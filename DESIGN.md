@@ -92,6 +92,10 @@ as the wire spells it (#89). No prompt steering is an acceptable fix for either.
 **Target shape.** Slices 1 to 3 on issue #1 fold the services in. Until they land, the tree
 still has `apps/hooks`, `apps/loan-app` and `apps/idp` as separate services.
 
+**The app lives at the repo root** (decided 2026-09-23, #3). The root `package.json` is
+the app, with `src/mastra/` and the Next.js routes at the root, so Mastra's Quickstart and
+`mastra dev` run from the top of a fresh clone. `packages/*` stay workspaces.
+
     app (Next.js + src/mastra)
       agent            one Mastra agent, registered in src/mastra/index.ts. The same one
                        answers in Studio and in the chat route.
@@ -323,6 +327,7 @@ Tracked on issue #1.
 0b. Apply the demo's #190 range `26b0cc9..4809b99` (Next 16 on Turbopack, TypeScript 7,
     React 19.3, `@types/bun`, `arcade-mcp-server` 1.32), with a fresh review. **Skip
     `55622c4`:** its `DESIGN.md` record is already in this document.
+0c. Move `apps/web` to the repo root as the one app (#3), before the folds.
 1. Fold `apps/hooks` into the app. It sets the contract Arcade calls, so it gates before merge.
 2. Fold `apps/loan-app` into the loan module. Runs in parallel with 1.
 3. Fold `apps/idp` into the identity module, with hop 1 as a User Source (or the fallback)
