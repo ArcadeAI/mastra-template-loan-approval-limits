@@ -12,7 +12,10 @@
   // app's `app-test/`, and since #3 put the app at the root, the repo's own
   // `test/` too, which imports from `apps/idp` for the same kind of reason.
   // `exclude` replaces tsconfig.json's rather than adding to it, so the
-  // workspaces and the directories outside the app are repeated here.
+  // workspaces and the directories outside the app are repeated here, and so is
+  // `scripts/reset.ts`: it is the repo's rather than the app's, and it imports
+  // from `apps/hooks`, which would put a file in the build's scope that the app
+  // never had in it before #3.
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "apps", "packages", "docs", "tools", "app-test", "test"]
+  "exclude": ["node_modules", "apps", "packages", "docs", "tools", "app-test", "test", "scripts/reset.ts"]
 }
