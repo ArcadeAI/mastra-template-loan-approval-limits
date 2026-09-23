@@ -1,0 +1,24 @@
+{
+  "name": "@cg/hooks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "bench": "bun scripts/bench.ts",
+    "interop:21": "bun scripts/interop-21.ts",
+    "build": "echo 'no build step — Bun runs TypeScript directly'"
+  },
+  "dependencies": {
+    "@cg/governance-core": "workspace:*",
+    "@cg/policy-schema": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.2"
+  }
+}

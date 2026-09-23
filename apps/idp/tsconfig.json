@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Better Auth's published types declare optional OpenAPI fields as
+    // `x?: T` and assign `undefined` to them, which the repo-wide setting
+    // rejects. Off for this one service; the library's types are not ours.
+    "exactOptionalPropertyTypes": false
+  },
+  "include": ["src", "scripts", "test"]
+}

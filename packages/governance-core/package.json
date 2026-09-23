@@ -1,0 +1,22 @@
+{
+  "name": "@cg/governance-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'no build step — consumed as TypeScript source'",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@cg/policy-schema": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.2"
+  }
+}

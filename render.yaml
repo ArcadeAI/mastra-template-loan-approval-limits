@@ -1,0 +1,490 @@
+# One blueprint provisions every service Render is responsible for: `web`,
+# `hooks`, `loan-app` and `idp`. `tools/loan` and `tools/approvals` are
+# deliberately absent — they are Python `arcade-mcp` toolkits and ship via
+# `arcade deploy`.
+#
+# Every service uses runtime: docker. Render does not detect Bun, so the
+# runtime is declared explicitly rather than left to detection.
+#
+# Data persists; resetting is something you deliberately run. Decided on #29,
+# replacing the earlier "/tmp plus seed-on-boot, so redeploying is the reset"
+# model: each database-owning service mounts a disk and seeds from its fixture
+# only when the database has no schema, so a policy edited on stage and a loan
+# approved on stage are both still there after a restart. Getting back to a
+# clean state is `bun run reset` (#23), which calls each service's own
+# `POST /admin/reset` under the shared `RESET_TOKEN` below. **A redeploy is not
+# a reset** — the disks survive it — and **a reset is not a re-registration**:
+# nothing resets the OAuth client Arcade holds, and deleting `idp.db` would.
+# `docs/RUNBOOK.md` is the operational half of this file.
+#
+# All three database-owning services — cg-loan-app, cg-hooks, cg-idp — mount
+# a disk below.
+#
+# Services with disks give up zero-downtime deploys — Render stops the old
+# instance before starting the new one. Irrelevant for a demo.
+#
+# Cross-service addresses are host-form, and every one of them is `sync: false`:
+# the value is READ OFF THE RENDER SERVICE PAGE, never derived and never
+# guessed. Two measurements say why, and they pull in opposite directions.
+#
+# Guessing is wrong because onrender.com subdomains are global, so a taken
+# service name gets silently suffixed: in the live environment `cg-web` is
+# `cg-web-sa31` and `cg-idp` is `cg-idp-or5b`. Hardcoding `cg-web.onrender.com`
+# would have addressed a stranger's deployment, and for a while the loan API
+# was validating bearer tokens against a colleague's IdP.
+#
+# Deriving is wrong because `fromService … property: host` emits the BARE
+# SERVICE NAME, not the hostname — measured 2026-09-10 on #59. `IDP_PUBLIC_HOST`
+# arrived as `cg-idp-or5b`, consumers prepend a scheme and nothing else, and
+# every request went to `https://cg-idp-or5b/…` where DNS fails. Blueprints have
+# no string interpolation, so no expression here can add `.onrender.com`.
+#
+# What is left is the value a human copies from the service's page, once per
+# environment. Each consumer refuses a host that still looks like a bare service
+# name at boot (`apps/*/…/public-host.ts`), so a wrong one fails loudly and
+# immediately rather than as a network error against a healthy dependency.
+#
+# Secrets are `sync: false` too, so a blueprint sync prompts for them instead of
+# putting them in git. See `.env.example` for where to obtain each one.
+
+services:
+  # The governed business system: the bank's system of record, a plain HTTP
+  # API. Not an MCP server and not registered in Arcade — `tools/loan` calls it.
+  - type: web
+    name: cg-loan-app
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/loan-app/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # Delete this block to run the loan book ephemerally and pay nothing for
+    # storage — the service re-seeds itself from the fixture on every boot,
+    # which is fine for a look at the demo and wrong for anything you would
+    # keep. A blueprint sync should not hand a forker a paid disk by surprise,
+    # so: 1 GB, the minimum, and it is one `disk:` key away from gone.
+    disk:
+      name: loans
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 8080
+      # On the disk, not /tmp. The service creates the parent directory, so
+      # this also works unchanged against a bind mount or a local path.
+      - key: LOANS_DB_PATH
+        value: /data/loans.db
+      # Where bearer tokens are validated: the API asks this host's
+      # /oauth2/userinfo who the caller is. Host-form, consumer adds https.
+      # Read it off the cg-idp service page in the Render dashboard — in the
+      # live environment that is `cg-idp-or5b.onrender.com`, not `cg-idp`. See
+      # the note at the top of this file; the service refuses an address it
+      # could not reach at boot.
+      - key: IDP_PUBLIC_HOST
+        sync: false
+      # The bearer POST /admin/reset requires (#23) — the loan book back to the
+      # rows this image seeds, between takes, without a deploy. THE SAME VALUE
+      # as cg-hooks', cg-idp's and cg-web's: `bun run reset` presents one
+      # bearer to all three services. Unset means the route does not exist —
+      # 404, and /health reports `reset: "disabled"` — because an endpoint that
+      # empties the bank's system of record and is reachable unauthenticated on
+      # a public URL is a denial-of-demo button. Generate it yourself:
+      # `openssl rand -hex 32`.
+      - key: RESET_TOKEN
+        sync: false
+
+  # The control plane. Serves /access, /pre and /post to Arcade Cloud, owns the
+  # policy and audit database, and fans decisions out to the UI over SSE.
+  - type: web
+    name: cg-hooks
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/hooks/Dockerfile
+    dockerContext: .
+    # Answers 200 whatever it finds, and says `status: degraded` with the
+    # compile error in the body when the policy will not load (#112). It used
+    # to answer 503 in that case: on 2026-09-14 a stale rule that #89's guard
+    # refuses took this instance out of rotation, Render served its own 502
+    # page over it, and a control plane that was correctly failing closed
+    # became one that was simply gone — with the fix unverifiable over HTTP.
+    # Readiness here is "the process is up and can tell you what is wrong".
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # Delete this block to run the control plane ephemerally and pay nothing
+    # for storage — the service re-seeds itself from the fixture on every
+    # boot, and a rule edited on stage is gone at the next restart. Fine for a
+    # look at the demo, wrong for the demo itself (PRD story 30). 1 GB, the
+    # minimum, and it is one `disk:` key away from gone.
+    disk:
+      name: governance
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 8080
+      # On the disk, not /tmp. Seeded from the fixture only when there is no
+      # schema; after that, edits persist across restarts and redeploys.
+      # Resetting is `scripts/reset` (#23), never a redeploy.
+      - key: GOVERNANCE_DB_PATH
+        value: /data/governance.db
+      # The bearer token Arcade presents on /access, /pre and /post. Set the
+      # same value on the hook extension in the Arcade dashboard (#13).
+      - key: ARCADE_HOOK_SIGNING_SECRET
+        sync: false
+      # The bearer the four /approvals endpoints require. A different secret
+      # from the one above on purpose: the deployed approvals toolkit and
+      # cg-web hold this one, Arcade holds that one, and neither is accepted
+      # in the other's place. Set the same value here, on cg-web, and as an
+      # Arcade secret uploaded by `arcade deploy` from tools/approvals.
+      # Without it the store would take an approval record from anyone on the
+      # internet, and that record is what a human then acts on.
+      - key: APPROVALS_STORE_TOKEN
+        sync: false
+      # `tool.toolkit` as Arcade files the deployed toolkits — measured on
+      # #35 (Loan) and derived for Approvals until #18 deploys it. The seeded
+      # rules are keyed on these; a wrong value fails loudly at boot.
+      - key: ARCADE_LOAN_TOOLKIT
+        sync: false
+      - key: ARCADE_APPROVALS_TOOLKIT
+        sync: false
+      # The persona emails, same values as cg-web's and cg-idp's — the join
+      # key across the whole system. Read only when governance.db is first
+      # seeded.
+      - key: PERSONA_LOAN_OFFICER_EMAIL
+        sync: false
+      - key: PERSONA_CREDIT_ANALYST_EMAIL
+        sync: false
+      - key: PERSONA_VP_CREDIT_EMAIL
+        sync: false
+      - key: PERSONA_CHIEF_CREDIT_OFFICER_EMAIL
+        sync: false
+      # Host-form, consumer adds the scheme — `fromService` emits neither a
+      # scheme nor a hostname, and blueprints have no string interpolation. Read
+      # it off the cg-loan-app service page in the Render dashboard. See the
+      # note at the top of this file; the service refuses an unreachable value
+      # at boot.
+      - key: LOAN_APP_PUBLIC_HOST
+        sync: false
+      # The bearer POST /admin/reset requires — a third secret, and never
+      # either of the two above. Unset means the endpoint does not exist: it
+      # answers 404 and /health reports `reset: "disabled"`, because a reset
+      # button reachable without authentication on a public URL is a
+      # denial-of-demo vector, and one that fails open on a missing variable is
+      # the same thing with a longer fuse. Set the same value on cg-web, which
+      # is what the panel's Reset button posts through, and on cg-loan-app and
+      # cg-idp, which have endpoints of their own under this name (#23) — one
+      # value, and `bun run reset` presents it to all three. Generate it
+      # yourself: `openssl rand -hex 32`.
+      - key: RESET_TOKEN
+        sync: false
+
+  # The enterprise's identity provider — a demo fixture standing in for the
+  # real one. Better Auth as an OAuth 2.1 authorization server, with the login
+  # and consent pages a persona sees the first time they authorize. Arcade is
+  # registered against it as an OAuth client (#13); the credentials come from
+  # `bun run oauth-client` in this service's shell, never from the logs.
+  - type: web
+    name: cg-idp
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/idp/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # Delete this block to run the identity provider ephemerally and pay
+    # nothing for storage — but know what you are giving up: the OAuth client
+    # credentials live in this database, so without the disk every restart
+    # regenerates them and the registration in the Arcade dashboard goes stale.
+    # Fine for a look at the demo, wrong for anything you would keep. 1 GB, the
+    # minimum, and it is one `disk:` key away from gone.
+    disk:
+      name: idp
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 8080
+      # On the disk, not /tmp. The service creates the parent directory, so
+      # this also works unchanged against a bind mount or a local path.
+      - key: IDP_DB_PATH
+        value: /data/idp.db
+      # Signs sessions and encrypts the stored OAuth client secret. Generated
+      # once by Render and never shown; rotating it invalidates every session
+      # and makes the stored client secret unreadable — see .env.example.
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      # Arcade's OAuth callback, allowlisted on the client. The default in the
+      # code is Arcade Cloud's; set this if the dashboard shows another.
+      - key: IDP_OAUTH_REDIRECT_URIS
+        sync: false
+      # One OAuth client per relying party, by key (#79). `web` is client C —
+      # cg-web's own sign-in (#82) — alongside the `arcade` client the Arcade
+      # dashboard is registered against. Set it to `web`, and give that client
+      # its own allowlist below; a client without a per-key override falls back
+      # to IDP_OAUTH_REDIRECT_URIS, which is Arcade's callback and not cg-web's.
+      #
+      # The secret is printed exactly once, by
+      # `bun run oauth-client --client web --rotate` in this service's shell.
+      - key: IDP_OAUTH_CLIENTS
+        sync: false
+      # `${PUBLIC_URL}/api/auth/callback` on cg-web — in the live environment
+      # `https://cg-web-sa31.onrender.com/api/auth/callback`. An OAuth redirect
+      # URI is matched byte for byte, and a mismatch is refused at the authorize
+      # step, where no hook fires and the panel stays dark.
+      - key: IDP_OAUTH_REDIRECT_URIS_WEB
+        sync: false
+      # The persona emails, same values as cg-web's — they are the join key
+      # across the whole system. Read only when idp.db is first seeded.
+      - key: PERSONA_LOAN_OFFICER_EMAIL
+        sync: false
+      - key: PERSONA_CREDIT_ANALYST_EMAIL
+        sync: false
+      - key: PERSONA_VP_CREDIT_EMAIL
+        sync: false
+      - key: PERSONA_CHIEF_CREDIT_OFFICER_EMAIL
+        sync: false
+      # The bearer POST /admin/reset requires (#23). THE SAME VALUE as
+      # cg-hooks', cg-loan-app's and cg-web's. The reset clears people,
+      # sessions, tokens and consents and re-seeds the four personas; it never
+      # touches the `oauthClient` row or the signing keys, and it asserts the
+      # client ids are unchanged on both sides rather than trusting that.
+      # **Never delete idp.db** — that IS a rotation, and Arcade would go on
+      # holding the old credentials, failing at the authorize step where no
+      # hook fires and the panel stays dark. Unset means the route answers 404
+      # and /health reports `reset: "disabled"`.
+      - key: RESET_TOKEN
+        sync: false
+      # No IDP_PUBLIC_URL here: Render injects RENDER_EXTERNAL_URL and the
+      # service falls back to it, so the issuer is always this service's own
+      # public address, whatever suffix Render gave the name.
+
+  # Next.js: chat, persona switcher, approval page, control-plane panel. The
+  # Mastra agent runs in this service's route handlers.
+  - type: web
+    name: cg-web
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/web/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PORT
+        value: 8080
+      # --- the agent (#14) --------------------------------------------------
+      # A Mastra agent in a route handler reaches the loan tools through the
+      # gateway as the signed-in persona. DESIGN.md → Model, Integration.
+      #
+      # Pinned here rather than left to the code's default so the blueprint is
+      # the whole list. Swapping the model is this line and a redeploy.
+      - key: MODEL_ID
+        value: claude-sonnet-5
+      # SECRET. console.anthropic.com → Settings → API keys. Without it `/chat`
+      # answers 503 naming this variable and /health reports
+      # `"agent": "missing"`, because a deployment that signs Alice in and then
+      # cannot run a turn is not `ok`.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ARCADE_API_KEY
+        sync: false
+      - key: ARCADE_GATEWAY_ID
+        sync: false
+      # `tool.toolkit` as Arcade files the deployed loan toolkit — `Loan`,
+      # measured on #35, the same value cg-hooks holds. Here it is half of an
+      # ALLOW-LIST: the agent is given the tools whose wire names start with
+      # `Loan_` or `Approvals_` and nothing else, so a live tools/list's eight
+      # entries become six and the gateway's own `System_ManageAuthorization`
+      # and `Arcade_ListApps` never reach the model.
+      #
+      # Both halves, not just this one (#89). The pre-hook's own denial tells
+      # the model to call `Approvals_RequestApproval`; an agent holding the loan
+      # toolkit alone is being told to call a tool it cannot see, and measured
+      # on #14 it refuses the instruction rather than acting on it. See
+      # ARCADE_APPROVALS_TOOLKIT further down this service's list.
+      #
+      # A wrong value here selects nothing, and `/chat` answers 502 naming this
+      # variable rather than letting a model with no tools answer fluently
+      # about a loan book it never read.
+      - key: ARCADE_LOAN_TOOLKIT
+        sync: false
+      # --- identity (#82) ---------------------------------------------------
+      # This service signs each persona in against cg-idp under its own OAuth
+      # client ("client C"), then drives the gateway OAuth itself and answers
+      # Arcade's custom user verifier. DESIGN.md → Identity and OAuth.
+      #
+      # cg-idp's public origin, as a URL — not HOST-form like the keys below,
+      # because it is an origin a browser is redirected to and an OAuth issuer.
+      # Read it off the cg-idp service page in the Render dashboard; in the live
+      # environment that is `https://cg-idp-or5b.onrender.com`.
+      - key: IDP_ISSUER
+        sync: false
+      # Client C, minted on cg-idp by adding `web` to IDP_OAUTH_CLIENTS and
+      # running `bun run oauth-client --client web --rotate` in that service's
+      # shell. It prints the secret exactly once (#70). Its redirect URI must be
+      # allowlisted as `${PUBLIC_URL}/api/auth/callback` via
+      # IDP_OAUTH_REDIRECT_URIS_WEB on cg-idp. Separate from the two
+      # registrations Arcade holds — one client per relying party, settled on
+      # #75/#79.
+      - key: IDP_CLIENT_ID
+        sync: false
+      - key: IDP_CLIENT_SECRET
+        sync: false
+      # Seals the per-browser session cookie (AES-256-GCM), which carries the
+      # persona's email and their gateway access and refresh tokens. Run
+      # `openssl rand -hex 32` and paste the result; nothing else produces a
+      # value this service will accept.
+      #
+      # At least 32 characters, and at least 8 distinct ones. That floor is
+      # enforced, not advised: below it /health reports signin, gateway and
+      # verifier all `missing` and every identity route answers 503 naming the
+      # minimum. `SESSION_SECRET=x` used to be accepted, and a guessable key
+      # over two bearer tokens with every surface reporting `configured` is the
+      # silent control this project argues against.
+      #
+      # Rotating it signs every browser out. That is the whole blast radius.
+      - key: SESSION_SECRET
+        sync: false
+      # This service's own public origin, as a URL with the scheme. Every OAuth
+      # redirect_uri is built from it, and each has to match an allowlist byte
+      # for byte, so it cannot be derived: onrender.com subdomains are global and
+      # Render suffixes a name that is taken — cg-web is `cg-web-sa31`, and the
+      # bare subdomain belongs to a stranger. Read it off this service's page:
+      # `https://cg-web-sa31.onrender.com`.
+      #
+      # It also decides whether the session cookie carries `Secure` (it does,
+      # for anything but an http:// loopback value).
+      - key: PUBLIC_URL
+        sync: false
+      # The three below have working defaults in the code and are named here so
+      # the blueprint is the whole list rather than most of it. **Leave all
+      # three blank on cg-web**; each comment says the one case for setting it.
+      #
+      # What sign-in asks cg-idp for. Defaults to `openid email`. `email` is the
+      # join key between Arcade's user_id, the OAuth subject and the loan book's
+      # actor column, so a value here that omits it breaks identity rather than
+      # narrowing it. Set it only to ask for more, never fewer.
+      #
+      # There is now one reason to ask for more. Since #157 cg-web keeps that
+      # access token and reads the loan book with it, and measured 2026-09-18
+      # against cg-idp: `openid email` returns **no** refresh token and a
+      # 3600-second access token, while `openid email offline_access` returns
+      # one and renews cleanly. The default is left alone because an hour
+      # outlasts a webinar and an expired token is a plain re-sign-in prompt on
+      # the card — never a denial and never a fault. Set
+      # `openid email offline_access` here to have cg-web renew instead; it
+      # adds one line to the consent screen a presenter sees once per browser.
+      - key: IDP_SCOPES
+        sync: false
+      # Where `confirm_user` lives, which is NOT api.arcade.dev. Defaults to
+      # https://cloud.arcade.dev, measured on spike #75. It exists so a test can
+      # point the verifier's two calls at a stand-in without moving the
+      # gateway's; set it only if Arcade Cloud moves.
+      - key: ARCADE_CLOUD_URL
+        sync: false
+      # Pins the MCP client id hop 1 authorizes under, instead of letting cg-web
+      # register one dynamically per process. Blank is correct and is what this
+      # deployment starts with: there is no value to put here until a
+      # registration exists.
+      #
+      # The one reason to fill it in later: Arcade renders its gateway consent
+      # screen once per persona per MCP client id, so with this blank every
+      # redeploy costs each persona one more consent click. If that becomes a
+      # nuisance during rehearsal, pin it to a client id Arcade already knows.
+      # Whether the dashboard lists the dynamically-registered client is
+      # unmeasured — nobody has looked — so treat that as a thing to check
+      # before relying on it, not as an instruction.
+      - key: ARCADE_MCP_CLIENT_ID
+        sync: false
+      #
+      # One step is not an environment variable at all: the Arcade dashboard's
+      # Auth → Settings → Custom verifier route must be
+      # `${PUBLIC_URL}/api/arcade/verify`. Without it Arcade uses its own
+      # verifier, which demands an Arcade account that is a project member —
+      # our personas are not, the grant binds to whoever is signed in at
+      # account.arcade.dev, and the tool re-challenges forever with nothing on
+      # the panel to say why (DESIGN.md open risk 4).
+      # The approval page reads GET /approvals/{id} from cg-hooks, and presses
+      # Approvals.Decide through Arcade. Both need naming here: the same
+      # shared bearer cg-hooks requires, and the toolkit name the tool is
+      # executed under. A wrong toolkit name calls nothing.
+      #
+      # It is also the second half of the agent's allow-list (#89), which is why
+      # it is required on this service rather than optional: without it the
+      # agent cannot see the tool its own denial instructs it to call.
+      - key: APPROVALS_STORE_TOKEN
+        sync: false
+      - key: ARCADE_APPROVALS_TOOLKIT
+        sync: false
+      - key: PERSONA_LOAN_OFFICER_EMAIL
+        sync: false
+      - key: PERSONA_CREDIT_ANALYST_EMAIL
+        sync: false
+      - key: PERSONA_VP_CREDIT_EMAIL
+        sync: false
+      - key: PERSONA_CHIEF_CREDIT_OFFICER_EMAIL
+        sync: false
+      # --- the control-plane panel's stream (#81) ---------------------------
+      # Which stream /panel watches. Three states, and the panel says which one
+      # it is in on screen:
+      #
+      #   hooks    the live control plane at HOOKS_PUBLIC_HOST. Badge:
+      #            `LIVE · cg-hooks.onrender.com`
+      #   fixture  the built-in replay of #5's sequence. Badge: `FIXTURE REPLAY`
+      #   unset    the replay under `next dev`; NO STREAM AT ALL when deployed —
+      #            /panel renders an error state naming this variable and
+      #            /health answers `"panel_stream":"unconfigured"`, `degraded`
+      #
+      # A plain value rather than `sync: false`, unlike almost everything else
+      # here, because it is not a credential and not an address: `hooks` is what
+      # a deployment of this blueprint is for, every time.
+      #
+      # It is declared here at all because it was not. Between #21 and #81 this
+      # key was absent from the blueprint, an unset value silently meant the
+      # replay, and on 2026-09-11 a human made a real governed call against the
+      # live gateway and watched cg-web play the demo sequence over the top of
+      # it. Nothing on the page or in /health said so. The fallback is gone; the
+      # blueprint now says what it wants.
+      - key: GOVERNANCE_STREAM
+        value: hooks
+      # The host the above watches. Server-side only, and no NEXT_PUBLIC_ twin
+      # on purpose: `next build` inlines NEXT_PUBLIC_* into the client bundle,
+      # but Render supplies service env vars at runtime — the value would be
+      # empty at build time and the browser would get `undefined`. The
+      # control-plane panel gets this host from a server component as a prop
+      # instead (#21).
+      #
+      # `sync: false`, and stays that way: onrender.com subdomains are global
+      # and Render suffixes a name that is taken, so this cannot be derived or
+      # guessed. Read it off the cg-hooks service page in the Render dashboard
+      # (the host part of the URL shown there). This one is the worst of the
+      # three to get wrong: the value reaches the browser, so a bare service
+      # name fails in a visitor's DevTools rather than in a log.
+      # `apps/web/lib/public-host.ts` refuses one before that, and with
+      # GOVERNANCE_STREAM=hooks above, leaving it blank is the error state
+      # rather than a quiet replay.
+      - key: HOOKS_PUBLIC_HOST
+        sync: false
+      # Where the bank's own screens read the loan book, since #157: the `/`
+      # cards and the `/loans` board call cg-loan-app's HTTP API directly, as
+      # the signed-in person, with the IdP access token from their own sign-in.
+      # Not through the gateway, and never with a service credential —
+      # `DESIGN.md` → Business system has the reversal and the reasoning.
+      #
+      # The same value cg-hooks and the Loan toolkit hold. `sync: false` for the
+      # same reason as every other cross-service address here: read it off the
+      # cg-loan-app service page. Leave it blank and this service falls back to
+      # `localhost:8082`, which on Render means the loan cards say the loan book
+      # could not be reached — loudly, and never as a policy refusal.
+      - key: LOAN_APP_PUBLIC_HOST
+        sync: false
+      # The same value as cg-hooks' RESET_TOKEN (#106). Held server-side only
+      # and never sent to the browser: the panel's Reset button posts to a
+      # route in this service, which is what presents the bearer to cg-hooks.
+      # Leave it blank and the button is not rendered at all, which is the
+      # correct state for a deployment nobody is presenting from.
+      - key: RESET_TOKEN
+        sync: false
