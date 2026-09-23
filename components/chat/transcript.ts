@@ -18,7 +18,7 @@
  * and one block per reply are the same picture. That is the shape of this bug
  * and it is worth naming — a fixture coarser than production makes a rendering
  * fault invisible, and the only thing that finds it is a test that streams the
- * way the provider does (`test/chat-rendering.test.tsx` feeds three characters
+ * way the provider does (`app-test/chat-rendering.test.tsx` feeds three characters
  * at a time).
  *
  * So: consecutive `text` events fold into one reply block, and everything else

@@ -60,7 +60,7 @@ export function ConfigurationBanner({ problems }: { problems: ConfigurationProbl
       <p style={{ margin: "0 0 0.75rem", fontSize: "0.875rem" }}>
         Some of it will work and some of it will fail at the point of use. <code>GET /health</code>{" "}
         answers <code>&quot;status&quot;: &quot;degraded&quot;</code> and names the same
-        capabilities; <code>apps/web/README.md</code> says where each value comes from.
+        capabilities; <code>docs/app.md</code> says where each value comes from.
       </p>
       {BANNER_HEADINGS.map(([key, heading]) =>
         problems[key].length === 0 ? null : (

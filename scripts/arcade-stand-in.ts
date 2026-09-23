@@ -15,7 +15,7 @@
  * so `apps/web` pointed at `api.arcade.dev` with no key and the page said
  * "Arcade answered 401". The behaviour was correct and the demo was
  * unrunnable, which is its own kind of wrong: this file was already the fix,
- * living inside `test/harness.ts` where only `bun test` could reach it.
+ * living inside `app-test/harness.ts` where only `bun test` could reach it.
  *
  * It stays useful after #13. A forker who wants to see the flow without an
  * Arcade account, or anyone on a plane, points `ARCADE_API_URL` here.
@@ -41,7 +41,7 @@
  *
  * ## One stand-in, not two
  *
- * `test/harness.ts` imports `createArcadeStandIn` from here rather than
+ * `app-test/harness.ts` imports `createArcadeStandIn` from here rather than
  * carrying its own copy, so the thing the suite proves and the thing a person
  * runs cannot drift apart. That is the whole reason this is a module with a
  * `main` rather than a script.
@@ -49,8 +49,8 @@
 /**
  * The two bearers the stand-in needs, and the development values it falls back
  * to — the same ones `apps/hooks` falls back to outside production, so the
- * local three-terminal run in `apps/web/README.md` needs no secrets at all.
- * `test/config.test.ts` reads the control plane's source and fails if either
+ * local three-terminal run in `docs/app.md` needs no secrets at all.
+ * `app-test/config.test.ts` reads the control plane's source and fails if either
  * literal drifts.
  */
 const DEV_HOOK_SECRET = "cg-hooks-dev-secret-not-for-production";
@@ -222,6 +222,6 @@ if (import.meta.main) {
     console.log("[arcade-stand-in] using the development hook secret; apps/hooks does too.");
   }
   console.log(
-    `[arcade-stand-in] point apps/web at it with ARCADE_API_URL=http://localhost:${server.port}`,
+    `[arcade-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${server.port}`,
   );
 }

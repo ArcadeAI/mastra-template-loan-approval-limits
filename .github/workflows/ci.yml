@@ -42,7 +42,7 @@ jobs:
       - name: idp schema is regenerated from the installed Better Auth
         run: bun run --cwd apps/idp generate:check
 
-      # `apps/web/test/home-loan-next-browser.test.ts` drives the real Next page
+      # `app-test/home-loan-next-browser.test.ts` drives the real Next page
       # in a real headless Chrome. Until #152 it looked only for the macOS
       # application bundle, so on this runner it skipped — and a regression that
       # skips in the environment that gates merges is a regression that is not
@@ -63,10 +63,12 @@ jobs:
           # action put on PATH. A wrong value here fails loudly by design.
           CG_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
 
-      # `bun test` and `tsc` never exercise `apps/web`'s build, and a Next.js
-      # build is where most of this service's failures show up.
+      # `bun test` and `tsc` never exercise the app's build, and a Next.js
+      # build is where most of this service's failures show up. The app is the
+      # repo root since #3, so the root `build` is `next build` (plus the
+      # workspaces' no-op builds).
       - name: Build web
-        run: bun run --cwd apps/web build
+        run: bun run build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
@@ -168,6 +170,7 @@ jobs:
           # the fallback works locally. Round 3 of #52 caught the guard missing
           # on this side.
           - service: web
+            dockerfile: ./Dockerfile
             smoke_env: -e APPROVALS_STORE_TOKEN=ci-smoke-only-not-a-real-token
     steps:
       - uses: actions/checkout@v4
@@ -183,7 +186,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./apps/${{ matrix.service }}/Dockerfile
+          # The web app's Dockerfile is at the root since #3; every other
+          # service's is in its own directory under apps/.
+          file: ${{ matrix.dockerfile || format('./apps/{0}/Dockerfile', matrix.service) }}
           push: false
           load: true
           tags: cg-${{ matrix.service }}:ci
@@ -211,17 +216,17 @@ jobs:
       # `next dev` and answered 404 in the artifact, which would have put a
       # frame with two broken images on a projector. `next.config.ts` carries
       # the directory in the file trace and
-      # `apps/web/test/public-assets.test.ts` proves that against the locally
+      # `app-test/public-assets.test.ts` proves that against the locally
       # built tree — but only on whatever machine ran it. This is the same
       # claim on Alpine, against the image, and it is derived from the
       # directory rather than from the two file names, so the next asset
       # added is covered by having been added.
-      - name: cg-web serves apps/web/public
+      - name: cg-web serves public/
         if: matrix.service == 'web'
         run: |
-          files="$(cd apps/web/public && find . -type f | sed 's|^\./||' | sort)"
+          files="$(cd public && find . -type f | sed 's|^\./||' | sort)"
           if [ -z "$files" ]; then
-            echo "::error::apps/web/public is empty, so this step asserted nothing"
+            echo "::error::public/ is empty, so this step asserted nothing"
             exit 1
           fi
           body="$(mktemp)"
@@ -229,8 +234,8 @@ jobs:
           while IFS= read -r file; do
             code="$(curl -s -o "$body" -w '%{http_code}' "http://localhost:8080/$file")"
             served="$(wc -c < "$body" | tr -d ' ')"
-            source="$(wc -c < "apps/web/public/$file" | tr -d ' ')"
-            if [ "$code" = "200" ] && cmp -s "$body" "apps/web/public/$file"; then
+            source="$(wc -c < "public/$file" | tr -d ' ')"
+            if [ "$code" = "200" ] && cmp -s "$body" "public/$file"; then
               echo "/$file  200  $served bytes, byte-for-byte"
             else
               echo "::error::/$file answered $code with $served bytes; the file is $source bytes"

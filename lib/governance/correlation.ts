@@ -11,7 +11,7 @@
  *   rides at the end of it in brackets, and this module reads it back out.
  *   Written by `withCorrelation()` in `apps/hooks/src/correlation.ts`; the
  *   regex below is that contract's other half and
- *   `test/correlation.test.ts` proves the two agree.
+ *   `app-test/correlation.test.ts` proves the two agree.
  * - **Allows** carry `execution_id` on the hook's own payload, which reaches
  *   this panel on the event itself. No token needed.
  *

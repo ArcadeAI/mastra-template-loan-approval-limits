@@ -10,7 +10,7 @@
  * ability to resume a turn has never depended on the panel being mounted, and
  * now it could not.
  *
- * This is the only stream `/` opens, and `test/home-full-screen-browser.test.ts`
+ * This is the only stream `/` opens, and `app-test/home-full-screen-browser.test.ts`
  * is what says so: it cuts the socket after pushing a governance row with an
  * `id:` and checks that nothing reconnects asking to resume from it.
  *

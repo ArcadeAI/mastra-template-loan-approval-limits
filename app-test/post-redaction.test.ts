@@ -41,7 +41,7 @@ import { GovernanceEvent } from "@cg/policy-schema";
 import { ControlPlanePanelView } from "../components/governance/ControlPlanePanelView.tsx";
 import { appendEvents, emptyTimeline } from "../lib/governance/timeline.ts";
 import { writeSession, type Session } from "../lib/identity/session.ts";
-import loans from "../../loan-app/src/fixtures/loans.json" with { type: "json" };
+import loans from "../apps/loan-app/src/fixtures/loans.json" with { type: "json" };
 
 const LIVE_KEY = liveModelKey();
 const TURN_TIMEOUT_MS = LIVE_KEY ? 240_000 : 30_000;

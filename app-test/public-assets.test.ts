@@ -3,13 +3,13 @@
  * `next dev` (#177, round 2).
  *
  * The frame's two wordmarks rendered in every check this slice shipped with —
- * `test/frame.test.ts` drives a real Chrome and waits on
+ * `app-test/frame.test.ts` drives a real Chrome and waits on
  * `img.frame-mark-mastra.complete === true` — and would still have rendered as
  * two broken images on `cg-web`, because all of those checks run the source
  * tree, where `next dev` serves `public/` off disk. The deployed service runs
  * `output: "standalone"`, which carries only what file tracing carried, and
  * `public/` was not in it. Measured before the fix, on the tree
- * `bun run --cwd apps/web build` emits:
+ * `bun run build` emits:
  *
  *     /                           200
  *     /arcade-wordmark-white.svg  404 text/html
@@ -20,11 +20,11 @@
  *
  * ## What this file runs
  *
- * It builds, then boots `.next/standalone/apps/web/server.js` on a socket with
+ * It builds, then boots `.next/standalone/server.js` on a socket with
  * `NODE_ENV=production`, and asks for the files over HTTP. Nothing is copied
  * into the tree first: whatever `next build` did not emit is missing here
  * exactly as it is missing in the image, which is the whole point. The runner
- * stage of `apps/web/Dockerfile` copies this tree and adds `.next/static`, so
+ * stage of the root `Dockerfile` copies this tree and adds `.next/static`, so
  * the artifact under test is the deployed one minus a directory that has
  * nothing to do with `public/`.
  *
@@ -194,9 +194,9 @@ function artifact(): Promise<Artifact> {
     const port = freePort();
     const origin = `http://127.0.0.1:${port}`;
     const server = Bun.spawn({
-      // The artifact's own entrypoint, run the way `apps/web/Dockerfile`'s
+      // The artifact's own entrypoint, run the way the root `Dockerfile`'s
       // `CMD` runs it: Node, from the root of the standalone tree.
-      cmd: ["node", join("apps", "web", "server.js")],
+      cmd: ["node", "server.js"],
       cwd: STANDALONE,
       env: {
         ...(process.env as Record<string, string>),

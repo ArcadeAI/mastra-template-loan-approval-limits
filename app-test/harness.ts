@@ -19,7 +19,7 @@
  *
  * That stand-in lives in `scripts/arcade-stand-in.ts` and is imported here
  * rather than duplicated, because it is also the thing a person runs to drive
- * the two beats by hand (see `apps/web/README.md`). One implementation means
+ * the two beats by hand (see `docs/app.md`). One implementation means
  * the demo a human sees and the behaviour this suite pins cannot diverge.
  *
  * What that leaves unverified is stated plainly and is not pretended away:
@@ -34,7 +34,7 @@ import { readWebConfig, type WebConfig } from "../lib/config.ts";
 import { createArcadeStandIn } from "../scripts/arcade-stand-in.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, "..", "..", "..");
+const REPO_ROOT = join(HERE, "..");
 
 export const REPO = REPO_ROOT;
 export const HOOK_SECRET = "hook-secret-for-web-tests";
@@ -77,7 +77,7 @@ export interface Harness {
 export async function startHarness(): Promise<Harness> {
   const hooks = await startHooks();
   const preCalls: Harness["preCalls"] = [];
-  // The same stand-in a person runs from `bun run --cwd apps/web arcade-stand-in`,
+  // The same stand-in a person runs from `bun run arcade-stand-in`,
   // in process. One implementation, so what the suite proves and what the
   // README tells someone to do cannot drift apart.
   const arcade = createArcadeStandIn({

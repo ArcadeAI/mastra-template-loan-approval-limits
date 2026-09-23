@@ -5,10 +5,14 @@
   //
   // Since Next 16 the build checks with the `tsc` CLI over the whole project
   // its tsconfig selects. Next 15's in-process checker ignored diagnostics in
-  // `*.test.*` files. `apps/web/Dockerfile` copies only this package and
-  // `packages/`, so three tests that import from `../../loan-app/src` and
-  // `../../hooks/src` cannot resolve there, and the image build failed with
-  // TS2307. Leaving `test/` out restores Next 15's scope for the build.
+  // `*.test.*` files. The root `Dockerfile` copies only the app's own tree and
+  // `packages/`, so three tests that import from `../apps/loan-app/src` and
+  // `../apps/hooks/src` cannot resolve there, and the image build failed with
+  // TS2307. Leaving the tests out restores Next 15's scope for the build: the
+  // app's `app-test/`, and since #3 put the app at the root, the repo's own
+  // `test/` too, which imports from `apps/idp` for the same kind of reason.
+  // `exclude` replaces tsconfig.json's rather than adding to it, so the
+  // workspaces and the directories outside the app are repeated here.
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test"]
+  "exclude": ["node_modules", "apps", "packages", "docs", "tools", "app-test", "test"]
 }

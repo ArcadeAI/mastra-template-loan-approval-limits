@@ -19,7 +19,7 @@
  *    *retry itself* the assertion: the moment the frame lands, a `/pre` on
  *    `Loan.ApproveLoan` is fired and must be allowed.
  * 4. The panel is unaffected: a client filtering on `event: governance` — which
- *    is what `apps/web/lib/governance/subscribe.ts` does — never sees one.
+ *    is what `lib/governance/subscribe.ts` does — never sees one.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
@@ -284,7 +284,7 @@ describe("the frame takes no part in the governance replay", () => {
     await reader.untilFrames(1);
     await reader.settle();
 
-    // The filter `apps/web/lib/governance/subscribe.ts` applies, spelled out
+    // The filter `lib/governance/subscribe.ts` applies, spelled out
     // rather than imported: this package cannot import an app.
     const governance = reader.frames.filter((frame) => frame.event === GOVERNANCE_EVENT_NAME);
     expect(governance.length).toBeGreaterThan(0);

@@ -14,7 +14,7 @@
  * **There is no path from this module to raw HTML.** It returns data. The
  * caller renders that data as React children, which escape. No
  * `dangerouslySetInnerHTML` anywhere on this side of the seam, which is not a
- * convention here but a test (`test/chat-markdown.test.tsx`). A markdown
+ * convention here but a test (`app-test/chat-markdown.test.tsx`). A markdown
  * library that takes `html: false` as an *option* is a library where the safe
  * behaviour is one config line from being off.
  *

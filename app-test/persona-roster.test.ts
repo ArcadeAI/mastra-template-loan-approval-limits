@@ -28,7 +28,7 @@ import {
   unconfiguredPersonas,
 } from "../lib/identity/roster.ts";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
+const REPO_ROOT = join(import.meta.dir, "..");
 
 interface SeedSubject {
   persona: string;

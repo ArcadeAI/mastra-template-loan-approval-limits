@@ -24,7 +24,7 @@
  */
 import type { ReactNode } from "react";
 
-/** The attribute #15 can grep for, and `test/home-screen.test.tsx` asserts on. */
+/** The attribute #15 can grep for, and `app-test/home-screen.test.tsx` asserts on. */
 export const TOOL_LIST_SLOT = "tool-list";
 
 export function ToolListSlot({ children }: { children?: ReactNode }) {

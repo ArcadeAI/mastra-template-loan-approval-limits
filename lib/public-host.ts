@@ -21,12 +21,12 @@
  * `apps/loan-app` depends on nothing outside itself on purpose — it is the part
  * a forker throws away, and a shared module would be a dependency edge it must
  * not have. The copies are kept byte-identical instead:
- * `apps/web/test/public-host.test.ts` diffs the three marked regions, and all
+ * `app-test/public-host.test.ts` diffs the three marked regions, and all
  * three test files run the same table of accepted and refused values.
  */
 
 // --- shared check: byte-identical in all three services ---------------------
-// `apps/web/test/public-host.test.ts` compares the region between these two
+// `app-test/public-host.test.ts` compares the region between these two
 // markers across the three files and fails if any copy drifts. Edit one, run
 // `bun test`, paste into the other two.
 

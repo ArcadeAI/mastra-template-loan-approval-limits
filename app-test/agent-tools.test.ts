@@ -418,8 +418,8 @@ describe("the stream protocol", () => {
 
 describe("the runnable stand-in's port", () => {
   test("it comes from ARCADE_API_URL, never from PORT", () => {
-    // #56's bug, arriving in a new script: `bun run --cwd apps/web
-    // gateway-stand-in` loads `apps/web/.env.local`, whose `PORT` belongs to
+    // #56's bug, arriving in a new script: `bun run
+    // gateway-stand-in` loads the root `.env.local`, whose `PORT` belongs to
     // the web app. Measured while writing this — the stand-in announced :4400
     // and answered on it, which is where `next dev` wants to be.
     expect(resolveStandInPort({ ARCADE_API_URL: "http://localhost:4405", PORT: "4400" })).toBe(4405);

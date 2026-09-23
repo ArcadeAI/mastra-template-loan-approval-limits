@@ -38,7 +38,7 @@ import type { IdpToken, Session } from "../lib/identity/session.ts";
 import { Browser, PEOPLE, startIdentityHarness, type IdentityHarness } from "./identity-harness.ts";
 import { readPort } from "./harness.ts";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
+const REPO_ROOT = join(import.meta.dir, "..");
 
 let identity: IdentityHarness;
 let loanApp: Subprocess<"ignore", "pipe", "pipe">;

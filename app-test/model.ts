@@ -186,10 +186,10 @@ export function promptText(prompts: readonly unknown[][]): string {
  * a variable somebody meant to fill in, not a key.
  *
  * ⚠️ **`bun test` sets `NODE_ENV=test`, and Bun does not load `.env.local`
- * under that.** A key in `apps/web/.env.local` never reaches this function and
+ * under that.** A key in the root `.env.local` never reaches this function and
  * the suite reports `SCRIPTED` while looking configured — which is why the mode
  * is printed rather than assumed. Pass it on the command line:
- * `ANTHROPIC_API_KEY=… bun test --cwd apps/web test/tracer-bullet.test.ts`.
+ * `ANTHROPIC_API_KEY=… bun test ./app-test/tracer-bullet.test.ts`.
  */
 export function liveModelKey(env: Record<string, string | undefined> = process.env): string | null {
   const key = env.ANTHROPIC_API_KEY?.trim();

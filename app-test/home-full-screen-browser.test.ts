@@ -2,7 +2,7 @@
  * #155's two claims that a render cannot make, measured against the real Next
  * server in a real browser.
  *
- * `test/home-screen.test.tsx` asserts on markup through each component's own
+ * `app-test/home-screen.test.tsx` asserts on markup through each component's own
  * props, which is the right shape for everything about *what is drawn*. Two of
  * this slice's acceptance criteria are not about that:
  *
@@ -83,7 +83,7 @@ if (chromeResolution.path === null && !REQUIRED) console.warn(missingBrowserMess
  * the frame* rather than the viewport. What this file asserts is unchanged —
  * the bank is full-screen, with nothing beside it and nothing under it — and
  * the arithmetic moved by exactly one constant, which is the point of naming
- * it. `test/frame.test.ts` measures the bar itself, on all three surfaces.
+ * it. `app-test/frame.test.ts` measures the bar itself, on all three surfaces.
  */
 const FRAME_BAR = 34;
 
@@ -555,7 +555,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
  * call is made as that person, and the loan book between them said the bank had
  * not accepted that sign-in. Two of the three were true.
  *
- * `test/home-stale-session.test.tsx` drives the same state through
+ * `app-test/home-stale-session.test.tsx` drives the same state through
  * `readLoanBook` against a real 401 and asserts on the components. This is the
  * other half of that claim and the one a component render cannot make: the
  * *page* — App Router, server component, client bundle, hydrated — in front of a
@@ -565,7 +565,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
  *
  * The loan book is a stand-in only at the socket: the half that says
  * `apps/loan-app` really answers 401 to a bearer its IdP refuses is measured
- * against the real subprocess in `test/api-loans.test.ts`.
+ * against the real subprocess in `app-test/api-loans.test.ts`.
  */
 test.skipIf(chromeResolution.path === null && !REQUIRED)(
   "with the loan book refusing this browser's bearer, the whole page says so once",

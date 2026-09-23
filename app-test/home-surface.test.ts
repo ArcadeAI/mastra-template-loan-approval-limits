@@ -22,7 +22,7 @@
  *
  * This suite was `test/loan-context.test.ts` until #109 and a suite about
  * governed loan reads until #157. The loan book's own tests are now
- * `test/api-loans.test.ts`, which is where a read that costs no tool call
+ * `app-test/api-loans.test.ts`, which is where a read that costs no tool call
  * belongs.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";

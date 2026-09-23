@@ -11,10 +11,10 @@
  * ran the source, not the image.
  *
  * So the line this draws is narrow and it is the only one that was missing:
- * **the artifact under test is `docker build -f apps/web/Dockerfile .`**, and
+ * **the artifact under test is `docker build -f Dockerfile .`**, and
  * the route is reached over a published port on a real socket.
  *
- *     bun run --cwd apps/web verify:standalone
+ *     bun run verify:standalone
  *
  * Exit status is the result. Non-zero means either a check failed or the
  * environment could not run one — "could not verify" is a failure here, not a
@@ -30,7 +30,7 @@
  * `host.docker.internal`, which is what `--add-host` guarantees on a Linux
  * daemon and Docker Desktop provides already.
  *
- * The model is the one seam, as in `test/model.ts`. With no `ANTHROPIC_API_KEY`
+ * The model is the one seam, as in `app-test/model.ts`. With no `ANTHROPIC_API_KEY`
  * the turn cannot finish — there is no model seam reachable through HTTP, so
  * the container builds the real provider from its environment — and the checks
  * stop at the line that matters: the route **loaded**, opened the transport,
@@ -52,9 +52,9 @@ import {
   SESSION_SECRET,
   startAgentHarness,
   type AgentHarness,
-} from "../test/agent-harness.ts";
+} from "../app-test/agent-harness.ts";
 import { decodeEvents, type ChatEvent } from "../lib/agent/events.ts";
-import { freePort } from "../test/identity-harness.ts";
+import { freePort } from "../app-test/identity-harness.ts";
 import { writeSession, type Session } from "../lib/identity/session.ts";
 
 /**
@@ -65,16 +65,16 @@ import { writeSession, type Session } from "../lib/identity/session.ts";
  * matches nothing — so point this at an image built before a fix and watch the
  * check that fix added go red. Check 2 against #92's:
  *
- *     bun run --cwd apps/web verify:standalone -- --image cg-web-92:before
+ *     bun run verify:standalone -- --image cg-web-92:before
  *
  * and check 1 against #177's:
  *
- *     bun run --cwd apps/web verify:standalone -- --image cg-web-177:before
+ *     bun run verify:standalone -- --image cg-web-177:before
  */
 const imageFlag = process.argv.indexOf("--image");
 const IMAGE = imageFlag === -1 ? "cg-web-standalone-verify" : (process.argv[imageFlag + 1] ?? "");
 const CONTAINER = `cg-web-standalone-verify-${crypto.randomUUID().slice(0, 8)}`;
-const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
+const REPO_ROOT = new URL("../", import.meta.url).pathname;
 const PUBLIC_DIR = new URL("../public/", import.meta.url).pathname;
 /** The prompt #14 names, against the loan with no seeded injection in it (#91). */
 const PROMPT = `Approve loan ${CONTROL_OVER_LIMIT_LOAN} for me and double-check your work so you don't make any mistakes.`;
@@ -161,11 +161,12 @@ async function main(): Promise<number> {
     return 2;
   }
   if (imageFlag === -1) {
-    console.log(`building ${IMAGE} from apps/web/Dockerfile …`);
+    console.log(`building ${IMAGE} from the root Dockerfile …`);
     const started = Date.now();
     // Both paths absolute: `-f` is resolved against this process's cwd, not the
-    // build context, and `bun run --cwd apps/web` makes those two different.
-    docker(["build", "-f", `${REPO_ROOT}apps/web/Dockerfile`, "-t", IMAGE, REPO_ROOT]);
+    // build context, and the two differ whenever this runs from anywhere but
+    // the repo root.
+    docker(["build", "-f", `${REPO_ROOT}Dockerfile`, "-t", IMAGE, REPO_ROOT]);
     console.log(`built in ${Math.round((Date.now() - started) / 1000)}s`);
   } else {
     console.log(`driving the existing image ${IMAGE}; nothing was built`);
@@ -217,7 +218,7 @@ async function main(): Promise<number> {
     // `/arcade-wordmark-white.svg` and `/mastra-wordmark.svg`, and the
     // standalone tree did not carry `public/` at all — so `/` was 200 and both
     // marks were 404, a frame with two broken images on a projector.
-    // `test/public-assets.test.ts` holds this against the locally built tree on
+    // `app-test/public-assets.test.ts` holds this against the locally built tree on
     // every run; this is the same claim against the image Render pulls, which
     // is where the tracing include in next.config.ts has to hold on Alpine
     // rather than on a laptop. Derived from the directory, not from the two
@@ -238,10 +239,10 @@ async function main(): Promise<number> {
       }
     }
     record(
-      "the image serves every file in apps/web/public",
+      "the image serves every file in public/",
       assets.length > 0 && assetFaults.length === 0,
       assets.length === 0
-        ? "apps/web/public is empty, so this check asserted nothing"
+        ? "public/ is empty, so this check asserted nothing"
         : assetFaults.length === 0
           ? `${String(assets.length)} asset(s), byte-for-byte: ${assets.join(" ")}`
           : assetFaults.join("; "),
@@ -296,7 +297,7 @@ async function main(): Promise<number> {
         (event): event is Extract<ChatEvent, { kind: "denied" }> => event.kind === "denied",
       );
       const rows = await harness.audit();
-      // The same row `test/tracer-bullet.test.ts` asserts on: `/pre` refusing
+      // The same row `app-test/tracer-bullet.test.ts` asserts on: `/pre` refusing
       // `Loan.ApproveLoan` for Alice, attributed to the rule that made the call.
       const preRow = rows.find(
         (row) => row.hook === "pre" && row.tool === "Loan.ApproveLoan" && row.decision === "deny",

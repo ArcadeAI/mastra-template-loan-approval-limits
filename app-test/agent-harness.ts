@@ -34,7 +34,7 @@ import { readIdentitySurface, type IdentitySurface } from "../lib/config.ts";
 import { freePort } from "./identity-harness.ts";
 import { readPort } from "./harness.ts";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
+const REPO_ROOT = join(import.meta.dir, "..");
 
 export const HOOK_SECRET = "hook-secret-for-agent-tests";
 export const STORE_TOKEN = "store-token-for-agent-tests";

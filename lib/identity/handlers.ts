@@ -2,7 +2,7 @@
  * Every identity route, as plain `(Request) => Promise<Response>` functions.
  *
  * `app/api/**` is a one-line adapter onto each of these. The indirection buys
- * one thing and it is the thing this slice needs most: `test/identity-flow.test.ts`
+ * one thing and it is the thing this slice needs most: `app-test/identity-flow.test.ts`
  * mounts these same functions behind a real `Bun.serve` and drives them with a
  * cookie jar over real HTTP, against a real `apps/idp` subprocess. So the suite
  * exercises the `Set-Cookie` header a browser would actually receive and the

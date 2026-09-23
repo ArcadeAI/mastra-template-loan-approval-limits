@@ -41,7 +41,7 @@ export interface AuthorizeRequest {
    * This is what makes "Sign in as Bob" land on a login page rather than
    * silently continue as Alice. `@better-auth/oauth-provider` implements it
    * (`authorize`'s `promptSet?.has("login")` branch, which redirects to the
-   * login page before it looks at the session) and `test/identity-flow.test.ts`
+   * login page before it looks at the session) and `app-test/identity-flow.test.ts`
    * measures it against a real `apps/idp` rather than taking the source's word
    * for it — the issue asked for a measurement and the failure it guards
    * against is the whole demo quietly running as one persona.

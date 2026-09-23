@@ -6,7 +6,7 @@
  * component. Replacing the bank with a real product's UI is replacing this
  * file and `components/bank/*` — the control plane at `/panel` keeps working,
  * because the two surfaces now share nothing at all but the brand tokens in
- * `app/globals.css`. `test/home-screen.test.tsx` fails if that stops being
+ * `app/globals.css`. `app-test/home-screen.test.tsx` fails if that stops being
  * true.
  *
  * #22 sized this pane as half of a 1920 screen. #155 gave it the whole

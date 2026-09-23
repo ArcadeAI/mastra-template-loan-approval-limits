@@ -30,7 +30,7 @@ import {
 import { join } from "node:path";
 
 const WEB_ROOT = join(import.meta.dir, "..");
-const REPO_ROOT = join(WEB_ROOT, "..", "..");
+const REPO_ROOT = WEB_ROOT;
 
 interface Manifest {
   scripts?: Record<string, string>;
@@ -101,12 +101,13 @@ test("the packaged dev script binds the PORT in the service's own .env.local", a
   // Next, React and the rest, resolved the way the real service resolves them.
   symlinkSync(join(WEB_ROOT, "node_modules"), join(project, "node_modules"));
 
-  // Left to infer it, Turbopack takes `apps/web` as this fixture's root. It
-  // then cannot follow `apps/web/node_modules/next` out to the repo's Bun store
-  // ("Could not find the Next.js package"), and every request answers 500.
-  // `apps/web` itself has no such problem: `outputFileTracingRoot` in its
-  // `next.config.ts` names the repo root. This names the same root. It is
-  // legal only because the project now sits inside it.
+  // Left to infer it, Turbopack took `apps/web` as this fixture's root when the
+  // app lived there, before #3. It then could not follow
+  // `apps/web/node_modules/next` out to the repo's Bun store ("Could not find
+  // the Next.js package"), and every request answered 500. The app itself has
+  // no such problem: `outputFileTracingRoot` in its `next.config.ts` names the
+  // repo root. This names the same root, so the fixture does not depend on
+  // what Turbopack infers. It is legal only because the project sits inside it.
   writeFileSync(
     join(project, "next.config.mjs"),
     `export default { turbopack: { root: ${JSON.stringify(REPO_ROOT)} } };\n`,

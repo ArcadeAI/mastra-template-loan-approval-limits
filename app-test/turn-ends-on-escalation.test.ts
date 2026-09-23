@@ -20,7 +20,7 @@
  *
  * What is deliberately *not* here is the end-to-end proof that nothing reaches
  * `/pre`. That belongs against a real control plane with a real audit log, and
- * it is `test/act2-resume.test.ts` → *"a model that tries a governed call
+ * it is `app-test/act2-resume.test.ts` → *"a model that tries a governed call
  * straight after the escalation"*.
  */
 import { describe, expect, test } from "bun:test";

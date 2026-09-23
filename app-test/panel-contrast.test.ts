@@ -247,7 +247,7 @@ describe("every text style clears 4.5:1 against what it is drawn on", () => {
 /**
  * The measured numbers, printed rather than only asserted, because #158 asks
  * for the values on the PR and a number transcribed by hand from a spreadsheet
- * is a number nobody can check. `bun test apps/web/test/panel-contrast.test.ts`
+ * is a number nobody can check. `bun test ./app-test/panel-contrast.test.ts`
  * prints the table this slice's evidence comment quotes.
  */
 describe("the measured table", () => {

@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 
 import { baseUrl, readWebConfig } from "../lib/config.ts";
 
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const GUARD = 'if (!storeToken && env.NODE_ENV === "production") {\n' +
   '    throw new Error("APPROVALS_STORE_TOKEN is required in production");';
@@ -91,7 +91,7 @@ describe("both services guard production the same way", () => {
     // one side, so the credential-presenting service silently used a published
     // value in production while the control plane refused to boot on it.
     for (const source of [
-      sourceOf("apps", "web", "lib", "config.ts"),
+      sourceOf("lib", "config.ts"),
       sourceOf("apps", "hooks", "src", "config.ts"),
     ]) {
       expect(source).toContain(GUARD);
@@ -105,7 +105,7 @@ describe("both services guard production the same way", () => {
     // whose hook bearer had drifted would fail with a 401 that looks like a
     // governance decision and is not one.
     const hooks = sourceOf("apps", "hooks", "src", "config.ts");
-    const standIn = sourceOf("apps", "web", "scripts", "arcade-stand-in.ts");
+    const standIn = sourceOf("scripts", "arcade-stand-in.ts");
 
     for (const literal of ["DEV_SECRET", "DEV_STORE_TOKEN"] as const) {
       const value = new RegExp(`const ${literal} = "([^"]+)"`).exec(hooks)?.[1];

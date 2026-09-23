@@ -14,7 +14,7 @@
  * that way again.
  *
  * The table below is shared, verbatim, with `apps/hooks/test/public-host.test.ts`
- * and `apps/web/test/public-host.test.ts` — the three copies of the check are
+ * and `app-test/public-host.test.ts` — the three copies of the check are
  * written out rather than imported, so each one is pinned by its own suite.
  */
 import { expect, test } from "bun:test";

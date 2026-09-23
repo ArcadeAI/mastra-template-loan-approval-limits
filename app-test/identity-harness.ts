@@ -43,7 +43,7 @@ import {
 import { forgetGatewayClients } from "../lib/identity/gateway.ts";
 import { nonce, pkce } from "../lib/identity/oidc.ts";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
+const REPO_ROOT = join(import.meta.dir, "..");
 
 /** The four demo people, as `apps/idp/src/fixtures/people.json` seeds them. */
 export const PEOPLE = {

@@ -10,7 +10,7 @@
  * There is deliberately no prose on the panel. `DESIGN.md` open risk 2 — that
  * Arcade refuses an unmet auth requirement before any hook runs, so such a
  * refusal reaches nothing here — is a real caveat and it lives in
- * `apps/web/README.md`. A paragraph of it on a projector was read as noise in
+ * `docs/app.md`. A paragraph of it on a projector was read as noise in
  * design review, which is a fair reading: nobody at the back of a room reads a
  * footnote, and the space it took belonged to the lanes.
  *

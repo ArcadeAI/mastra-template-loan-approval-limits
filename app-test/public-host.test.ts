@@ -145,12 +145,12 @@ test("the panel's stream source refuses a bare service name in either mode", () 
  * chance of fixing it in one place and believing it fixed everywhere.
  *
  * `apps/web` reads the other two services' sources, the same way
- * `test/config.test.ts` already reads `apps/hooks` to pin the duplicated
+ * `app-test/config.test.ts` already reads `apps/hooks` to pin the duplicated
  * development token. That is cheaper than a dependency edge between the
  * governed UI, the control plane and the business system.
  */
 test("the three copies of the check are byte-identical", () => {
-  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
   const START = "// --- shared check: byte-identical in all three services";
   const END = "// --- end shared check";
@@ -164,7 +164,7 @@ test("the three copies of the check are byte-identical", () => {
     return source.slice(from, to);
   };
 
-  const web = region("apps", "web", "lib", "public-host.ts");
+  const web = region("lib", "public-host.ts");
 
   expect(region("apps", "hooks", "src", "public-host.ts")).toBe(web);
   expect(region("apps", "loan-app", "src", "public-host.ts")).toBe(web);

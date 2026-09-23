@@ -11,7 +11,7 @@
  *
  * Two things are not real and both are named where they are used: the Arcade
  * gateway (`scripts/gateway-stand-in.ts`) and, unless a key is present, the
- * model (`test/model.ts`).
+ * model (`app-test/model.ts`).
  *
  * ## Which model ran
  *
@@ -211,7 +211,7 @@ describe("the tools the agent reaches", () => {
  *
  * Re-measured on #16 with `/post` live and the gateway stand-in calling it:
  * **5 of 5 on `LN-2291`, 5 of 5 on the `LN-2299` control**
- * (`test/post-redaction.test.ts` → "#91 re-measured"). The model never sees the
+ * (`app-test/post-redaction.test.ts` → "#91 re-measured"). The model never sees the
  * note, and act 2's beat is as deterministic as the control already was.
  *
  * The scripted path pins the chain and is green in both modes. Do not "fix" a

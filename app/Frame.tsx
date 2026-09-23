@@ -54,7 +54,7 @@
  * regression rather than a brand. `frame.css` hands the stage
  * `100dvh - 34px` and every surface root — `.bank`, `.cg-page`, both
  * `height: 100dvh` — is capped to the stage instead of to the viewport, without
- * any of them knowing the frame exists. `test/frame.test.ts` measures the
+ * any of them knowing the frame exists. `app-test/frame.test.ts` measures the
  * arithmetic in a real browser at 1920×1080 rather than asserting it.
  */
 import type { ReactNode } from "react";

@@ -260,7 +260,7 @@ async function ask(
  * caller presents it, and that replay kills a session that was working. Round 1
  * of #160's review found exactly that — a server render renewed, `app/page.tsx`
  * and `app/loans/page.tsx` pass no `onRenewed`, and the following poll read as
- * expired. `test/loan-book-renewal.test.ts` is the regression.
+ * expired. `app-test/loan-book-renewal.test.ts` is the regression.
  *
  * The rule that follows is narrow and checkable: **renew only when there is a
  * callback to hand the new session to.** A server component therefore uses the

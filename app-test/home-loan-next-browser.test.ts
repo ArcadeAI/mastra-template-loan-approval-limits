@@ -16,7 +16,7 @@
  * they read the bank's own API as the signed-in person and poll — so there is
  * no challenge, no Continue button and no refresh boundary left to drive. That
  * half is deleted because the UI it exercised does not exist, and
- * `test/loan-board-browser.test.ts` covers what replaced it: a decision made by
+ * `app-test/loan-board-browser.test.ts` covers what replaced it: a decision made by
  * somebody else reaching this screen inside one poll interval.
  *
  * **The rest of the file stays, and it is the half that matters on CI.** #152's
@@ -124,7 +124,7 @@ const HYDRATION_DELAY_MS = Number(process.env.CG_HYDRATION_DELAY_MS ?? "0");
  * that shell along with the split view, and the marker moved to the container
  * that inherited the job: `.bank`, set by `components/bank/BankPane.tsx`, now
  * the outermost element on `/`. The property being proved is unchanged, and
- * `test/home-screen.test.tsx` still holds the other half of it — that the
+ * `app-test/home-screen.test.tsx` still holds the other half of it — that the
  * server never emits the attribute itself.
  *
  * The third control checked here was `[data-action="continue-loan-authorization"]`

@@ -32,7 +32,7 @@
  *    path. They used to be two `Loan_GetLoan` reads made here, which put two
  *    decisions on the control plane before the presenter had said anything and
  *    left the audience unable to tell the agent's calls from the page's chrome.
- *    `test/home-surface.test.ts` asserts the counts.
+ *    `app-test/home-surface.test.ts` asserts the counts.
  *
  *    It also reads the loan book, but not from the gateway: `readLoanBook`
  *    calls `apps/loan-app` over HTTP with this browser's IdP bearer, so the

@@ -6,7 +6,7 @@ import type { GovernanceEvent } from "@cg/policy-schema";
 // — in a test, never at runtime — is what stops the two halves of the contract
 // drifting apart silently, which for a correlation token looks exactly like a
 // panel that simply never joins anything.
-import { withCorrelation } from "../../hooks/src/correlation.ts";
+import { withCorrelation } from "../apps/hooks/src/correlation.ts";
 import { CORRELATION_TOKEN, correlate, isCorrelated } from "../lib/governance/correlation.ts";
 
 /** The prefix Arcade wraps our message in. Theirs, undocumented, may change. */

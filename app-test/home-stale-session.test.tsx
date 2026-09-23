@@ -26,7 +26,7 @@
  * component calls — against a real HTTP server that answers a real `401` to a
  * real `Authorization: Bearer …`. The one thing standing in is the loan book
  * itself, at the network edge, because *that* half is measured against the real
- * `apps/loan-app` subprocess with a real sign-in in `test/api-loans.test.ts`
+ * `apps/loan-app` subprocess with a real sign-in in `app-test/api-loans.test.ts`
  * ("a token the identity provider refuses is the same re-sign-in"). Nothing
  * between the socket and the pixels is mocked, and the message on screen is the
  * one `lib/loan-context/read.ts` wrote rather than one this file did.

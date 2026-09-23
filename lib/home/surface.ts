@@ -13,7 +13,7 @@
  * something the agent did.
  *
  * `lib/loan-context/loans.ts` carries the argument in full and `DESIGN.md` →
- * Business system records the decision. `test/home-surface.test.ts` asserts the
+ * Business system records the decision. `app-test/home-surface.test.ts` asserts the
  * counts off the gateway stand-in's own record rather than describing them.
  *
  * ## What is left

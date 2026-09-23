@@ -12,20 +12,20 @@
  *
  * Usage:
  *
- *     bun apps/web/scripts/panel-chrome-evidence.ts \
+ *     bun scripts/panel-chrome-evidence.ts \
  *       --out docs/evidence --prefix 158-after --label "slice/158-panel-restyle"
  *
- * `--web-dir` runs a different checkout's `apps/web`, which is how the "before"
+ * `--web-dir` runs a different checkout's app (`apps/web` before #3), which is how the "before"
  * half is produced without editing anything:
  *
  *     git worktree add --detach /tmp/cg-before f4130c3
  *     (cd /tmp/cg-before && bun install)
- *     bun apps/web/scripts/panel-chrome-evidence.ts \
+ *     bun scripts/panel-chrome-evidence.ts \
  *       --web-dir /tmp/cg-before/apps/web --out docs/evidence \
  *       --prefix 158-before --label "main at f4130c3"
  *
  * It starts a Next dev server and a headless Chrome on OS-assigned ports and
- * stops both; `cg-hooks` is the local stub in `test/panel-chrome.ts`. Nothing is
+ * stops both; `cg-hooks` is the local stub in `app-test/panel-chrome.ts`. Nothing is
  * deployed, provisioned or authenticated, and no reset is ever POSTed.
  */
 import { mkdirSync } from "node:fs";
@@ -36,7 +36,7 @@ import {
   measurePanelChrome,
   PANEL_STATES,
   type PanelChromeMeasurement,
-} from "../test/panel-chrome.ts";
+} from "../app-test/panel-chrome.ts";
 
 function flag(name: string, fallback?: string): string {
   const index = process.argv.indexOf(`--${name}`);
@@ -50,7 +50,7 @@ function flag(name: string, fallback?: string): string {
 
 const outDir = resolve(flag("out"));
 const prefix = flag("prefix");
-const label = flag("label", "apps/web");
+const label = flag("label", "app");
 const webDir = process.argv.includes("--web-dir") ? resolve(flag("web-dir")) : undefined;
 /** `--state live-healthy-reset,live-healthy-no-reset` narrows the run; absent means all of them. */
 const only = process.argv.includes("--state") ? flag("state").split(",").map((name) => name.trim()) : undefined;
@@ -70,4 +70,4 @@ const measurements: PanelChromeMeasurement[] = await measurePanelChrome({
 
 console.log(`\n.cg-lane top relative to .cg-panel — ${label}\n${formatMeasurements(measurements)}\n`);
 console.log(`wrote ${measurements.length} screenshots to ${outDir}`);
-console.log(JSON.stringify({ label, webDir: webDir ?? "apps/web", measurements }, null, 2));
+console.log(JSON.stringify({ label, webDir: webDir ?? ".", measurements }, null, 2));

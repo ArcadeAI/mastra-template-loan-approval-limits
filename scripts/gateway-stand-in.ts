@@ -84,7 +84,7 @@
  *
  * ## One stand-in, or two
  *
- * `test/identity-harness.ts` carries its own narrower Arcade Cloud stand-in for
+ * `app-test/identity-harness.ts` carries its own narrower Arcade Cloud stand-in for
  * the two identity hops (#82): discovery, dynamic registration, authorize,
  * token, `confirm_user`, `next_uri`. This file does not duplicate any of that —
  * it starts where a token already exists. The two overlap only in that both
@@ -430,7 +430,7 @@ function createApprovalsStore(options: {
  * claim that *the hook's sentence* moved the model. A description that already
  * told it to escalate after a refusal would have been steering the result the
  * measurement was taken to prove, and the number would have meant nothing.
- * `test/act1-tool-list.test.ts` reads these back through a real `tools/list`
+ * `app-test/act1-tool-list.test.ts` reads these back through a real `tools/list`
  * and fails on the vocabulary, so the rule is enforced on the sentence the
  * model receives rather than on the source that produced it.
  *
@@ -1087,17 +1087,17 @@ function authorizationChallenge(authorizationUrl: string): string {
  * Which port the runnable stand-in binds — from `ARCADE_API_URL`, and
  * deliberately **not** from `PORT`.
  *
- * `PORT` here belongs to `apps/web`. This script lives under `apps/web/scripts/`
- * and `bun run --cwd apps/web gateway-stand-in` loads `apps/web/.env.local` into
+ * `PORT` here belongs to the app. This script lives under `scripts/`
+ * and `bun run gateway-stand-in` loads the root `.env.local` into
  * it: the right file for the wrong service. Measured while writing this —
  * in a worktree owning 4400-4409 the stand-in announced `:4400` and answered on
- * it, which is `apps/web`'s own port, so whichever process started second lost
+ * it, which is the app's own port, so whichever process started second lost
  * and nothing was listening where anybody was calling.
  *
  * That is #56's bug exactly, and this is #56's fix:
  * `apps/loan-app/scripts/dev-idp.ts` reads the port out of `IDP_PUBLIC_HOST` —
  * the address the loan API already asks for — so the two agree by construction.
- * `ARCADE_API_URL` is the same kind of value here: it is where `apps/web` is
+ * `ARCADE_API_URL` is the same kind of value here: it is where the app is
  * told to reach Arcade, so binding it leaves no second number to keep in step.
  *
  * Unset means `:0`: the OS picks, the boot line says what it got, and you paste
@@ -1183,7 +1183,7 @@ if (import.meta.main) {
     `[gateway-stand-in] listening on :${standIn.port} — this is a STAND-IN for the Arcade gateway, ` +
       `for local runs only. It is not the product and it is not in the deployed image.`,
   );
-  console.log(`[gateway-stand-in] point apps/web at it with ARCADE_API_URL=http://localhost:${standIn.port}`);
+  console.log(`[gateway-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${standIn.port}`);
   console.log(
     `[gateway-stand-in] every tools/call asks ${hooksHost}/pre first and runs nothing when the answer ` +
       `is not OK, then asks ${hooksHost}/post and forwards its override.output when there is one; ` +

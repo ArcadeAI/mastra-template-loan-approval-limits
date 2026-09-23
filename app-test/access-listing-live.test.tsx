@@ -24,7 +24,7 @@
  *    instead — which is where every `/pre` row on a live panel comes from now.
  *
  * It also **measures the burst**, and prints the spread, which is the number
- * `ACCESS_GROUP_WINDOW_MS` is justified against in `apps/web/README.md`. The
+ * `ACCESS_GROUP_WINDOW_MS` is justified against in `docs/app.md`. The
  * window is asserted to be comfortably wider than what a real listing spreads
  * over rather than assumed to be.
  */
@@ -81,7 +81,7 @@ async function loadAndRecord(email: string): Promise<GovernanceEvent[]> {
  *
  * The same path the chat takes: `sessionSurface` lists the persona's tools
  * through `/access` and runs the calls against that listing. A page load made
- * these until #157 moved the loan cards off the MCP path (`test/home-surface.test.ts`
+ * these until #157 moved the loan cards off the MCP path (`app-test/home-surface.test.ts`
  * asserts it now makes none), so the `/pre` and `/post` rows a live panel shows
  * come from the conversation — which is the point of that change, and does not
  * alter what the lanes do with them.

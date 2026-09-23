@@ -10,11 +10,12 @@ COPY package.json bun.lock ./
 COPY apps/hooks/package.json ./apps/hooks/
 COPY apps/idp/package.json ./apps/idp/
 COPY apps/loan-app/package.json ./apps/loan-app/
-COPY apps/web/package.json ./apps/web/
 COPY packages/governance-core/package.json ./packages/governance-core/
 COPY packages/policy-schema/package.json ./packages/policy-schema/
 
-# --filter keeps `apps/web`'s Next.js toolchain out of this image.
+# --filter keeps the root app's Next.js toolchain out of this image: since #3
+# the root manifest is the app's, and a filtered install skips the root's
+# dependencies unless the filter names it.
 RUN bun install --frozen-lockfile --production --filter '@cg/loan-app'
 
 COPY tsconfig.base.json ./

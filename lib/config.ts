@@ -128,7 +128,7 @@ export interface WebConfig {
  *
  * Duplicated rather than imported because `apps/web` does not depend on
  * `apps/hooks` in the package graph and should not start to. The cost of a
- * duplicated literal is drift, so `test/config.test.ts` reads the other file
+ * duplicated literal is drift, so `app-test/config.test.ts` reads the other file
  * and fails if the two ever disagree — which is a cheaper guarantee than a
  * dependency edge between the governed UI and the control plane.
  *

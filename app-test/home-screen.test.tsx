@@ -7,11 +7,11 @@
  * in lockstep could not be narrated.
  *
  * Assertions are on markup, through each component's own props, with nothing
- * mocked — the same shape as `test/panel.test.tsx`, for the same reason: every
+ * mocked — the same shape as `app-test/panel.test.tsx`, for the same reason: every
  * property this slice is accountable for is a property of a pure render. The
  * two claims a pure render cannot make — that the served page carries no `cg-`
  * class and opens no governance-timeline socket — are measured in a real
- * browser against the real Next server in `test/home-full-screen-browser.test.ts`.
+ * browser against the real Next server in `app-test/home-full-screen-browser.test.ts`.
  *
  * Five groups, and the last is the one worth reading:
  *
@@ -20,7 +20,7 @@
  * 2. **The chrome.** #176: a tab strip where both tabs navigate, and a top bar
  *    that carries the session rather than a card of persona buttons below the
  *    loan files. The screen's third claim about a stale sign-in is driven
- *    against a real 401 in `test/home-stale-session.test.tsx`, because a
+ *    against a real 401 in `app-test/home-stale-session.test.tsx`, because a
  *    hand-written `expired` fixture proves the render and not the path.
  * 3. **What the split took with it.** The panel, its stream badge, and the
  *    `correlationKey` join. Absence is the assertion, so it is stated rather
@@ -59,7 +59,7 @@ const WEB = join(HERE, "..");
  * controls are stubbed for the same reason the sign-in panel always was: they
  * arrive as an element from the server component that unseals the session, and
  * this file is about the screen rather than about #82. Since #176 that element
- * is in the chrome bar; `test/configuration-banner.test.tsx` is what renders
+ * is in the chrome bar; `app-test/configuration-banner.test.tsx` is what renders
  * the real one.
  *
  * `loans` is the loan book's **first paint** since #157, not the screen's
@@ -97,7 +97,7 @@ const samSession = (): Session => ({
  *
  * `Loan_ApproveLoan` is missing because `access.analysts-cannot-see-approve`
  * removed it before the gateway answered, which is act 1. It is measured
- * end-to-end in `test/act1-tool-list.test.ts` (#15); here it is a fixture,
+ * end-to-end in `app-test/act1-tool-list.test.ts` (#15); here it is a fixture,
  * because what this file is asserting is that #22's layout does not put it back.
  */
 const SAM_TOOLS: SessionTools = {
@@ -179,7 +179,7 @@ describe("the screen", () => {
    * It was `.cg-split[data-hydrated]`; #155 deleted that shell, so it is
    * `.bank[data-hydrated]` now, set in `BankPane`'s mount effect. The half of
    * the contract that says the attribute *appears* is measured on the real
-   * thing by `test/home-loan-next-browser.test.ts`, whose readiness gate waits
+   * thing by `app-test/home-loan-next-browser.test.ts`, whose readiness gate waits
    * for it and would time out if it never arrived. What matters here is the
    * other half: that the server does not claim it. An attribute present in the
    * server's own HTML would answer "yes, hydrated" to a page that is nothing of
@@ -331,7 +331,7 @@ describe("the screen", () => {
  *
  * The third thing the human named is the contradiction between the chrome and
  * the loan book, and it is driven against a real 401 in
- * `test/home-stale-session.test.tsx` rather than asserted here. A fixture that
+ * `app-test/home-stale-session.test.tsx` rather than asserted here. A fixture that
  * spells out an `expired` state proves the render; it does not prove the state
  * is ever reached, which is the failure mode #167, #170 and #151 all were.
  */
@@ -433,7 +433,7 @@ describe("the chrome", () => {
  * opens no governance-timeline socket — cannot be made by a pure render at all,
  * because it is a claim about the whole client tree and the network. It is
  * measured in a real browser against the real Next server in
- * `test/home-full-screen-browser.test.ts`.
+ * `app-test/home-full-screen-browser.test.ts`.
  */
 describe("what the split took with it", () => {
   test("no control-plane column, no lanes, no panel chrome", () => {
@@ -462,7 +462,7 @@ describe("what the split took with it", () => {
     expect(existsSync(join(WEB, "components/shell/SplitScreen.tsx"))).toBe(false);
     expect(existsSync(join(WEB, "components/shell/shell.css"))).toBe(false);
 
-    for (const directory of ["lib", "app", "components", "test"]) {
+    for (const directory of ["lib", "app", "components", "app-test"]) {
       for (const path of walk(join(WEB, directory))) {
         const source = readFileSync(path, "utf8");
         expect({ path, imports: /from\s+"[^"]*(SplitScreen|shell\/shell\.css)/.test(source) }).toEqual({
@@ -486,7 +486,7 @@ describe("what the split took with it", () => {
    * The join goes with the screen it joined.
    *
    * #6's token still rides in the denial's text and the panel still outlines
-   * whatever key it is handed (`test/panel.test.tsx` covers that) — but the
+   * whatever key it is handed (`app-test/panel.test.tsx` covers that) — but the
    * chat no longer has an outlet to hand one through, so nobody can wire the
    * two together by accident and leave a highlight that means nothing.
    */

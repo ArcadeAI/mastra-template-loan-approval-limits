@@ -576,7 +576,7 @@ describe("the connection, said out loud", () => {
 describe("no prose on the projector", () => {
   // The layer-2 caveat (DESIGN.md open risk 2) was a paragraph in the bottom
   // left. Design review cut it: nobody at the back of a room reads a footnote,
-  // and the space belonged to the lanes. It lives in apps/web/README.md now.
+  // and the space belonged to the lanes. It lives in docs/app.md now.
   test("the bottom-left paragraph is gone", () => {
     const markup = render(aGovernanceEventSequence());
 

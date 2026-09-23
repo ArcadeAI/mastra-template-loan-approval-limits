@@ -103,7 +103,7 @@ export function browserRequired(env: Record<string, string | undefined> = proces
 export function missingBrowserMessage(resolution: ChromeResolution): string {
   return [
     "No Chrome or Chromium executable found, so the production Next browser regression",
-    "(apps/web/test/home-loan-next-browser.test.ts) cannot run. Set CG_CHROME_BIN to one,",
+    "(app-test/home-loan-next-browser.test.ts) cannot run. Set CG_CHROME_BIN to one,",
     "or install Chrome. Looked at:",
     ...resolution.searched.map((entry) => `  - ${entry}`),
   ].join("\n");

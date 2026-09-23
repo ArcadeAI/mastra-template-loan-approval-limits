@@ -16,7 +16,7 @@
  * the loan book.
  *
  * The table below is shared, verbatim, with
- * `apps/loan-app/test/public-host.test.ts` and `apps/web/test/public-host.test.ts`
+ * `apps/loan-app/test/public-host.test.ts` and `app-test/public-host.test.ts`
  * — the three copies of the check are written out rather than imported, so each
  * one is pinned by its own suite.
  */

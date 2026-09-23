@@ -149,7 +149,7 @@ export interface ChatProps {
    * panel is a page away, so nothing could hand one a key any more. They are
    * deleted rather than left unused — an outlet nothing plugs into is the
    * shape of a control that does nothing. The panel still accepts a
-   * `correlationKey`; `test/panel.test.tsx` is what exercises it.
+   * `correlationKey`; `app-test/panel.test.tsx` is what exercises it.
    */
   /**
    * The governance stream, resolved on the server and handed down as an
@@ -780,7 +780,7 @@ function detailOf(detail: unknown): string {
  * Exported because it is the unit #22's acceptance criterion is about — "renders
  * denials without looking like an error state" is a property of this function
  * and of nothing else, and asserting it needs neither a socket nor a DOM.
- * `test/home-screen.test.tsx` renders each of the ten kinds through it.
+ * `app-test/home-screen.test.tsx` renders each of the ten kinds through it.
  */
 export function EventView({
   event,

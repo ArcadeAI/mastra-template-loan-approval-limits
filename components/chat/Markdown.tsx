@@ -7,7 +7,7 @@
  * what makes the safety claim checkable: the parser returns data and has no way
  * to say "HTML", and this file renders that data as React children, which
  * escape. **There is no `dangerouslySetInnerHTML` here and there must never
- * be** — `test/chat-markdown.test.tsx` reads this directory's source and fails
+ * be** — `app-test/chat-markdown.test.tsx` reads this directory's source and fails
  * if one appears, because the reply is the one surface on this screen a prompt
  * injection gets to write (act 4).
  *

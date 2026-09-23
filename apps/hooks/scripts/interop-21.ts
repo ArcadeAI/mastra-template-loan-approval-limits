@@ -18,7 +18,7 @@
  *     bun run --cwd apps/hooks interop:21 -- path/to/lib/governance
  *
  * The argument is the directory holding `subscribe.ts`, and it defaults to
- * `apps/web/lib/governance`. Until #21 merges, point it at a checkout of
+ * the root app's `lib/governance`. Until #21 merges, point it at a checkout of
  * `slice/21-control-panel`; the script says so rather than failing obscurely.
  * A checkout outside this repo needs `@cg/policy-schema` resolvable from it —
  * see the message below for the two symlinks that do it.
@@ -37,7 +37,7 @@ import { createPolicyCache } from "../src/policy-cache.ts";
 import { openGovernance } from "../src/policy-store.ts";
 import { createServer } from "../src/server.ts";
 
-const DEFAULT_CLIENT_DIR = resolve(import.meta.dir, "../../web/lib/governance");
+const DEFAULT_CLIENT_DIR = resolve(import.meta.dir, "../../../lib/governance");
 const clientDir = resolve(process.argv[2] ?? DEFAULT_CLIENT_DIR);
 const clientEntry = resolve(clientDir, "subscribe.ts");
 

@@ -31,7 +31,7 @@ import { LoanFileCard } from "./LoanFileCard.tsx";
  * server module: importing it into this component drags the OIDC client and the
  * sealing code into the browser bundle — `BankPane` is `"use client"`, so
  * everything under it is client code. The cost of a duplicated literal is
- * drift, so `test/home-screen.test.tsx` reads the other file and fails if the
+ * drift, so `app-test/home-screen.test.tsx` reads the other file and fails if the
  * two ever disagree.
  *
  * Exported since #176, because the chrome needs the same address for the same

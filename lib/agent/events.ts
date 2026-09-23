@@ -24,7 +24,7 @@
  * Deliberately not the AI SDK's UI message stream. That protocol is richer than
  * this slice needs and it would put the shape of a vendor's stream between the
  * control plane and the screen; these ten kinds are the whole vocabulary and
- * `test/agent-tools.test.ts` reads them back.
+ * `app-test/agent-tools.test.ts` reads them back.
  */
 
 export type ChatEvent =

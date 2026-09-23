@@ -18,8 +18,8 @@
  * be there afterwards. A navigation, a `router.refresh()` or a full remount
  * would take it with them.
  *
- * The rig is the repo's, not this file's: `test/cdp.ts` drives the browser and
- * `test/chrome.ts` finds one. Since #152 a missing browser is a **failure** on
+ * The rig is the repo's, not this file's: `app-test/cdp.ts` drives the browser and
+ * `app-test/chrome.ts` finds one. Since #152 a missing browser is a **failure** on
  * CI rather than a silent skip, and `.github/workflows/ci.yml` installs Chrome,
  * so this runs on every merge alongside the hydration regression. It skips only
  * on a developer machine with no browser at all, and says where it looked when
@@ -40,7 +40,7 @@ import { Browser, PEOPLE, SESSION_SECRET, signInAs, startIdentityHarness, type I
 import { readPort } from "./harness.ts";
 
 const WEB = join(import.meta.dir, "..");
-const REPO_ROOT = join(WEB, "..", "..");
+const REPO_ROOT = WEB;
 
 /** Alice's card beside the chat, and Charlie's decision on the control application. */
 const ON_THE_CARDS = "LN-2299";

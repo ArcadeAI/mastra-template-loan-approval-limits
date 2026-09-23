@@ -64,7 +64,7 @@ export function notConfigured(what: string, problems: string[], headers = new He
     `<p>This deployment cannot do that yet:</p><ul>` +
       problems.map((problem) => `<li>${escapeHtml(problem)}</li>`).join("") +
       `</ul><p><code>GET /health</code> reports which of <code>signin</code>, <code>gateway</code> and ` +
-      `<code>verifier</code> this deployment has. See <code>apps/web/README.md</code> for where each value comes from.</p>`,
+      `<code>verifier</code> this deployment has. See <code>docs/app.md</code> for where each value comes from.</p>`,
     503,
     headers,
   );

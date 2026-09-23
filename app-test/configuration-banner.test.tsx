@@ -29,7 +29,7 @@
  *   when sign-in itself is broken, and still says nothing about a persona.
  *
  * The third half, that it reaches the served `/`, is in
- * `test/home-full-screen-browser.test.ts`: a claim about the whole page cannot
+ * `app-test/home-full-screen-browser.test.ts`: a claim about the whole page cannot
  * be made by rendering one component of it.
  */
 import { describe, expect, test } from "bun:test";

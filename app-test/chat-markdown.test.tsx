@@ -20,7 +20,7 @@
  *
  * Markup-level, through `renderToStaticMarkup`, the way every other React test
  * in this service works — these are properties of a pure render.
- * `test/chat-rendering.test.tsx` is the one that needs a DOM, and needs it for
+ * `app-test/chat-rendering.test.tsx` is the one that needs a DOM, and needs it for
  * a different claim.
  */
 import { describe, expect, test } from "bun:test";
@@ -135,7 +135,7 @@ describe("nothing outside the subset renders", () => {
     // The claim above is only worth as much as this one. One React escape hatch
     // anywhere on this side of the seam and the parser's care stops mattering.
     //
-    // Comments stripped, the same way `test/home-screen.test.tsx` strips them
+    // Comments stripped, the same way `app-test/home-screen.test.tsx` strips them
     // for the seam rules: every file in this directory explains why the escape
     // hatch is forbidden, and a rule nobody may write down is a rule nobody can
     // follow.
@@ -254,7 +254,7 @@ describe("the authorization card is a name and a link", () => {
     expect(hop1).toContain("cg-demo-us — authorization needed");
     expect(hop1).toContain(`href="/api/arcade/start?next=%2Fchat"`);
     // Ours are still instructions for the model. Off the screen too — the wire
-    // keeps them, and `test/gateway-token-rejected.test.tsx` reads them there.
+    // keeps them, and `app-test/gateway-token-rejected.test.tsx` reads them there.
     expect(hop1).not.toContain("401");
     expect(hop1).not.toContain("alice@bank.example");
   });

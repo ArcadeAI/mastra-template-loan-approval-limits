@@ -45,7 +45,7 @@
  * replaces this. That is only true if the bank's styling is somewhere they can
  * delete: it is `components/bank/bank.css`, nothing under `components/bank`
  * imports anything from `components/governance`, and no `cg-` class name
- * appears on this screen. `test/home-screen.test.tsx` fails if any of that
+ * appears on this screen. `app-test/home-screen.test.tsx` fails if any of that
  * stops holding.
  *
  * The session controls arrive as an element for the same reason they always

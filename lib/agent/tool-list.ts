@@ -155,7 +155,7 @@ export async function sessionTools(
   options: SessionToolsOptions = {},
 ): Promise<SessionTools> {
   // Nothing extra on the session: this is the listing on its own, which is what
-  // `POST /api/chat` and `test/act1-tool-list.test.ts` ask for.
+  // `POST /api/chat` and `app-test/act1-tool-list.test.ts` ask for.
   const { tools } = await sessionSurface(session, async () => null, options);
   return tools;
 }

@@ -82,7 +82,7 @@ function baseUrl(host: string): string {
  * Deployed or not, which is the only thing that changes what an unset
  * `GOVERNANCE_STREAM` means.
  *
- * `NODE_ENV` is what matters in practice — `apps/web/Dockerfile` sets it on the
+ * `NODE_ENV` is what matters in practice — the root `Dockerfile` sets it on the
  * runner stage, so every Render deploy of this service has it. `RENDER` is
  * there for a deployment that runs the Next server some other way; Render sets
  * it on every service it starts.

@@ -47,7 +47,7 @@
      serif at four sizes competing with itself — and the rehearsal verdict on
      the whole surface was "too noisy". It now marks the three lane titles,
      which are the structure the eye is meant to find first, and marks nothing
-     else. `test/panel-type-roles.test.ts` fails if a second selector claims
+     else. `app-test/panel-type-roles.test.ts` fails if a second selector claims
      it, because "one display face" is the kind of rule that decays one
      reasonable-looking rule at a time. */
   --font-display: "GT Sectra", Cambria, Georgia, "Times New Roman", serif;

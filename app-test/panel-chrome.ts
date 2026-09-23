@@ -172,7 +172,7 @@ export interface PanelChromeMeasurement {
 }
 
 export interface MeasureOptions {
-  /** Which `apps/web` to run. Defaults to this one; the evidence script points it at an older commit. */
+  /** Which app tree to run. Defaults to this one; the evidence script points it at an older commit. */
   readonly webDir?: string;
   readonly states?: readonly PanelState[];
   readonly viewports?: readonly Viewport[];
@@ -551,10 +551,10 @@ export async function measurePanelChrome(options: MeasureOptions = {}): Promise<
 
             if (options.evidenceDir !== undefined) {
               const caption =
-                `${options.label ?? "apps/web"} · state ${state.name} · ${viewport.width}×${viewport.height} · ` +
+                `${options.label ?? "app"} · state ${state.name} · ${viewport.width}×${viewport.height} · ` +
                 `.cg-panel top = 0.00px · .cg-lane top = ${measurement.laneTop.toFixed(2)}px · ` +
                 `panel font-size ${measurement.panelFontSize} · ${measurement.cards} cards · ` +
-                `measured by apps/web/test/panel-chrome.ts in headless Chrome`;
+                `measured by app-test/panel-chrome.ts in headless Chrome`;
               await evaluate<void>(cdp, annotation(measurement, caption));
               const shot = await cdp.command<{ data: string }>("Page.captureScreenshot", {
                 format: "png",

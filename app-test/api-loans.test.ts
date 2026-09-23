@@ -39,7 +39,7 @@ import {
 } from "./identity-harness.ts";
 import { readPort } from "./harness.ts";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
+const REPO_ROOT = join(import.meta.dir, "..");
 
 /** The $88,000 control application, pending in the fixture. Charlie decides it below. */
 const CONTROL_LOAN = "LN-2299";

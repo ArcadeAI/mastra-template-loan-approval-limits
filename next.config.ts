@@ -7,14 +7,16 @@ const config: NextConfig = {
   // `next dev` only, and only the loopback address (#190). Next 16 answers 403
   // to a `/_next/*` request from any origin but `localhost`, so a page opened
   // at `http://127.0.0.1:<port>` never gets its client chunks and never
-  // hydrates. Every browser test in `test/` opens the app that way. Next 15
+  // hydrates. Every browser test in `app-test/` opens the app that way. Next 15
   // only warned. The production server (`server.js`) ignores this option.
   allowedDevOrigins: ["127.0.0.1"],
-  // The build's type check leaves out `test/`, which the Docker builder cannot
+  // The build's type check leaves out the tests, which the Docker builder cannot
   // resolve. The reason is in tsconfig.build.json (#190).
   typescript: { tsconfigPath: "tsconfig.build.json" },
-  // The monorepo root, so tracing picks up files linked from packages/.
-  outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
+  // The monorepo root, so tracing picks up files linked from packages/. Since
+  // #3 that is this app's own directory, named anyway so Turbopack does not
+  // have to infer it.
+  outputFileTracingRoot: new URL("./", import.meta.url).pathname,
   // `ws` by hand, because tracing cannot find it on its own (#92).
   //
   // `@mastra/core` opens `ws` at module scope, and in the Alpine builder
@@ -29,8 +31,8 @@ const config: NextConfig = {
   //
   // The glob is `./node_modules/ws`, inside this package, and that is the
   // load-bearing part: Node resolves `require("ws")` from the route by walking
-  // up to `apps/web/node_modules`, so a copy anywhere else — the Bun store, the
-  // repo root — would be present and still unreachable. The path exists only
+  // up to this package's `node_modules` (the repo root's, since #3), so a copy
+  // anywhere else — the Bun store — would be present and still unreachable. The path exists only
   // because `ws` is a declared dependency of this package; see the `//ws` note
   // in package.json. Both halves are needed and neither works alone.
   //
@@ -51,14 +53,15 @@ const config: NextConfig = {
   // artifact somewhere only Docker can assemble it, and this repo has already
   // paid for that once: #92 was a standalone gap that every local check was
   // blind to because none of them ran the artifact. Carrying `public` in the
-  // trace instead means `bun run --cwd apps/web build` emits a **complete**
+  // trace instead means `bun run build` emits a **complete**
   // `.next/standalone`, and the runner stage copies that one tree — so the
-  // thing `test/public-assets.test.ts` boots on a socket and the thing Render
+  // thing `app-test/public-assets.test.ts` boots on a socket and the thing Render
   // serves are the same tree, and a fast test can hold it.
   //
   // The glob is relative to this package, so it lands at
-  // `.next/standalone/apps/web/public/` — where `server.js` looks, because
-  // `outputFileTracingRoot` makes the standalone tree mirror the monorepo. It
+  // `.next/standalone/public/` — where `server.js` looks, because
+  // `outputFileTracingRoot` makes the standalone tree mirror the monorepo, and
+  // since #3 the app is the monorepo's root. It
   // is the whole directory rather than the two wordmarks `app/Frame.tsx`
   // names: the next file added to `public/` must not be able to go missing in
   // production the way these two did.

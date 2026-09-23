@@ -15,7 +15,7 @@
  *
  * `load` is injectable for the same reason `ModelFactory` is in `handlers.ts` —
  * a seam a test can drive rather than a mock of the thing under test.
- * `test/chat-fault.test.ts` hands it a loader that throws and reads the
+ * `app-test/chat-fault.test.ts` hands it a loader that throws and reads the
  * response back over real HTTP.
  */
 import { serverFault } from "./fault.ts";

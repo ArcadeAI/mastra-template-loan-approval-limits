@@ -6,7 +6,7 @@
  * with `--cwd apps/loan-app`, so Bun loads `apps/loan-app/.env.local` into it.
  * Until #56 it took `PORT` from that file — the loan API's port. In a worktree
  * owning 4410-4419 both processes wanted 4412, and `IDP_PUBLIC_HOST` pointed
- * at 4413 where nothing was listening. Sibling of `apps/web/test/dev-port.test.ts`
+ * at 4413 where nothing was listening. Sibling of `app-test/dev-port.test.ts`
  * (#50): same family of silent misbinding, different cause — that one was a
  * shell expanding `${PORT:-3000}` before anything read the file, this one read
  * the right file for the wrong service.

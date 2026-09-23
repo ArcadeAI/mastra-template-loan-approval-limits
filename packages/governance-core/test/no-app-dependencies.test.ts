@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 const PACKAGE_ROOT = join(import.meta.dir, "..");
 const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
@@ -39,6 +39,20 @@ function addressesApp(specifier: string, apps: readonly string[]): boolean {
   );
 }
 
+/**
+ * Does the relative `specifier`, written in `file`, land outside `packages/`?
+ *
+ * Since #3 the web app is the repo root — `app/`, `lib/`, `components/` —
+ * so a path into it no longer contains `apps/` and `addressesApp` cannot see
+ * it. Everything that is not a package is an app from here, so leaving
+ * `packages/` is the rule rather than a list of the root's directories.
+ */
+function leavesPackages(file: string, specifier: string): boolean {
+  if (!specifier.startsWith(".")) return false;
+  const target = relative(join(REPO_ROOT, "packages"), resolve(dirname(file), specifier));
+  return target === ".." || target.startsWith(`..${sep}`);
+}
+
 function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
 }
@@ -59,6 +73,8 @@ function appPackageNames(): string[] {
     .filter((entry) => statSync(join(appsDir, entry)).isDirectory())
     .filter((entry) => existsSync(join(appsDir, entry, "package.json")))
     .map((entry) => readJson(join(appsDir, entry, "package.json")).name)
+    // The root manifest is the web app's since #3 moved it out of `apps/web`.
+    .concat(readJson(join(REPO_ROOT, "package.json")).name)
     .filter((name): name is string => typeof name === "string");
 }
 
@@ -111,6 +127,15 @@ describe("importedSpecifiers recognises every form that creates a dependency", (
     expect(addressesApp(specifier as string, [APP])).toBe(true);
   });
 
+  it("catches a relative path that climbs out of packages/ into the root app", () => {
+    const file = join(PACKAGE_ROOT, "src", "index.ts");
+    expect(leavesPackages(file, "../../../lib/config.ts")).toBe(true);
+    expect(leavesPackages(file, "../../../apps/governed-app/src/index.ts")).toBe(true);
+    expect(leavesPackages(file, "../../policy-schema/src/index.ts")).toBe(false);
+    expect(leavesPackages(file, "./policy.ts")).toBe(false);
+    expect(leavesPackages(file, "zod")).toBe(false);
+  });
+
   it("leaves innocent specifiers alone", () => {
     const source = [
       `import { z } from "zod";`,
@@ -155,7 +180,7 @@ describe("governance-core is independent of every app", () => {
 
     const offenders = files.flatMap((file) =>
       importedSpecifiers(readFileSync(file, "utf8"))
-        .filter((specifier) => addressesApp(specifier, apps))
+        .filter((specifier) => addressesApp(specifier, apps) || leavesPackages(file, specifier))
         .map((specifier) => `${file}: ${specifier}`),
     );
 

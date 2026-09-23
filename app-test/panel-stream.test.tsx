@@ -27,7 +27,7 @@ import { resolvePanelStream } from "../lib/governance/stream-url.ts";
 
 /**
  * The variables that decide the panel's stream, and the only ones these tests
- * touch. Named explicitly because `apps/web/.env.local` sets `HOOKS_PUBLIC_HOST`
+ * touch. Named explicitly because the root `.env.local` sets `HOOKS_PUBLIC_HOST`
  * for a local run, so a case that means "unset" has to say so.
  */
 const STREAM_KEYS = [
@@ -40,7 +40,7 @@ const STREAM_KEYS = [
   // where sign-in is also unset — which is every deployment this suite builds
   // by default. `ANTHROPIC_API_KEY` is here for the same reason and one more:
   // it may well be set in the ambient environment of whoever runs the suite
-  // (see `test/model.ts`), so a case that means "configured" has to say so
+  // (see `app-test/model.ts`), so a case that means "configured" has to say so
   // rather than inherit it.
   "IDP_ISSUER",
   "IDP_CLIENT_ID",
@@ -100,7 +100,7 @@ function text(html: string): string {
     .trim();
 }
 
-/** The deployed shape, which is what `apps/web/Dockerfile` sets on the runner. */
+/** The deployed shape, which is what the root `Dockerfile` sets on the runner. */
 const DEPLOYED = { NODE_ENV: "production" } as const;
 const HOOKS_HOST = "cg-hooks.onrender.com";
 
@@ -277,7 +277,7 @@ describe("live mode", () => {
  */
 describe("what render.yaml gives cg-web", () => {
   const blueprint = Bun.YAML.parse(
-    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "render.yaml"), "utf8"),
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "render.yaml"), "utf8"),
   ) as { services: Array<{ name: string; envVars?: Array<Record<string, unknown>> }> };
 
   const web = blueprint.services.find((service) => service.name === "cg-web");

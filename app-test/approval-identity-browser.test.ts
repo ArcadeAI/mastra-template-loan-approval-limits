@@ -30,7 +30,7 @@
  * has to still get through. The second half of this test is what makes the
  * first half mean something.
  *
- * The rig is the repo's: `test/cdp.ts` drives the browser and `test/chrome.ts`
+ * The rig is the repo's: `app-test/cdp.ts` drives the browser and `app-test/chrome.ts`
  * finds one. Since #152 a missing browser is a failure on CI rather than a
  * silent skip.
  */

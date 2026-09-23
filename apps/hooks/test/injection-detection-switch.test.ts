@@ -4,7 +4,7 @@
  * The acceptance criterion is "a control run with detection disabled
  * demonstrably changes the agent's behaviour, so the demo can show what was
  * prevented." Two halves. That the behaviour changes is a claim about a real
- * model and is measured in `apps/web/test/act4-control-run.test.ts`. That the
+ * model and is measured in `app-test/act4-control-run.test.ts`. That the
  * control plane *can* be disabled, that disabling it changes what `/post`
  * returns, and that a disabled control announces itself, is a claim about this
  * service and is measured here.

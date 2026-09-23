@@ -133,7 +133,7 @@ const cancelElicitation: NativeElicitationBridge["handle"] = async () => ({ acti
  *   back. Pinned, the gateway sees the `initialize` handshake 1.x sent and no
  *   new request. Revisit when Arcade's gateway advertises 2026-07-28.
  * - **No HTTP+SSE fallback.** A streamable POST that fails is the failure; 1.x
- *   then tried a `GET`. `test/gateway-token-rejected.test.tsx` records both.
+ *   then tried a `GET`. `app-test/gateway-token-rejected.test.tsx` records both.
  */
 export function gatewayClient(options: GatewayToolsOptions): MCPClient {
   return new MCPClient({

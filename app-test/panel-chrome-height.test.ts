@@ -11,10 +11,10 @@
  *
  * Run it on its own with:
  *
- *     bun test apps/web/test/panel-chrome-height.test.ts
+ *     bun test ./app-test/panel-chrome-height.test.ts
  *
- * `apps/web/test/panel-chrome.ts` has the harness and the reasons the states
- * are the states; `apps/web/scripts/panel-chrome-evidence.ts` runs the same
+ * `app-test/panel-chrome.ts` has the harness and the reasons the states
+ * are the states; `scripts/panel-chrome-evidence.ts` runs the same
  * measurement with the screenshots turned on.
  *
  * ## Why a tolerance, and why it is this one
@@ -94,7 +94,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
           `${measurement.state} at ${key(measurement)}: the chrome above the first lane measures ` +
             `${measurement.laneTop.toFixed(2)}px, and this test pins ${expected}px ±${TOLERANCE}. ` +
             `If the panel changed on purpose, re-measure with ` +
-            `\`bun test apps/web/test/panel-chrome-height.test.ts\`, update EXPECTED, and update the ` +
+            `\`bun test ./app-test/panel-chrome-height.test.ts\`, update EXPECTED, and update the ` +
             `figure on the PR — the number in the PR body and the number here are the same claim.`,
         );
       }

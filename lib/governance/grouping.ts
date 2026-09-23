@@ -71,7 +71,7 @@ import type { GovernanceEvent, HookPoint } from "@cg/policy-schema";
  *
  * Measured where it can be. A listing driven through the local rig —
  * `apps/hooks` with its real policy behind the gateway stand-in,
- * `test/access-listing-live.test.tsx` — answers one `/access` call, and its
+ * `app-test/access-listing-live.test.tsx` — answers one `/access` call, and its
  * six decisions share a timestamp: **spread 0 ms**, printed by that suite on
  * every run. The #13 fan-out lands 40 ms apart per decision and 160 ms end to
  * end (`access-fanout.ts`).

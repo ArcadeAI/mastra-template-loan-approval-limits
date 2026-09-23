@@ -1,7 +1,8 @@
 /**
- * Runs the Next CLI with the `PORT` from this service's own `.env.local`.
+ * Runs the Next CLI with the `PORT` from this service's own `.env.local`, which
+ * since #3 is the root one: the app is the repo root.
  *
- * `apps/web` is the one service that is not `bun <entrypoint>.ts`, and that is
+ * The app is the one service that is not `bun <entrypoint>.ts`, and that is
  * the whole problem. The script used to be:
  *
  *     "dev": "next dev --port ${PORT:-3000}"
@@ -15,15 +16,15 @@
  * executes. Measured both ways on #50.
  *
  * So this file is that process. Bun runs it directly, which loads
- * `apps/web/.env.local` into `process.env` exactly the way `bun --watch
+ * the root `.env.local` into `process.env` exactly the way `bun --watch
  * src/index.ts` does for `hooks`, `loan-app` and `idp`, and the Next CLI
  * inherits that environment and reads `PORT` out of it. A real environment
- * variable still wins over the file — `PORT=4420 bun run --cwd apps/web dev`
+ * variable still wins over the file — `PORT=4420 bun run dev`
  * and Render's injected `PORT` both keep working — because that is Bun's own
  * precedence, not something re-implemented here.
  *
- * Production does not run this. `apps/web/Dockerfile` serves the standalone
- * build with `node apps/web/server.js`, which reads `process.env.PORT` itself.
+ * Production does not run this. The root `Dockerfile` serves the standalone
+ * build with `node server.js`, which reads `process.env.PORT` itself.
  */
 const args = process.argv.slice(2);
 
