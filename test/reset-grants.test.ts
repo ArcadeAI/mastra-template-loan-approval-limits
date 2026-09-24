@@ -57,6 +57,7 @@ import { join } from "node:path";
 // every `PERSONA_*` from the environment, so the fixture's own address is the
 // one that gets seeded.
 import people from "../lib/identity/provider/fixtures/people.json" with { type: "json" };
+import { childEnv } from "../app-test/child-env.ts";
 import { bootApp, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -141,7 +142,7 @@ async function authorizeAlice(): Promise<string> {
   // unchanged by this, which is the property every reset here asserts.
   const rotate = Bun.spawnSync(
     ["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"],
-    { env: { ...process.env, ...appEnv, APP_PUBLIC_HOST: app.host, NODE_ENV: "test" } },
+    { env: childEnv({ ...appEnv, APP_PUBLIC_HOST: app.host, NODE_ENV: "test" }) },
   );
   expect(rotate.exitCode).toBe(0);
   const creds = JSON.parse(rotate.stdout.toString()) as { client_id: string; client_secret: string };

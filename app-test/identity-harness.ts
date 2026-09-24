@@ -45,6 +45,7 @@ import {
   signout,
   verify,
 } from "../lib/identity/handlers.ts";
+import { childEnv } from "./child-env.ts";
 import { forgetGatewayClients } from "../lib/identity/gateway.ts";
 import { linkIdentity } from "../lib/identity/link.ts";
 import { readConfig as readIdpConfig } from "../lib/identity/provider/config.ts";
@@ -973,16 +974,10 @@ export async function startIdentityHarness(
   const dbPath = join(tmpdir(), `cg-web-identity-${crypto.randomUUID()}`, "idp.db");
   mkdirSync(dirname(dbPath), { recursive: true });
 
-  // A developer's own PERSONA_* and IDP_* values are deliberately not passed
-  // through: these tests are about the fixture.
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
-    ),
-  ) as Record<string, string>;
-
-  const idpEnv: Record<string, string> = {
-    ...inherited,
+  // The provider's environment, and the credentials script's: an allowlist
+  // (`child-env.ts`), so a developer's own PERSONA_*, IDP_* or host values
+  // never reach it — these tests are about the fixture.
+  const idpEnv: Record<string, string> = childEnv({
     PORT: String(webPort),
     APP_PUBLIC_HOST: `localhost:${webPort}`,
     IDP_DB_PATH: dbPath,
@@ -999,7 +994,7 @@ export async function startIdentityHarness(
       ...(options.extraWebRedirectUris ?? []),
     ].join(","),
     NODE_ENV: "test",
-  };
+  });
 
   // The provider runs in this process, as it does in the app, so everything it
   // prints comes out of this process's console. The lines it prints are kept

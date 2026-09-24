@@ -18,6 +18,8 @@ import { spawn } from "bun";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { childEnv } from "./child-env.ts";
+
 const REPO_ROOT = join(import.meta.dir, "..");
 
 export interface AppIdentity {
@@ -37,17 +39,12 @@ export async function appIdentityEnv(origin: string, dir: string): Promise<AppId
     IDP_OAUTH_REDIRECT_URIS_WEB: `${origin}/api/auth/callback`,
   };
 
-  // A developer's own PERSONA_* and IDP_* values are not passed through: these
-  // tests are about the fixture, as the identity harness's are.
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
-    ),
-  ) as Record<string, string>;
-
+  // An allowlisted environment (`child-env.ts`): a developer's own PERSONA_*
+  // and IDP_* values are not passed through, because these tests are about the
+  // fixture, as the identity harness's are.
   const rotate = spawn(
     ["bun", join(REPO_ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--client", "web", "--rotate"],
-    { env: { ...inherited, ...base, NODE_ENV: "test" }, stdout: "pipe", stderr: "pipe" },
+    { env: childEnv({ ...base, NODE_ENV: "test" }), stdout: "pipe", stderr: "pipe" },
   );
   const [out, err, code] = await Promise.all([
     new Response(rotate.stdout).text(),

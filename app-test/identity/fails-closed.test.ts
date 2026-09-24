@@ -17,6 +17,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { childEnv } from "../child-env.ts";
+
 const REPO = join(import.meta.dir, "..", "..");
 const scratch = mkdtempSync(join(tmpdir(), "cg-fails-closed-"));
 
@@ -24,19 +26,9 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** Everything a deployment needs except, in the `failed` run, the one secret. */
 function environment(expect: "failed" | "ok"): Record<string, string> {
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) =>
-        value !== undefined &&
-        !key.startsWith("PERSONA_") &&
-        !key.startsWith("IDP_") &&
-        !key.endsWith("_PUBLIC_HOST") &&
-        !key.endsWith("_DB_PATH") &&
-        !["BETTER_AUTH_SECRET", "RESET_TOKEN", "IDENTITY_HOST", "CONTROL_PLANE_HOST", "GOVERNANCE_STREAM"].includes(key),
-    ),
-  ) as Record<string, string>;
-  return {
-    ...inherited,
+  // An allowlist (`child-env.ts`): the one variable this is about must not
+  // arrive from the shell that runs the suite.
+  return childEnv({
     CG_PROBE_EXPECT: expect,
     NODE_ENV: "production",
     APP_PUBLIC_HOST: "localhost:3999",
@@ -54,7 +46,7 @@ function environment(expect: "failed" | "ok"): Record<string, string> {
     ANTHROPIC_API_KEY: "fails-closed-anthropic-key",
     GOVERNANCE_STREAM: "fixture",
     ...(expect === "ok" ? { BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex") } : {}),
-  };
+  });
 }
 
 async function probe(expect: "failed" | "ok"): Promise<{ code: number; output: string }> {

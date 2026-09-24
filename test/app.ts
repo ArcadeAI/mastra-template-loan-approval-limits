@@ -18,6 +18,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { childEnv } from "../app-test/child-env.ts";
+
 const ROOT = join(import.meta.dir, "..");
 const BOOT_MS = 180_000;
 
@@ -47,27 +49,14 @@ export async function bootApp(env: Record<string, string>): Promise<App> {
   const data = mkdtempSync(join(tmpdir(), "cg-reset-app-"));
   const distDir = `.next/cg-reset-${port}`;
 
-  // Anything the developer's own shell carries for the app is deliberately
-  // dropped: a PERSONA_* or an IDP_* from a local run would make these tests
-  // about their environment, and a host or database path would point the app
+  // An allowlist, not the developer's shell minus some of it (`child-env.ts`):
+  // a PERSONA_* or an IDP_* from a local run would make these tests about
+  // their environment, and a host or database path would point the app
   // somewhere else.
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) =>
-        value !== undefined &&
-        !key.startsWith("PERSONA_") &&
-        !key.startsWith("IDP_") &&
-        !key.endsWith("_PUBLIC_HOST") &&
-        !key.endsWith("_DB_PATH") &&
-        !["RESET_TOKEN", "IDENTITY_HOST", "CONTROL_PLANE_HOST", "GOVERNANCE_STREAM"].includes(key),
-    ),
-  ) as Record<string, string>;
-
   let output = "";
   const child = Bun.spawn(["bun", "scripts/next.ts", "dev"], {
     cwd: ROOT,
-    env: {
-      ...inherited,
+    env: childEnv({
       NODE_ENV: "development",
       PORT: String(port),
       CG_NEXT_DIST_DIR: distDir,
@@ -77,7 +66,7 @@ export async function bootApp(env: Record<string, string>): Promise<App> {
       LOANS_DB_PATH: join(data, "loans.db"),
       IDP_DB_PATH: join(data, "idp.db"),
       ...env,
-    },
+    }),
     stdout: "pipe",
     stderr: "pipe",
   });

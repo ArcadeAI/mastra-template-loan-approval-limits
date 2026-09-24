@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { bootApp, type App } from "../../test/app.ts";
+import { childEnv } from "../child-env.ts";
 
 const REPO = join(import.meta.dir, "..", "..");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
@@ -74,7 +75,7 @@ beforeAll(async () => {
   // mint a readable one the way a developer does, against the app's idp.db.
   const rotate = Bun.spawn(["bun", "scripts/identity/oauth-client.ts", "--json", "--rotate"], {
     cwd: REPO,
-    env: { ...process.env, ...env, APP_PUBLIC_HOST: app.host, NODE_ENV: "test" },
+    env: childEnv({ ...env, APP_PUBLIC_HOST: app.host, NODE_ENV: "test" }),
     stdout: "pipe",
     stderr: "pipe",
   });
