@@ -27,13 +27,25 @@ const CASES: Array<[string, string]> = [
 
 describe("the issuer's scheme", () => {
   test.each(CASES)("APP_PUBLIC_HOST=%s is %s, on both sides", (host, origin) => {
-    const env = { APP_PUBLIC_HOST: host };
+    // A throwaway secret: since #9 the provider refuses to read a public
+    // issuer without one (asserted below), and this test is about the scheme.
+    const env = { APP_PUBLIC_HOST: host, BETTER_AUTH_SECRET: "issuer-test-throwaway-secret-0123456789" };
     expect(issuerOf(env)).toBe(origin);
     expect(readConfig(env).baseURL).toBe(origin);
     expect(appOrigin(env)).toBe(origin);
     const surface = readIdentitySurface(env);
     expect(surface.identity.idpIssuer).toBe(origin);
     expect(surface.identity.publicUrl).toBe(origin);
+  });
+
+  test("a public issuer with no BETTER_AUTH_SECRET is refused; a local one is not (#9)", () => {
+    for (const [host, origin] of CASES) {
+      if (origin.startsWith("https://")) {
+        expect(() => readConfig({ APP_PUBLIC_HOST: host })).toThrow("the development secret is published in this repository");
+      } else {
+        expect(readConfig({ APP_PUBLIC_HOST: host }).baseURL).toBe(origin);
+      }
+    }
   });
 
   test("unset, both sides fall back to the app's own port on localhost", () => {
