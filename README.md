@@ -157,6 +157,14 @@ Some questions could not be answered from documentation, so they were spiked aga
 - **The model reads an injected note and stops.** With `LN-2291`'s pasted instruction visible, the $95K request reached `/pre` roughly 5 times in 17: the model read the injection, refused it, and ended the turn asking whether to proceed. With `/hooks/post` stripping the note first, 5 of 5. Act 4's control is act 2's prerequisite, and the fix was removing what the model was reading, never steering it.
 - The two identity spikes, [`04-user-source.md`](./docs/spikes/04-user-source.md) and [`05-custom-verifier.md`](./docs/spikes/05-custom-verifier.md), are the working record of the two-hop design, including OAuth misconfigurations that each fire no hook and leave the control plane dark.
 
+## Deploying to Render
+
+The Quickstart runs on your machine behind ngrok. [`render.yaml`](./render.yaml) is the stage demo's Render blueprint, reshaped for the one app: a single service, `cg-web`, built from the root `Dockerfile` with `runtime: docker` (Render does not detect Bun) and holding all three databases on one 1 GB disk. The toolkits are not in it, because they ship with `arcade deploy`. Secrets are `sync: false`, so a blueprint sync prompts for them rather than committing them.
+
+- **A redeploy is not a reset.** The databases seed from their fixtures only when empty, and the disk survives a deploy, so every stage edit and every approval carries forward.
+- **The disk holds the OAuth clients Arcade is registered against.** Without it, `idp.db` is recreated on every restart, the clients change, and the registration in Arcade goes stale.
+- **A service with a disk gives up zero-downtime deploys.** Render stops the old instance before starting the new one.
+
 ## Further reading
 
 - [`DESIGN.md`](./DESIGN.md) is the authoritative record: architecture, contracts, and the reasoning behind each decision.
