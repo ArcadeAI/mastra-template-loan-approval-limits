@@ -52,15 +52,28 @@
  * "could you give me the loan ID", made no tool call, and no hook fired. That
  * is about how a request names a thing, not about what anyone may do to it.
  *
- * Tool *descriptions* are the other place behaviour can hide, and `tools/loan`
- * still says a write has "no undo". Out of scope here and filed as **#90**.
+ * Tool *descriptions* are the other place behaviour can hide. Since #8 the
+ * deployed ones are checked where they are defined, in each toolkit's
+ * `tests/test_descriptions.py`, and this prompt is checked against the same
+ * vocabulary in `app-test/studio-entry.test.ts`.
+ *
+ * ## One definition, two entries
+ *
+ * The chat route (`handlers.ts`) and Mastra Studio (`studio.ts`, registered by
+ * `src/mastra/index.ts`) both construct the agent here and nowhere else. They
+ * differ only in *when* the model and the tools are resolved: per request from
+ * the browser's session in the chat route, and when Studio asks, from Studio's
+ * own grant. `app-test/studio-entry.test.ts` fails if what reaches the model
+ * differs between them.
  *
  * ## Temperature 0, and one model id
  *
- * Temperature is pinned at the call site rather than at construction because
- * `modelSettings` is a per-execution option in Mastra and a default set here
- * can be overridden by a caller who does not know it exists. One place, on
- * every run: `run.ts`.
+ * Temperature is pinned at the call site because `modelSettings` is a
+ * per-execution option in Mastra and a default can be overridden by a caller
+ * who does not know it exists: `run.ts` passes it on every chat turn. It is
+ * also the agent's default, because Studio is a call site this repo does not
+ * write — its own model settings panel can override it, and when it does not,
+ * Studio runs at the temperature `DESIGN.md` → Model names.
  */
 import { Agent } from "@mastra/core/agent";
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -129,9 +142,15 @@ export function anthropicModel(options: ModelOptions) {
 /** Stable across turns and processes, so a trace names the same agent every time. */
 export const AGENT_ID = "loan-operations";
 
+/** Temperature 0, on every run. `DESIGN.md` → Model. */
+export const TEMPERATURE = 0;
+
+/** A toolset, or the function that resolves one when the agent is asked for it (Studio). */
+export type AgentTools = Record<string, unknown> | (() => Promise<Record<string, unknown>>);
+
 export function buildAgent(options: {
   model: ConstructorParameters<typeof Agent>[0]["model"];
-  tools: Record<string, unknown>;
+  tools: AgentTools;
   instructions?: string;
 }): Agent {
   return new Agent({
@@ -143,5 +162,6 @@ export function buildAgent(options: {
     // rather than widen to it: an optional property may be absent, but it may
     // not be present and undefined.
     tools: options.tools as NonNullable<ConstructorParameters<typeof Agent>[0]["tools"]>,
+    defaultOptions: { modelSettings: { temperature: TEMPERATURE } },
   });
 }
