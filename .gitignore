@@ -5,6 +5,8 @@ __pycache__/
 
 # build
 .next/
+# `mastra dev` bundles Studio's entry here (#8).
+.mastra/
 dist/
 build/
 *.tsbuildinfo
