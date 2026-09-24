@@ -4,28 +4,36 @@
  *
  * Nothing is mocked. `apps/idp` is a real subprocess and the sign-in is a real
  * authorization-code + PKCE flow with a real password typed into a real login
- * form; `apps/loan-app` is a real subprocess owning a real `loans.db`; and the
- * route under test is the deployed handler, reached over real HTTP behind a
- * real `Bun.serve`, with the sealed cookie a browser would actually be holding.
+ * form; the loan module is the app's own, in this process, owning a real
+ * `loans.db` in a throwaway directory; and the route under test is the deployed
+ * handler, reached over real HTTP behind a real `Bun.serve`, with the sealed
+ * cookie a browser would actually be holding.
  *
- * Between the route and the loan book sits one addition: a recording proxy that
+ * Since #5 the route reads the loan module **in-process** — no loopback HTTP to
+ * `/bank/…`, no MCP — so the only request that leaves the process on a read is
+ * the module asking the identity provider who the bearer belongs to. A
+ * recording proxy sits there, in front of `apps/idp`'s `/oauth2/userinfo`: it
  * writes down the `Authorization` header on every request and forwards it
  * unchanged. That is how the claim **"the read is made with the persona's
  * bearer, not a shared secret"** is measured rather than asserted — the
- * recorded bearer is presented to `apps/idp`'s `/oauth2/userinfo`, which is the
- * same endpoint `apps/loan-app/src/actor.ts` uses to decide who a caller is, and
- * it has to name the person who signed in.
+ * recorded bearer is the one `lib/loans/actor.ts` presented to decide who the
+ * caller is, and presented again it has to name the person who signed in.
+ * Until #5 the proxy sat between the route and `apps/loan-app`, and recorded
+ * the same bearer one hop earlier.
+ *
+ * The writes this file makes as another person (Charlie's approval) go through
+ * the app's own `/bank/…` route, served here behind a second `Bun.serve`.
  *
  * Every port is `:0` or taken from the OS. This worktree owns a block of ten
  * and the reviewer's owns a different block, so nothing here may pick a number.
  */
-import { spawn, type Subprocess } from "bun";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { GET } from "../app/api/loans/route.ts";
+import { closeLoanModule, serve as serveBank } from "../lib/loans/instance.ts";
 import { chunk, chunkName, joinChunks, openSealed, seal } from "../lib/identity/seal.ts";
 import { DEMO_LOAN_IDS } from "../lib/loan-context/loans.ts";
 import { SESSION_COOKIE, type Session } from "../lib/identity/session.ts";
@@ -37,18 +45,16 @@ import {
   startIdentityHarness,
   type IdentityHarness,
 } from "./identity-harness.ts";
-import { readPort } from "./harness.ts";
-
-const REPO_ROOT = join(import.meta.dir, "..");
 
 /** The $88,000 control application, pending in the fixture. Charlie decides it below. */
 const CONTROL_LOAN = "LN-2299";
 
 let identity: IdentityHarness;
-let loanApp: Subprocess<"ignore", "pipe", "pipe">;
+/** The app's `/bank/…` route, for the writes this file makes as somebody else. */
+let bank: ReturnType<typeof Bun.serve>;
 let loanAppHost: string;
 let workspace: string;
-/** Every request the loan book received through the proxy, with its bearer. */
+/** Every request the identity provider received through the proxy, with its bearer. */
 let seen: Array<{ method: string; path: string; authorization: string | null }> = [];
 let proxy: ReturnType<typeof Bun.serve>;
 let route: ReturnType<typeof Bun.serve>;
@@ -60,25 +66,11 @@ beforeAll(async () => {
   workspace = join(tmpdir(), `cg-api-loans-${crypto.randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
 
-  loanApp = spawn({
-    cmd: ["bun", join(REPO_ROOT, "apps", "loan-app", "src", "index.ts")],
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      PORT: "0",
-      LOANS_DB_PATH: join(workspace, "loans.db"),
-      IDP_PUBLIC_HOST: new URL(identity.idpUrl).host,
-      NODE_ENV: "test",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  }) as Subprocess<"ignore", "pipe", "pipe">;
-  const { port } = await readPort(loanApp);
-  loanAppHost = `localhost:${port}`;
+  const idpHost = new URL(identity.idpUrl).host;
 
-  // Transparent, and the only reason it exists is to write down what the route
-  // sent. It changes nothing about the request: same method, same path, same
-  // headers, same body.
+  // Transparent, and the only reason it exists is to write down what the loan
+  // module sent. It changes nothing about the request: same method, same path,
+  // same headers, same body.
   proxy = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -88,19 +80,16 @@ beforeAll(async () => {
         path: url.pathname,
         authorization: request.headers.get("authorization"),
       });
-      try {
-        return await fetch(`http://${loanAppHost}${url.pathname}${url.search}`, {
-          method: request.method,
-          headers: request.headers,
-          ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: await request.text() }),
-        });
-      } catch {
-        // A proxy whose upstream is gone answers; it does not throw. The last
-        // test in this file kills the loan book on purpose.
-        return new Response("the loan book is not listening", { status: 502 });
-      }
+      return fetch(`http://${idpHost}${url.pathname}${url.search}`, {
+        method: request.method,
+        headers: request.headers,
+        ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: await request.text() }),
+      });
     },
   });
+
+  bank = Bun.serve({ port: 0, idleTimeout: 30, fetch: (request) => serveBank(request) });
+  loanAppHost = `localhost:${bank.port}`;
 
   // The route reads its environment the way the deployed service does, so the
   // test configures the environment rather than reaching past the route.
@@ -109,7 +98,11 @@ beforeAll(async () => {
   set("IDP_ISSUER", identity.idpUrl);
   set("IDP_CLIENT_ID", identity.config.identity.idpClientId);
   set("IDP_CLIENT_SECRET", identity.config.identity.idpClientSecret);
-  set("LOAN_APP_PUBLIC_HOST", `localhost:${proxy.port}`);
+  // The loan module opens on the first read, from this environment: its own
+  // `loans.db`, and bearers checked at the recording proxy.
+  closeLoanModule();
+  set("LOANS_DB_PATH", join(workspace, "loans.db"));
+  set("IDP_PUBLIC_HOST", `localhost:${proxy.port}`);
   // So `decided_by_name` can resolve an address to the name a room reads.
   set("PERSONA_LOAN_OFFICER_EMAIL", PEOPLE.dana.email);
   set("PERSONA_CREDIT_ANALYST_EMAIL", PEOPLE.sam.email);
@@ -126,9 +119,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   route?.stop(true);
+  bank?.stop(true);
   proxy?.stop(true);
-  loanApp?.kill();
-  await loanApp?.exited;
+  closeLoanModule();
   await identity?.stop();
   for (const [key, value] of restoreEnv) {
     if (value === undefined) delete process.env[key];
@@ -208,7 +201,7 @@ describe("the loan book a signed-in persona is served", () => {
   /**
    * Act 3's and act 4's subjects, never on this route.
    *
-   * `apps/loan-app` returns all three on its detail route — it is the bank's
+   * The loan module returns all three on its detail route — it is the bank's
    * system of record and it holds them — so this is asserted against the raw
    * response text rather than against parsed fields: a value that reaches the
    * browser is a value in the page source whatever a component draws. The
@@ -218,7 +211,7 @@ describe("the loan book a signed-in persona is served", () => {
   test("the borrower's account number, tax id and underwriter notes never leave the server", async () => {
     const cookie = await signedInCookie("dana");
     const held = (await (
-      await fetch(`http://${loanAppHost}/loans/LN-2291`, {
+      await fetch(`http://${loanAppHost}/bank/loans/LN-2291`, {
         headers: { authorization: `Bearer ${await bearerFor("dana")}` },
       })
     ).json()) as Record<string, string>;
@@ -236,7 +229,7 @@ describe("the loan book a signed-in persona is served", () => {
   /**
    * The decision the demo is about to make, as the card will show it.
    *
-   * Approved through `apps/loan-app`'s own API as Charlie — the same call the
+   * Approved through the loan module's own API, `/bank/…`, as Charlie — the same call the
    * approval page makes — so `decided_by` is whatever the loan book derived
    * from *that* caller's token, not something this test handed it.
    */
@@ -246,7 +239,7 @@ describe("the loan book a signed-in persona is served", () => {
       before.body.loans.find((loan: { loan_id: string }) => loan.loan_id === CONTROL_LOAN).status,
     ).toBe("pending");
 
-    const approved = await fetch(`http://${loanAppHost}/loans/${CONTROL_LOAN}/approve`, {
+    const approved = await fetch(`http://${loanAppHost}/bank/loans/${CONTROL_LOAN}/approve`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${await bearerFor("riley")}`,
@@ -288,7 +281,7 @@ describe("who the read is made as", () => {
     const authorization = [...bearers][0] as string;
     expect(authorization.startsWith("Bearer ")).toBe(true);
 
-    // `apps/loan-app/src/actor.ts` decides who a caller is by asking exactly
+    // `lib/loans/actor.ts` decides who a caller is by asking exactly
     // this. Asking it the same way is what turns "the persona's bearer" from a
     // claim about our code into a measurement of the IdP's answer.
     const userinfo = await fetch(`${identity.idpUrl}/oauth2/userinfo`, {
@@ -298,8 +291,47 @@ describe("who the read is made as", () => {
     expect(((await userinfo.json()) as { email: string }).email.toLowerCase()).toBe(PEOPLE.riley.email);
   }, 45_000);
 
+  /**
+   * #5's claim about the board: it reads the loan module in-process, with no
+   * loopback HTTP call to `/bank/…` and no MCP call. Measured on `fetch`
+   * itself, for the duration of one read: everything this process asked the
+   * network for, apart from the test's own request to the route. The one
+   * thing allowed out is the module asking the identity provider who the
+   * bearer is, which is the recording proxy's `/oauth2/userinfo`.
+   */
+  test("a read leaves the process only to ask the identity provider, never to /bank or MCP", async () => {
+    const cookie = await signedInCookie("dana");
+    const outbound: string[] = [];
+    const realFetch = globalThis.fetch;
+    const spy = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url !== routeUrl) outbound.push(url);
+      return realFetch(input, init);
+    }) as typeof fetch;
+    globalThis.fetch = spy;
+    let status: number;
+    try {
+      ({ status } = await ask(cookie));
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    expect(status).toBe(200);
+    expect(outbound.length).toBeGreaterThan(0);
+    // Two addresses, one question: the module asks the recording proxy, and
+    // the proxy — which runs in this process too, so the spy sees it — asks
+    // the identity provider behind it the same thing.
+    const userinfo = new Set([
+      `http://localhost:${proxy.port}/oauth2/userinfo`,
+      `http://${new URL(identity.idpUrl).host}/oauth2/userinfo`,
+    ]);
+    expect(outbound.filter((url) => !userinfo.has(url))).toEqual([]);
+    expect(outbound).toContain(`http://localhost:${proxy.port}/oauth2/userinfo`);
+    expect(outbound.filter((url) => url.includes("/bank/") || url.includes("/mcp"))).toEqual([]);
+  }, 45_000);
+
   test("the loan book refuses the same requests without it", async () => {
-    const naked = await fetch(`http://${loanAppHost}/loans`);
+    const naked = await fetch(`http://${loanAppHost}/bank/loans`);
     expect(naked.status).toBe(401);
   }, 30_000);
 
@@ -399,10 +431,16 @@ describe("when there is nobody to read as", () => {
  * reverse mistake, nobody ever finds out.
  */
 describe("when the loan book does not answer", () => {
+  /**
+   * Since #5 there is no loan process to kill: the loan book is this one. What
+   * can still stop answering is the identity provider it asks, and a loan
+   * module that cannot resolve a bearer answers 503 — so the proxy in front of
+   * the provider is stopped, and a fresh sign-in's first read (which no cached
+   * answer can serve) meets it.
+   */
   test("an unreachable loan book is an outage, never a refusal", async () => {
     const cookie = await signedInCookie("dana");
-    loanApp.kill();
-    await loanApp.exited;
+    proxy.stop(true);
 
     const { status, body, text } = await ask(cookie);
 

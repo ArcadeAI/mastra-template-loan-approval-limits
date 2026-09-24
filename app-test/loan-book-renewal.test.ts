@@ -20,13 +20,12 @@
  *
  * Everything here is real: a real `apps/idp` subprocess, a real
  * authorization-code + PKCE flow asking for `offline_access`, a real
- * `apps/loan-app` with a real `loans.db`, and the real `readLoanBook`. A
+ * loan module (`lib/loans/`) with a real `loans.db`, and the real `readLoanBook`. A
  * counting proxy sits in front of the IdP so "the refresh token was not spent"
  * is a number this file reads back rather than a claim it makes.
  *
  * Every port is `:0` or taken from the OS.
  */
-import { spawn, type Subprocess } from "bun";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,15 +33,13 @@ import { join } from "node:path";
 
 import { nonce, pkce } from "../lib/identity/oidc.ts";
 import { readLoanBook } from "../lib/loan-context/read.ts";
+import { openLoanBook } from "../lib/loans/db.ts";
+import { createLoanModule, type LoanModule } from "../lib/loans/server.ts";
 import type { IdpToken, Session } from "../lib/identity/session.ts";
 import { Browser, PEOPLE, startIdentityHarness, type IdentityHarness } from "./identity-harness.ts";
-import { readPort } from "./harness.ts";
-
-const REPO_ROOT = join(import.meta.dir, "..");
-
 let identity: IdentityHarness;
-let loanApp: Subprocess<"ignore", "pipe", "pipe">;
-let loanAppHost: string;
+/** A real loan module over its own `loans.db`, handed to the reader in-process (#5). */
+let loans: LoanModule;
 let workspace: string;
 /** Every `grant_type` the IdP's token endpoint was asked for, through the proxy. */
 let grants: string[] = [];
@@ -55,24 +52,14 @@ beforeAll(async () => {
   workspace = join(tmpdir(), `cg-renewal-${crypto.randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
 
-  loanApp = spawn({
-    cmd: ["bun", join(REPO_ROOT, "apps", "loan-app", "src", "index.ts")],
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      PORT: "0",
-      LOANS_DB_PATH: join(workspace, "loans.db"),
-      // The loan book validates bearers against the IdP itself, not the proxy:
-      // the proxy exists to count what `readLoanBook` asks for, and putting it
-      // on this leg too would blur the two.
-      IDP_PUBLIC_HOST: new URL(identity.idpUrl).host,
-      NODE_ENV: "test",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  }) as Subprocess<"ignore", "pipe", "pipe">;
-  const { port } = await readPort(loanApp);
-  loanAppHost = `localhost:${port}`;
+  loans = createLoanModule({
+    db: openLoanBook(join(workspace, "loans.db")),
+    // The loan book validates bearers against the IdP itself, not the proxy:
+    // the proxy exists to count what `readLoanBook` asks for, and putting it
+    // on this leg too would blur the two.
+    idpHost: new URL(identity.idpUrl).host,
+    resetToken: "",
+  });
 
   idpProxy = Bun.serve({
     port: 0,
@@ -99,8 +86,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   idpProxy?.stop(true);
-  loanApp?.kill();
-  await loanApp?.exited;
+  loans?.db.close();
   await identity?.stop();
   rmSync(workspace, { recursive: true, force: true });
 });
@@ -180,7 +166,7 @@ function sessionWith(token: IdpToken, email: string): Session {
 }
 
 function read(session: Session, options: { onRenewed?: (next: Session) => void } = {}) {
-  return readLoanBook(session, { host: loanAppHost, idp: idpConfig, ...options });
+  return readLoanBook(session, { loans, idp: idpConfig, ...options });
 }
 
 describe("a server render, which cannot store a renewed token", () => {

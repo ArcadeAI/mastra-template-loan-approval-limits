@@ -23,12 +23,12 @@
  * render and says nothing about whether anything ever produces the value.
  *
  * So the state comes out of `readLoanBook` — the real module the server
- * component calls — against a real HTTP server that answers a real `401` to a
- * real `Authorization: Bearer …`. The one thing standing in is the loan book
- * itself, at the network edge, because *that* half is measured against the real
- * `apps/loan-app` subprocess with a real sign-in in `app-test/api-loans.test.ts`
- * ("a token the identity provider refuses is the same re-sign-in"). Nothing
- * between the socket and the pixels is mocked, and the message on screen is the
+ * component calls — against a loan book that answers a real `401` to a real
+ * `Authorization: Bearer …`. The one thing standing in is the loan book
+ * itself, at the module edge (it is in-process since #5), because *that* half
+ * is measured against the real loan module with a real sign-in in
+ * `app-test/api-loans.test.ts` ("a token the identity provider refuses is the
+ * same re-sign-in"). Nothing between that edge and the pixels is mocked, and the message on screen is the
  * one `lib/loan-context/read.ts` wrote rather than one this file did.
  *
  * ## The distinction that must survive
@@ -40,7 +40,7 @@
  * refused by policy" is asserted here as a property of the whole screen, not
  * just of the card it is written on.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { BankPane } from "../components/bank/BankPane.tsx";
@@ -52,31 +52,23 @@ const BOB = "bob@megaforce.tech";
 
 /** Every request the stand-in saw, so the 401 is known to have been a real ask. */
 let seen: Array<{ path: string; authorization: string | null }> = [];
-let loanBook: ReturnType<typeof Bun.serve>;
-let host: string;
-
 /**
  * The loan book, refusing this browser's bearer.
  *
- * Port `0`: this worktree owns a block of ten and the reviewer's owns another,
- * so nothing here may pick a number — the OS does, and the port is read back.
+ * Handed to `readLoanBook` in-process, the way the app's own loan module is
+ * since #5 (`lib/loans/`): a request handler, not an address. Until #5 this was
+ * a `Bun.serve` on port `0` answering the same 401.
  */
-beforeAll(() => {
-  loanBook = Bun.serve({
-    port: 0,
-    fetch(request) {
-      const url = new URL(request.url);
-      seen.push({ path: url.pathname, authorization: request.headers.get("authorization") });
-      return new Response(JSON.stringify({ error: "invalid_token" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      });
-    },
-  });
-  host = `localhost:${loanBook.port}`;
-});
-
-afterAll(() => loanBook.stop(true));
+const loanBook = {
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    seen.push({ path: url.pathname, authorization: request.headers.get("authorization") });
+    return new Response(JSON.stringify({ error: "invalid_token" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  },
+};
 
 /**
  * A browser that signed in an hour ago and whose loan-system bearer the bank
@@ -123,7 +115,7 @@ function text(html: string): string {
 describe("the expired state, reached rather than assumed", () => {
   test("a 401 from the loan book is an expired sign-in, and the read really happened", async () => {
     seen = [];
-    const book = await readLoanBook(staleSession(), { host });
+    const book = await readLoanBook(staleSession(), { loans: loanBook });
 
     expect(book.status).toBe("expired");
     // The refusal was answered to a request this code made, carrying this
@@ -135,7 +127,7 @@ describe("the expired state, reached rather than assumed", () => {
   });
 
   test("the copy still says nothing was refused by policy", async () => {
-    const book = await readLoanBook(staleSession(), { host });
+    const book = await readLoanBook(staleSession(), { loans: loanBook });
 
     expect(book.status).toBe("expired");
     const message = (book as Extract<LoanBookState, { status: "expired" }>).message;
@@ -150,7 +142,7 @@ describe("the chrome and the assistant, with the loan book expired", () => {
   let markup: string;
 
   beforeAll(async () => {
-    expired = await readLoanBook(staleSession(), { host });
+    expired = await readLoanBook(staleSession(), { loans: loanBook });
     markup = screen(expired);
   });
 
