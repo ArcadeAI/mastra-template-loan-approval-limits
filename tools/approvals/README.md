@@ -116,7 +116,7 @@ the control plane, reached over HTTP the same way Arcade reaches the hooks.
 
 Storage-A was ratified on #18, and the control plane serves these four
 endpoints as of #19 — **since #4 from the app, under `/api/approvals`**, on the
-host in `HOOKS_PUBLIC_HOST` (the app's own). They were `/approvals/…` while the
+host in `APP_PUBLIC_HOST` (the app's own, and one secret since #6). They were `/approvals/…` while the
 control plane was the `apps/hooks` service; in the app `/approvals/{id}` is the
 approval page the Slack link opens, so the store moved under one prefix. What landed in this slice is the client and the contract below,
 implemented by a stand-in server in `tests/conftest.py` and driven over real
@@ -245,14 +245,12 @@ tool. It is not a tool argument and the model cannot reach it.
 
 ## Configuration
 
-Three Arcade secrets, uploaded by `arcade deploy` from the repo's `.env`,
-because a secret is the one configuration channel a deployed toolkit has. All
-HOST-form, like every address in this repo; consumers add the scheme.
+Two Arcade secrets, uploaded by `arcade deploy` from the repo's `.env`,
+because a secret is the one configuration channel a deployed toolkit has.
 
 | secret | what |
 |---|---|
-| `HOOKS_PUBLIC_HOST` | the control plane, which owns `governance.db` |
-| `WEB_PUBLIC_HOST` | used to build the approval link, and nothing else |
+| `APP_PUBLIC_HOST` | the app's host, HOST-form: the control plane that owns `governance.db` is there, and so is the approval page the link opens. Two secrets until #6, one per service |
 | `APPROVALS_STORE_TOKEN` | shared bearer the approvals endpoints require |
 
 `APPROVALS_STORE_TOKEN` is not ceremony. Without it the approvals store would
