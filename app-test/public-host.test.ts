@@ -130,7 +130,7 @@ test("the panel's stream source refuses a bare service name in either mode", () 
     GOVERNANCE_STREAM: "hooks",
     HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com",
   });
-  expect(live).toHaveProperty("url", "https://cg-hooks.onrender.com/events");
+  expect(live).toHaveProperty("url", "https://cg-hooks.onrender.com/hooks/events");
   expect(resolvePanelStream({}).mode).toBe("fixture");
 });
 

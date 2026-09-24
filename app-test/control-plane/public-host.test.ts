@@ -59,7 +59,7 @@ async function waitForHealth(child: Subprocess, stdoutPath: string): Promise<num
     if (listening !== null) {
       const port = Number(listening[1]);
       try {
-        if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) return port;
+        if ((await fetch(`http://127.0.0.1:${port}/hooks/health`)).ok) return port;
       } catch {
         // The boot line is flushed just before the socket accepts requests.
       }
@@ -223,7 +223,7 @@ test.each(["cg-loan-app.onrender.com", "localhost:8082", "127.0.0.1:1234", "[::1
 
     try {
       const port = await waitForHealth(child, stdoutPath);
-      expect((await fetch(`http://127.0.0.1:${port}/health`)).ok).toBe(true);
+      expect((await fetch(`http://127.0.0.1:${port}/hooks/health`)).ok).toBe(true);
     } catch (cause) {
       const stderr = await fileText(stderrPath);
       throw new Error(`${String(cause)}\nstderr:\n${stderr || "(empty)"}`);

@@ -205,6 +205,9 @@ async function main(): Promise<number> {
         IDP_CLIENT_SECRET: harness.config.identity.idpClientSecret,
         APPROVALS_STORE_TOKEN: "standalone-verify-store-token",
         HOOKS_PUBLIC_HOST: harness.hooksHost,
+        // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+        // defaults to the app's own listener; this test's control plane is elsewhere.
+        CONTROL_PLANE_HOST: harness.hooksHost,
       }),
       IMAGE,
     ]);

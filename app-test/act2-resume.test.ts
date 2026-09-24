@@ -76,7 +76,7 @@ beforeAll(async () => {
     port: 0,
     idleTimeout: 120,
     fetch: (request) => {
-      const store = { hooksHost: harness.hooksHost, approvalsStoreToken: STORE_TOKEN };
+      const store = { controlPlaneHost: harness.hooksHost, approvalsStoreToken: STORE_TOKEN };
       const { pathname } = new URL(request.url);
       // The store this harness's control plane serves, on its own port.
       if (pathname === CHAT_PATH) {
@@ -193,7 +193,7 @@ function watchForNotice(requestId: string): {
   });
 
   const notice = (async (): Promise<ApprovalNotice> => {
-    const response = await fetch(`http://${harness.hooksHost}/events`, {
+    const response = await fetch(`http://${harness.hooksHost}/hooks/events`, {
       headers: { accept: "text/event-stream", "cache-control": "no-cache" },
       signal: controller.signal,
     });

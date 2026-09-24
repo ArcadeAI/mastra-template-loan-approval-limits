@@ -17,6 +17,9 @@ import { ApprovalRecord } from "@cg/policy-schema";
 
 import { baseUrl, type WebConfig } from "./config.ts";
 
+/** What reading the store takes: where this server reaches it, and its bearer. */
+type StoreConfig = Pick<WebConfig, "controlPlaneHost" | "approvalsStoreToken">;
+
 export type ApprovalLookup =
   | { found: true; request: ApprovalRecord }
   | { found: false; reason: string };
@@ -28,7 +31,7 @@ export interface RosterEntry {
   clearance: number;
 }
 
-export async function fetchApproval(id: string, config: WebConfig): Promise<ApprovalLookup> {
+export async function fetchApproval(id: string, config: StoreConfig): Promise<ApprovalLookup> {
   const response = await get(`/api/approvals/${encodeURIComponent(id)}`, config);
 
   if (response.status === 404) {
@@ -47,15 +50,15 @@ export async function fetchApproval(id: string, config: WebConfig): Promise<Appr
   return { found: true, request: ApprovalRecord.parse(body.request) };
 }
 
-export async function fetchRoster(config: WebConfig): Promise<RosterEntry[]> {
+export async function fetchRoster(config: StoreConfig): Promise<RosterEntry[]> {
   const response = await get("/api/approvals/roster", config);
   if (!response.ok) return [];
   const body = (await response.json()) as { subjects?: RosterEntry[] };
   return body.subjects ?? [];
 }
 
-function get(path: string, config: WebConfig): Promise<Response> {
-  return fetch(`${baseUrl(config.hooksHost)}${path}`, {
+function get(path: string, config: StoreConfig): Promise<Response> {
+  return fetch(`${baseUrl(config.controlPlaneHost)}${path}`, {
     headers: { authorization: `Bearer ${config.approvalsStoreToken}` },
     // The page must show what the store holds now, not what it held when the
     // route was last rendered: a decision made thirty seconds ago has to be

@@ -657,7 +657,7 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
       ]),
     );
 
-    const access = await fetch(`${hooks}/access`, {
+    const access = await fetch(`${hooks}/hooks/access`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${options.hookSigningSecret}` },
       body: JSON.stringify({ user_id: actor, toolkits }),
@@ -870,7 +870,7 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
       // a stand-in that minted two would break the panel's join.
       const executionId = `tc_${crypto.randomUUID().slice(0, 8)}`;
 
-      const pre = await fetch(`${hooks}/pre`, {
+      const pre = await fetch(`${hooks}/hooks/pre`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${options.hookSigningSecret}` },
         body: JSON.stringify({
@@ -979,7 +979,7 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
       // that the identifiers never enter the model's context, and a stand-in
       // that called `/post` and then forwarded the original payload anyway
       // would be the control that does nothing.
-      const post = await fetch(`${hooks}/post`, {
+      const post = await fetch(`${hooks}/hooks/post`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${options.hookSigningSecret}` },
         body: JSON.stringify({
@@ -1185,9 +1185,9 @@ if (import.meta.main) {
   );
   console.log(`[gateway-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${standIn.port}`);
   console.log(
-    `[gateway-stand-in] every tools/call asks ${hooksHost}/pre first and runs nothing when the answer ` +
-      `is not OK, then asks ${hooksHost}/post and forwards its override.output when there is one; ` +
-      `every tools/list asks ${hooksHost}/access first and omits what comes back denied.`,
+    `[gateway-stand-in] every tools/call asks ${hooksHost}/hooks/pre first and runs nothing when the answer ` +
+      `is not OK, then asks ${hooksHost}/hooks/post and forwards its override.output when there is one; ` +
+      `every tools/list asks ${hooksHost}/hooks/access first and omits what comes back denied.`,
   );
   console.log(
     storeToken === ""

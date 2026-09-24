@@ -1,10 +1,12 @@
 /**
- * `GET /audit` — the audit log over HTTP, behind the hook signing secret.
+ * `POST /hooks/access`: Arcade's access hook: which tools this user may see → `{ deny }`.
  *
  * Served by the control-plane module (`lib/control-plane/`), in-process, since
- * #4 folded `apps/hooks` into the app. The path is the one the service had.
+ * #4 folded `apps/hooks` into the app. Under `/hooks` by the human's decision
+ * on #4. The service served it at `/access`, and `mountedFetch` hands the module
+ * that path.
  */
-import { serve } from "../../lib/control-plane/instance.ts";
+import { serve } from "../../../lib/control-plane/instance.ts";
 
 export const dynamic = "force-dynamic";
 

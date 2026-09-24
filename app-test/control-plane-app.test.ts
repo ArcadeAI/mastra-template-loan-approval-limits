@@ -22,6 +22,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
+import { HealthResponse } from "@cg/policy-schema";
+
 import { freePort, stopProcess, waitForHttp } from "./cdp.ts";
 import { loanFixture } from "./control-plane/loan-fixture.ts";
 import { openEventStream } from "./control-plane/sse-reader.ts";
@@ -119,7 +121,7 @@ describe("the control plane, on the app's own port", () => {
   });
 
   test("/pre refuses Alice's $95K on LN-2299 with the remediation, and lets $50K through", async () => {
-    const refused = await hook(app!, "/pre", approveLoan(95_000, "tc_app_95k"));
+    const refused = await hook(app!, "/hooks/pre", approveLoan(95_000, "tc_app_95k"));
     expect(refused.status).toBe(200);
     const body = (await refused.json()) as { code: string; error_message: string };
     expect(body.code).toBe("CHECK_FAILED");
@@ -128,13 +130,13 @@ describe("the control plane, on the app's own port", () => {
     expect(body.error_message).toMatch(/\[ref evt_[0-9a-z]{10}\]$/);
 
     for (const amount of [50_000, 45_000]) {
-      const allowed = await hook(app!, "/pre", approveLoan(amount, `tc_app_${amount}`));
+      const allowed = await hook(app!, "/hooks/pre", approveLoan(amount, `tc_app_${amount}`));
       expect(await allowed.json()).toEqual({ code: "OK" });
     }
   }, 60_000);
 
   test("routing the escalation names Charlie, and not Michael, on the audit row", async () => {
-    const response = await hook(app!, "/pre", {
+    const response = await hook(app!, "/hooks/pre", {
       execution_id: "tc_app_route",
       tool: { name: "RequestApproval", toolkit: "Approvals", version: "1.0.0" },
       inputs: { action: "approve_loan", resource_id: "LN-2299", amount: 95_000, justification: "cash flow" },
@@ -142,7 +144,7 @@ describe("the control plane, on the app's own port", () => {
     });
     expect(await response.json()).toEqual({ code: "OK" });
 
-    const audit = await fetch(`${app!.origin}/audit?limit=1`, {
+    const audit = await fetch(`${app!.origin}/hooks/audit?limit=1`, {
       headers: { authorization: `Bearer ${HOOK_SECRET}` },
     });
     const { rows } = (await audit.json()) as { rows: Array<{ execution_id: string; reason: string }> };
@@ -155,7 +157,7 @@ describe("the control plane, on the app's own port", () => {
     "/post redacts the account number and tax id from %s's record",
     async (name) => {
       const loan = loanFixture("LN-2291");
-      const response = await hook(app!, "/post", {
+      const response = await hook(app!, "/hooks/post", {
         execution_id: `tc_app_post_${name}`,
         tool: { name, toolkit: "Loan", version: "1.0.0" },
         inputs: { loan_id: "LN-2291" },
@@ -173,9 +175,9 @@ describe("the control plane, on the app's own port", () => {
   );
 
   test("GET /events delivers the frame for a /pre decision made on the same app", async () => {
-    const stream = await openEventStream(app!.origin);
+    const stream = await openEventStream(`${app!.origin}/hooks`);
     try {
-      await hook(app!, "/pre", approveLoan(95_000, "tc_app_sse"));
+      await hook(app!, "/hooks/pre", approveLoan(95_000, "tc_app_sse"));
       await stream.untilFrames(1, 10_000);
       const frame = stream.frames.find((each) => each.data.includes("tc_app_sse"));
       expect(frame?.event).toBe("governance");
@@ -204,12 +206,50 @@ describe("the control plane, on the app's own port", () => {
       ((await (await fetch(`${app!.origin}/health`)).json()) as { control_plane: { stream_clients: number } })
         .control_plane.stream_clients;
     const baseline = await clients();
-    const streams = await Promise.all([1, 2, 3].map(() => openEventStream(app!.origin)));
+    const streams = await Promise.all([1, 2, 3].map(() => openEventStream(`${app!.origin}/hooks`)));
     expect(await clients()).toBe(baseline + 3);
     for (const stream of streams) stream.abort();
     const deadline = Date.now() + 5_000;
     while ((await clients()) !== baseline && Date.now() < deadline) await Bun.sleep(50);
     expect(await clients()).toBe(baseline);
+  }, 60_000);
+
+  test("/hooks/health is the hook contract's health check, in Arcade's own vocabulary", async () => {
+    // The human's decision on #4: Arcade's health probe gets the control
+    // plane's own body, and its `status` is from the generated
+    // `HealthResponse` enum (healthy|degraded|unhealthy). The app's `/health`
+    // is a different endpoint, with DESIGN.md's ok|degraded.
+    const response = await fetch(`${app!.origin}/hooks/health`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(HealthResponse.safeParse(body).success).toBe(true);
+    expect(HealthResponse.shape.status.unwrap().options).toEqual(["healthy", "degraded", "unhealthy"]);
+    expect(body).toMatchObject({ status: "healthy", service: "hooks", policy: { status: "ready", revision: 19 } });
+  }, 60_000);
+
+  test("the app's own /health keeps DESIGN.md's ok|degraded, which Arcade's enum does not have", async () => {
+    const body = (await (await fetch(`${app!.origin}/health`)).json()) as { status: string };
+    expect(["ok", "degraded"]).toContain(body.status);
+    // Which is why Arcade is not pointed at it: `ok` is outside the contract.
+    expect(HealthResponse.shape.status.unwrap().options).not.toContain("ok");
+  }, 60_000);
+
+  test("nothing the old service served is left at the root", async () => {
+    for (const [method, path] of [
+      ["POST", "/access"],
+      ["POST", "/pre"],
+      ["POST", "/post"],
+      ["GET", "/events"],
+      ["GET", "/audit"],
+      ["POST", "/admin/reset"],
+    ] as const) {
+      const response = await fetch(`${app!.origin}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${HOOK_SECRET}`, "content-type": "application/json" },
+        ...(method === "POST" ? { body: JSON.stringify(approveLoan(95_000, "tc_app_root")) } : {}),
+      });
+      expect({ path, status: response.status }).toEqual({ path, status: 404 });
+    }
   }, 60_000);
 
   test("/health is one response carrying the control plane's fields", async () => {
@@ -255,8 +295,8 @@ describe("the control plane, on the app's own port", () => {
   }, 60_000);
 
   test("the hooks keep their bearer and their JSON 405 behind Next", async () => {
-    expect((await hook(app!, "/pre", approveLoan(95_000, "tc_app_noauth"), null)).status).toBe(401);
-    const get = await fetch(`${app!.origin}/pre`);
+    expect((await hook(app!, "/hooks/pre", approveLoan(95_000, "tc_app_noauth"), null)).status).toBe(401);
+    const get = await fetch(`${app!.origin}/hooks/pre`);
     expect(get.status).toBe(405);
     expect(await get.json()).toEqual({ error: "Method not allowed" });
   }, 60_000);
@@ -293,8 +333,17 @@ describe("a control plane that does not boot, in an app that does", () => {
     expect(body.warnings.join(" ")).toContain("every /access, /pre and /post call is being refused");
   }, 60_000);
 
+  test("/hooks/health says unhealthy, in Arcade's vocabulary, and why", async () => {
+    const response = await fetch(`${app!.origin}/hooks/health`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(HealthResponse.safeParse(body).success).toBe(true);
+    expect(body.status).toBe("unhealthy");
+    expect(String(body.error)).toContain('INJECTION_DETECTION is "sometimes"');
+  }, 60_000);
+
   test("every hook refuses with a 5xx, which Arcade's fail_closed turns into a denial", async () => {
-    for (const path of ["/access", "/pre", "/post"]) {
+    for (const path of ["/hooks/access", "/hooks/pre", "/hooks/post"]) {
       const response = await hook(app!, path, approveLoan(45_000, "tc_app_dead"));
       expect(response.status).toBe(503);
       expect(((await response.json()) as { code: string }).code).toBe("CHECK_FAILED");

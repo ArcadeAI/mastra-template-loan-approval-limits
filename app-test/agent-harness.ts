@@ -282,7 +282,7 @@ export async function startAgentHarness(
       // same bearer Arcade presents, because rows say more than the model was
       // told. Read over HTTP rather than by opening `governance.db`: what a
       // reviewer can reconstruct is what the endpoint serves.
-      const response = await fetch(`http://${hooksHost}/audit?limit=1000`, {
+      const response = await fetch(`http://${hooksHost}/hooks/audit?limit=1000`, {
         headers: { authorization: `Bearer ${HOOK_SECRET}` },
       });
       if (!response.ok) throw new Error(`GET /audit -> ${response.status} ${await response.text()}`);
@@ -290,7 +290,7 @@ export async function startAgentHarness(
       return body.rows ?? [];
     },
     async health() {
-      const response = await fetch(`http://${hooksHost}/health`);
+      const response = await fetch(`http://${hooksHost}/hooks/health`);
       return (await response.json()) as Record<string, unknown>;
     },
     async stopLoanApp() {

@@ -180,7 +180,7 @@ describe("which stream the panel is pointed at", () => {
   test("GOVERNANCE_STREAM=hooks points at the hook server, and carries the host for the badge", () => {
     expect(
       resolvePanelStream({ GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: "localhost:8081" }),
-    ).toEqual({ url: "http://localhost:8081/events", mode: "hooks", host: "localhost:8081" });
+    ).toEqual({ url: "http://localhost:8081/hooks/events", mode: "hooks", host: "localhost:8081" });
   });
 
   test("a deployed host gets https, a local one gets http", () => {
@@ -193,8 +193,8 @@ describe("which stream the panel is pointed at", () => {
       HOOKS_PUBLIC_HOST: "127.0.0.1:4421",
     });
 
-    expect(watching(deployed).url).toBe("https://cg-hooks.onrender.com/events");
-    expect(watching(local).url).toBe("http://127.0.0.1:4421/events");
+    expect(watching(deployed).url).toBe("https://cg-hooks.onrender.com/hooks/events");
+    expect(watching(local).url).toBe("http://127.0.0.1:4421/hooks/events");
   });
 
   test("asking for hooks without a host is unconfigured, not a quiet replay", () => {
@@ -331,7 +331,7 @@ describe("fixture pacing carried from the page's own query string", () => {
 
   test("the hook server's stream is never given query parameters", () => {
     const hooks = {
-      url: "https://cg-hooks.onrender.com/events",
+      url: "https://cg-hooks.onrender.com/hooks/events",
       mode: "hooks",
       host: "cg-hooks.onrender.com",
     } as const;

@@ -25,7 +25,7 @@ import { assertPublicHost } from "../public-host.ts";
 export const FIXTURE_STREAM_PATH = "/api/governance/fixture-stream";
 
 /** The hook server's stream, live since #54. See `subscribe.ts` for the frames. */
-export const HOOKS_STREAM_PATH = "/events";
+export const HOOKS_STREAM_PATH = "/hooks/events";
 
 export type StreamMode = "fixture" | "hooks";
 

@@ -63,6 +63,7 @@ beforeAll(async () => {
   banner = boot.banner;
   config = {
     hooksHost: hooks.host,
+    controlPlaneHost: hooks.host,
     approvalsStoreToken: STORE_TOKEN,
     arcadeApiUrl: `http://localhost:${boot.port}`,
     // Any non-empty value: the stand-in ignores it, and an empty one would

@@ -14,6 +14,7 @@
  * backstop, not the plan.
  */
 import { bootControlPlane, type BootedControlPlane } from "./index.ts";
+import { HOOKS_BASE, mountedFetch, SERVICE } from "./server.ts";
 
 const KEY = Symbol.for("cg.control-plane");
 
@@ -70,14 +71,31 @@ export function controlPlane(): BootedControlPlane["plane"] {
 /**
  * What each control-plane route exports for every method: the module decides.
  *
+ * The routes live under `/hooks/…` and `/api/approvals/…` (#4), and the module
+ * is handed the path *within* it, `/pre` rather than `/hooks/pre`, by
+ * `mountedFetch`, which `scripts/control-plane.ts` uses too.
+ *
  * A control plane that did not boot answers **503** on every route. For the
  * three hooks that is a refusal: Arcade's `failure_mode: fail_closed` (#13)
  * turns a 5xx into a denial of every tool the call was about, which is the
- * same answer `cg-hooks` being down produced.
+ * same answer `cg-hooks` being down produced. The one exception is the hook
+ * contract's health check, which says `unhealthy` in its own vocabulary, at
+ * 200 like every other health answer here (#112), naming the reason.
  */
 export function serve(request: Request): Promise<Response> {
   const booted = boot();
   if (!booted.ok) {
+    if (new URL(request.url).pathname === `${HOOKS_BASE}/health`) {
+      return Promise.resolve(
+        Response.json({
+          status: "unhealthy",
+          service: SERVICE,
+          error: booted.error,
+          warnings: [`the control plane did not boot and every hook is being refused: ${booted.error}`],
+          failure_mode: "fail-closed",
+        }),
+      );
+    }
     return Promise.resolve(
       Response.json(
         { error: `The control plane did not boot, so it refuses every call: ${booted.error}`, code: "CHECK_FAILED" },
@@ -85,5 +103,5 @@ export function serve(request: Request): Promise<Response> {
       ),
     );
   }
-  return booted.booted.plane.fetch(request);
+  return mountedFetch(booted.booted.plane)(request);
 }

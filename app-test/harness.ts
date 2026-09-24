@@ -89,6 +89,7 @@ export async function startHarness(): Promise<Harness> {
 
   const config: WebConfig = {
     hooksHost: hooks.host,
+    controlPlaneHost: hooks.host,
     approvalsStoreToken: STORE_TOKEN,
     arcadeApiUrl: `http://localhost:${arcade.port}`,
     arcadeApiKey: "arcade-key-for-web-tests",
@@ -123,7 +124,7 @@ export async function startHarness(): Promise<Harness> {
     },
     async audit(filters = {}) {
       const query = new URLSearchParams(filters).toString();
-      const response = await fetch(`http://${hooks.host}/audit${query ? `?${query}` : ""}`, {
+      const response = await fetch(`http://${hooks.host}/hooks/audit${query ? `?${query}` : ""}`, {
         // Arcade's bearer, not the store's — these are the hooks' own rows.
         headers: { authorization: `Bearer ${HOOK_SECRET}` },
       });

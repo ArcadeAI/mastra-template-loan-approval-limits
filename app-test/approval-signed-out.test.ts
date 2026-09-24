@@ -79,6 +79,9 @@ beforeAll(async () => {
       IDP_CLIENT_ID: identity.config.identity.idpClientId,
       IDP_CLIENT_SECRET: identity.config.identity.idpClientSecret,
       HOOKS_PUBLIC_HOST: control.hooksHost,
+      // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+      // defaults to the app's own listener; this test's control plane is elsewhere.
+      CONTROL_PLANE_HOST: control.hooksHost,
       APPROVALS_STORE_TOKEN: control.config.approvalsStoreToken,
       ARCADE_API_URL: control.config.arcadeApiUrl,
       ARCADE_API_KEY: control.config.arcadeApiKey,

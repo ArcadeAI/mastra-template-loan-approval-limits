@@ -98,6 +98,11 @@ interface ServiceSpec {
   /** The environment variable holding its address, per target. */
   hostVar: Record<Target, string>;
   body?: unknown;
+  /**
+   * Its reset endpoint. `/admin/reset` for the services; `/hooks/admin/reset`
+   * for the control plane since #4, which the app mounts under `/hooks`.
+   */
+  resetPath?: string;
 }
 
 /**
@@ -126,6 +131,7 @@ const BETWEEN_TAKES: ServiceSpec[] = [
     render: "cg-hooks",
     hostVar: { local: "HOOKS_PUBLIC_HOST", render: "RENDER_HOOKS_PUBLIC_HOST" },
     body: { mode: "demo" },
+    resetPath: "/hooks/admin/reset",
   },
   {
     label: "loan-app",
@@ -284,7 +290,7 @@ async function resetOne(
 
   let response: Response;
   try {
-    response = await options.fetch(`${origin}/admin/reset`, {
+    response = await options.fetch(`${origin}${spec.resetPath ?? "/admin/reset"}`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       ...(spec.body === undefined ? {} : { body: JSON.stringify(spec.body) }),

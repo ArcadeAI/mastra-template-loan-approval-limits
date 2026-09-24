@@ -406,9 +406,15 @@ export function createControlPlane(deps: ServerDeps) {
   return {
     /** The `/health` body, for the app's one readiness response to fold in. */
     health: healthBody,
-    async fetch(request: Request): Promise<Response> {
+    /**
+     * `pathname` is the path *within* the control plane, which is how Arcade's
+     * contract names it (`/pre`, `/health`, …). A caller that mounts the
+     * control plane under a prefix (`HOOKS_BASE`, below) passes the path with
+     * the prefix removed. It defaults to the request's own, which is what the
+     * tests that drive `createServer` directly send.
+     */
+    async fetch(request: Request, pathname: string = new URL(request.url).pathname): Promise<Response> {
       const url = new URL(request.url);
-      const { pathname } = url;
 
       if (pathname === HOOK_ENDPOINT_PATHS.healthCheck) {
         return request.method === "GET" ? health() : json({ error: "Method not allowed" }, 405);
@@ -484,6 +490,37 @@ export function createControlPlane(deps: ServerDeps) {
 }
 
 export type ControlPlane = ReturnType<typeof createControlPlane>;
+
+/**
+ * Where the app mounts the hooks and everything else `apps/hooks` served at its
+ * root (#4): `/hooks/access`, `/hooks/pre`, `/hooks/post`, `/hooks/health`,
+ * `/hooks/events`, `/hooks/audit`, `/hooks/admin/reset`. Arcade takes a full
+ * URL per hook and a health-check path, so the registration names these; the
+ * app's own `/health` is a different endpoint with a different vocabulary.
+ *
+ * The approvals store is not under it: it is `/api/approvals/…` wherever the
+ * control plane is reached (`APPROVALS_PREFIX`).
+ */
+export const HOOKS_BASE = "/hooks";
+
+/**
+ * The control plane as the app lays it out: the hook contract under
+ * `HOOKS_BASE`, the approvals store at its own prefix, and nothing at the root.
+ * The app's routes and `scripts/control-plane.ts` both answer through this, so
+ * a consumer pointed at either one uses the same paths.
+ */
+export function mountedFetch(plane: ControlPlane): (request: Request) => Promise<Response> {
+  return (request) => {
+    const { pathname } = new URL(request.url);
+    if (pathname.startsWith(`${HOOKS_BASE}/`)) {
+      return plane.fetch(request, pathname.slice(HOOKS_BASE.length));
+    }
+    if (pathname === APPROVALS_PREFIX || pathname.startsWith(`${APPROVALS_PREFIX}/`)) {
+      return plane.fetch(request, pathname);
+    }
+    return Promise.resolve(Response.json({ error: "Not found" }, { status: 404 }));
+  };
+}
 
 /** The same handler on a socket of its own: `config.port`, `0` for any. */
 export function createServer(deps: ServerDeps) {

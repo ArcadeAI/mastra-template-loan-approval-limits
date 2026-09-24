@@ -113,7 +113,8 @@ export function createArcadeStandIn(options: ArcadeStandInOptions) {
       }
 
       // 1. The pre-execution hook, exactly as the engine calls it.
-      const pre = await fetch(`${base}/pre`, {
+      // Under `/hooks` since #4, as the app and scripts/control-plane.ts serve it.
+      const pre = await fetch(`${base}/hooks/pre`, {
         method: "POST",
         headers: {
           "content-type": "application/json",

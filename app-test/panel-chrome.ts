@@ -227,8 +227,9 @@ function startStubControlPlane(port: number) {
       // `/health` is read by the Next route, server to server, so it needs no
       // CORS — but it costs nothing and keeps the stub honest about what it
       // is standing in for.
-      if (url.pathname === "/health") return Response.json(HEALTH, { headers: CORS_HEADERS });
-      if (url.pathname !== "/events") return new Response(null, { status: 404, headers: CORS_HEADERS });
+      // Under `/hooks` since #4, as the app serves them.
+      if (url.pathname === "/hooks/health") return Response.json(HEALTH, { headers: CORS_HEADERS });
+      if (url.pathname !== "/hooks/events") return new Response(null, { status: 404, headers: CORS_HEADERS });
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           let open = true;
@@ -478,6 +479,9 @@ export async function measurePanelChrome(options: MeasureOptions = {}): Promise<
             // resolves to the replay and there is no health strip to measure.
             GOVERNANCE_STREAM: "hooks",
             HOOKS_PUBLIC_HOST: `127.0.0.1:${hooksPort}`,
+            // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+            // defaults to the app's own listener; this test's control plane is elsewhere.
+            CONTROL_PLANE_HOST: `127.0.0.1:${hooksPort}`,
             // A throwaway string that authorizes nothing: the only service it
             // would ever be presented to is the stub above, which ignores it.
             // Set or unset is the whole difference between the last two states.

@@ -39,7 +39,7 @@ export const APPROVAL_STATUS_PREFIX = "/api/approvals";
 
 export interface ApprovalStatusOptions {
   config?: IdentitySurface;
-  store?: { hooksHost: string; approvalsStoreToken: string };
+  store?: { controlPlaneHost: string; approvalsStoreToken: string };
 }
 
 /** `/api/approvals/{id}/status` → the id, or `null` when the path is not ours. */
@@ -67,9 +67,8 @@ export async function approvalStatus(
   const store = options.store ?? readWebConfig();
   const lookup = await fetchApproval(id, {
     ...config,
-    hooksHost: store.hooksHost,
+    controlPlaneHost: store.controlPlaneHost,
     approvalsStoreToken: store.approvalsStoreToken,
-    approvalsToolkit: config.agent.approvalsToolkit,
   }).catch(() => ({ found: false as const, reason: "the approvals store could not be reached" }));
 
   // One answer for "no such request" and "not yours", on purpose: two answers

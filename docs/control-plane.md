@@ -5,27 +5,48 @@ contextual-access hooks, and records every decision it makes.
 
 **A module of the app since #4, not a service.** It was `apps/hooks`, a Bun service of its
 own; this file was its README. The app mounts every route below in-process, on the app's own
-port (`app/access/route.ts` and its siblings hand the request to `createControlPlane`'s
-handler), and boots it once per process from `instrumentation.ts`. The paths are the
-service's, except the approvals store, which moved under `/api/approvals` because the app's
-`/approvals/{id}` is the approval page. `scripts/control-plane.ts` puts the same handler on a
-port of its own for the test harnesses. Everything below that says "this service" means this
-module.
+port (`app/hooks/pre/route.ts` and its siblings hand the request to `createControlPlane`'s
+handler through `mountedFetch`), and boots it once per process from `instrumentation.ts`.
+
+**Everything the service served at its root is under `/hooks` now** (the human's decision on
+#4), and the approvals store is under `/api/approvals`, because the app's `/approvals/{id}` is
+the approval page. `scripts/control-plane.ts` puts the same handler on a port of its own, laid
+out the same way, for the test harnesses. Inside the module the paths are still the contract's
+own (`/pre`, `/health`, …): `mountedFetch` hands it the path with `/hooks` removed, and the
+tests that drive `createServer` directly send those. Everything below that says "this
+service" means this module.
 
 ```
-POST /access   which tools this user may see       → { deny: Toolkits }
-POST /pre      may this user make this call         → { code: OK | CHECK_FAILED, error_message? }
-POST /post     what the model may read of the result → { code: OK, override?: { output } }
-GET  /audit    the audit log, filtered              → { rows, count, total, limit, filters }
-GET  /events   the live governance stream, plus `event: approval` (#20) → text/event-stream (no auth)
-GET  /health   policy revision, row counts, fixture drift — always 200      (no auth)
-POST /admin/reset  put the policy, or the whole demo, back to the fixture (bearer RESET_TOKEN)
+POST /hooks/access   which tools this user may see       → { deny: Toolkits }
+POST /hooks/pre      may this user make this call         → { code: OK | CHECK_FAILED, error_message? }
+POST /hooks/post     what the model may read of the result → { code: OK, override?: { output } }
+GET  /hooks/audit    the audit log, filtered              → { rows, count, total, limit, filters }
+GET  /hooks/events   the live governance stream, plus `event: approval` (#20) → text/event-stream (no auth)
+GET  /hooks/health   the hook contract's health check: policy revision, row counts, fixture drift;
+                     `status` is healthy | degraded | unhealthy, always 200      (no auth)
+POST /hooks/admin/reset  put the policy, or the whole demo, back to the fixture (bearer RESET_TOKEN)
 
 GET  /api/approvals/roster        every subject, so routing can show who was not asked
 POST /api/approvals               create an escalation; the store mints the id and the clock
 GET  /api/approvals/{id}          read one by opaque id — what the approval page is built on
 POST /api/approvals/{id}/decision record an outcome
 ```
+
+**Registering it in Arcade.** Arcade's admin API takes no base URL for a hook extension: each of
+`access`, `pre` and `post` is registered with its own full `url`, and the extension has one
+`health_check_path` (public swagger, `schemas.WebhookEndpointRequest` and
+`CreateWebhookConfigRequest`). So the registration is `<APP_PUBLIC_HOST>/hooks/access`,
+`/hooks/pre`, `/hooks/post`, and `health_check_path: /hooks/health`. `/hooks/health` answers
+in the generated `HealthResponse` vocabulary, and a test holds it to that schema. The app's
+own `/health` is a different endpoint, DESIGN.md's `ok|degraded` for the whole app.
+
+**Which host reads what.** `HOOKS_PUBLIC_HOST` is the public, bare host: what `tools/approvals`
+calls (`/api/approvals/…`) and what the panel's browser opens (`/hooks/events`). The app's own
+server-side readers (the panel's status strip on `/hooks/health`, the Reset button on
+`/hooks/admin/reset`, the approval page and the resume path on `/api/approvals/…`) read
+`CONTROL_PLANE_HOST` instead, which defaults to `localhost:$PORT`, the app's own local
+listener. So a server-side read never leaves the machine through the tunnel. The harnesses
+set it when they point the app at `scripts/control-plane.ts`.
 
 Every hook endpoint requires `Authorization: Bearer $ARCADE_HOOK_SIGNING_SECRET`, and so does
 `GET /audit` — same secret, because the rows it returns are the record those three wrote. Request and

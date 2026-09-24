@@ -107,11 +107,21 @@ export interface AgentConfig {
 
 export interface WebConfig {
   /**
-   * The control plane, which owns `governance.db` and the approvals store. The
-   * app itself since #4 (`lib/control-plane/`); a separate host only when a
-   * test points it at `scripts/control-plane.ts`.
+   * The control plane's public address: `HOOKS_PUBLIC_HOST`, the host the
+   * deployed approvals toolkit and the panel's browser reach it at. The app
+   * itself since #4 (`lib/control-plane/`). Validated here; this server never
+   * reads the control plane through it (see `controlPlaneHost`).
    */
   hooksHost: string;
+  /**
+   * Where **this server** reads the control plane: the panel's status strip,
+   * the Reset button, the approval page and the resume path. Since #4 that is
+   * the app's own local listener, `localhost:$PORT`, so a server-side read
+   * never leaves the machine through the public tunnel `HOOKS_PUBLIC_HOST`
+   * names. `CONTROL_PLANE_HOST` overrides it, which the test harnesses do when
+   * they point the app at `scripts/control-plane.ts` on a port of its own.
+   */
+  controlPlaneHost: string;
   /** The shared bearer the `/approvals` endpoints require. */
   approvalsStoreToken: string;
   /** Arcade's API root. Overridden in tests by a stand-in. */
@@ -223,6 +233,11 @@ export function readWebConfig(env: Record<string, string | undefined> = process.
     // app, so its default is the app's default, `WEB_PUBLIC_HOST`'s in
     // `.env.example`. It was `localhost:8081`, where `apps/hooks` listened.
     hooksHost: publicHost("HOOKS_PUBLIC_HOST", env.HOOKS_PUBLIC_HOST, "localhost:3000"),
+    controlPlaneHost: publicHost(
+      "CONTROL_PLANE_HOST",
+      env.CONTROL_PLANE_HOST,
+      `localhost:${env.PORT?.trim() || "3000"}`,
+    ),
     approvalsStoreToken: storeToken || DEV_STORE_TOKEN,
     approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT?.trim() || "Approvals",
     ...readIdentitySurface(env),
