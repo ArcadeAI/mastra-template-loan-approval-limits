@@ -103,11 +103,10 @@ async function withBrowser(
       // a governance.db in the repo.
       GOVERNANCE_DB_PATH: ":memory:",
       PUBLIC_URL: origin,
-      // A port this process bound and released: the loan read is refused by the
-      // kernel and the book comes back unavailable. It may not default to
-      // `LOAN_APP_PUBLIC_HOST` — that port belongs to whichever sibling
-      // worktree is running, and this one would read its loan book.
-      LOAN_APP_PUBLIC_HOST: `localhost:${freePort()}`,
+      // The app holds the loan book since #5 (until then this pointed
+      // `LOAN_APP_PUBLIC_HOST` at a port nothing listened on). A throwaway
+      // one: it may not default to `./loans.db`, which is the developer's own.
+      LOANS_DB_PATH: ":memory:",
       ...env,
     };
     for (const name of ["GOVERNANCE_STREAM", "HOOKS_PUBLIC_HOST"]) delete environment[name];

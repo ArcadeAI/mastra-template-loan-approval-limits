@@ -73,6 +73,9 @@ beforeAll(async () => {
       // The app mounts the control plane since #4; a throwaway one, not
       // a governance.db in the repo.
       GOVERNANCE_DB_PATH: ":memory:",
+      // The app holds the loan book since #5; a throwaway one, not a
+      // loans.db in the repo.
+      LOANS_DB_PATH: ":memory:",
       PUBLIC_URL: origin,
       SESSION_SECRET,
       IDP_ISSUER: identity.idpUrl,
