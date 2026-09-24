@@ -133,7 +133,7 @@ export function createArcadeStandIn(options: ArcadeStandInOptions) {
       if (pre.status === 401) {
         return failed(
           `the control plane refused the stand-in's hook bearer. Set ` +
-            `ARCADE_HOOK_SIGNING_SECRET to the same value apps/hooks has, or unset it on both.`,
+            `ARCADE_HOOK_SIGNING_SECRET to the same value the app's control plane has, or unset it on both.`,
         );
       }
       const verdict = (await pre.json()) as { code?: string; error_message?: string };
@@ -219,7 +219,7 @@ if (import.meta.main) {
       `runs nothing when the answer is not OK.`,
   );
   if (env.ARCADE_HOOK_SIGNING_SECRET?.trim() === undefined || env.ARCADE_HOOK_SIGNING_SECRET.trim() === "") {
-    console.log("[arcade-stand-in] using the development hook secret; apps/hooks does too.");
+    console.log("[arcade-stand-in] using the development hook secret; the app's control plane does too.");
   }
   console.log(
     `[arcade-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${server.port}`,

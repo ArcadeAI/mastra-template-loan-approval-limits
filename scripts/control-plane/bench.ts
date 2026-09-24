@@ -8,7 +8,7 @@
  *
  * Arcade's hook timeout is 5s. The number to watch is the 1.6 MB p95.
  *
- *   bun run --cwd apps/hooks bench
+ *   bun scripts/control-plane/bench.ts
  */
 import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
 import { openGovernance } from "../../lib/control-plane/policy-store.ts";

@@ -157,8 +157,9 @@ export function resolvePanelStream(
     if (host === "") {
       return unconfigured(
         "GOVERNANCE_STREAM=hooks, but HOOKS_PUBLIC_HOST is not set, so there is no address " +
-          "to watch. Read the host off the cg-hooks service page in the Render dashboard " +
-          "(the host part of the URL shown there) and set it on this service.",
+          "to watch. The control plane is part of this app, so it is this service's own host: " +
+          "read it off this service's page in the Render dashboard (the host part of the URL " +
+          "shown there) and set it here.",
       );
     }
     return { mode: "hooks", url: `${baseUrl(host)}${HOOKS_STREAM_PATH}`, host };

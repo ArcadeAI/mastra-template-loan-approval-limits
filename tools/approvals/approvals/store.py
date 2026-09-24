@@ -5,11 +5,10 @@ This toolkit holds no state, exactly as `tools/loan` holds none. A deployed
 here — the approval page in #19 runs in `apps/web` and has to read the record
 the tool wrote. A record living inside the worker would be a record nobody can
 open. So the request is persisted where `DESIGN.md` says approvals live:
-`governance.db`, owned by `apps/hooks`, reached over the public internet the
-same way Arcade reaches the hooks themselves.
-
-`apps/hooks` does not serve these four endpoints yet — #12 is the service and
-#19 is the approval flow. What lands here is the client and the contract.
+`governance.db`, owned by the control plane, reached over the public internet
+the same way Arcade reaches the hooks themselves. The control plane is part of
+the app since #4, so `HOOKS_PUBLIC_HOST` is the app's own host, and the four
+endpoints are under `/api/approvals` there.
 
 **The contract is written down in Markdown, not here.** See "The approvals
 store contract" in `tools/approvals/README.md`: request and response bodies,

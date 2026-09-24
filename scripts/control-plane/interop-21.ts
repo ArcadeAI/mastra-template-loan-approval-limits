@@ -14,8 +14,8 @@
  * resumed by the client on its own, and what the client ends up holding is the
  * audit log in the audit log's order with nothing repeated.
  *
- *     bun run --cwd apps/hooks interop:21
- *     bun run --cwd apps/hooks interop:21 -- path/to/lib/governance
+ *     bun scripts/control-plane/interop-21.ts
+ *     bun scripts/control-plane/interop-21.ts -- path/to/lib/governance
  *
  * The argument is the directory holding `subscribe.ts`, and it defaults to
  * the root app's `lib/governance`. Until #21 merges, point it at a checkout of
@@ -50,7 +50,7 @@ if (!existsSync(clientEntry)) {
       `  mkdir -p /tmp/slice-21/node_modules/@cg\n` +
       `  ln -s "$PWD/packages/policy-schema" /tmp/slice-21/node_modules/@cg/policy-schema\n` +
       `  ln -s "$PWD/node_modules/zod" /tmp/slice-21/node_modules/zod\n` +
-      `  bun run --cwd apps/hooks interop:21 -- /tmp/slice-21/apps/web/lib/governance\n`,
+      `  bun scripts/control-plane/interop-21.ts -- /tmp/slice-21/lib/governance\n`,
   );
   process.exit(2);
 }

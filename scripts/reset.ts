@@ -216,7 +216,8 @@ function requireToken(env: Record<string, string | undefined>): string {
   throw new ResetConfigError(
     "RESET_TOKEN is unset. It is the bearer all three services require, it has no development " +
       "default, and without it each of them answers 404 on /admin/reset. Generate one with " +
-      "`openssl rand -hex 32`, set it on cg-hooks, cg-idp, cg-loan-app and cg-web, and put the " +
+      "`openssl rand -hex 32`, set it on cg-web (which holds the control plane since #4), cg-idp " +
+      "and cg-loan-app, and put the " +
       "same value in .env.local here.",
   );
 }
