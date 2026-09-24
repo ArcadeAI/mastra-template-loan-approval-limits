@@ -1,14 +1,21 @@
-# apps/idp — the enterprise identity provider
+# lib/identity/provider — the identity provider
 
 **This is a demo fixture standing in for the enterprise's real IdP** — the same category
-of thing as the persona switcher. A forker deletes this directory and points Arcade at
-their Okta. Nothing else in the template depends on it, and it depends on nothing else in
-the template: it declares nothing under `packages/`, nothing declares it, and it knows
-people, not loans and not policy.
+of thing as the persona switcher. A forker with a real IdP replaces the identity module and
+points both hops at it (DESIGN.md → Identity and OAuth). It depends on nothing else in the
+template: it declares nothing under `packages/`, and it knows people, not loans and not
+policy.
 
-Bun on Render, [Better Auth](https://www.better-auth.com) with the
+**A module of the app since #6, not a service.** It was `apps/idp`, booted on its own port
+on Render. Now the app serves it on the app's own port (`instance.ts`, the routes under
+`app/`), its issuer is `APP_PUBLIC_HOST`, and `scripts/identity.ts` runs the same handler on
+a port of its own for the tests. The app depends on it now, by DESIGN.md's decision, through
+one door: **only this module mints tokens**, and `app-test/identity/only-identity-mints.test.ts`
+fails if another module imports its signing keys or its issuance.
+
+[Better Auth](https://www.better-auth.com) 1.7.5 with the
 [`@better-auth/oauth-provider`](https://www.better-auth.com/docs/plugins/oauth-provider)
-plugin as an OAuth 2.1 authorization server, owning `idp.db` on its own disk.
+plugin as an OAuth 2.1 authorization server, owning `idp.db`.
 
 > `@better-auth/oauth-provider` (the `oauthProvider()` plugin) supersedes the older
 > `oidc-provider` plugin, which still appears in the docs tree and in search results.
@@ -25,11 +32,16 @@ plugin as an OAuth 2.1 authorization server, owning `idp.db` on its own disk.
 | `POST /oauth2/introspect`, `POST /oauth2/revoke` | For a resource server that needs to validate or revoke an opaque token. |
 | `GET /.well-known/openid-configuration` | Discovery. A custom OAuth provider does not read it; an Arcade **User Source** does, and refuses an issuer without a `jwks_uri`. |
 | `GET /login`, `GET /consent` | The two pages a persona sees. Server-rendered HTML, legible on a projector. |
-| `GET /health` | Render's health check. Reports the client id, the endpoint URLs, the JWKS URL, what happened to the client secret at boot, and whether the reset route exists. |
-| `POST /admin/reset` | Back to the seeded personas, leaving the OAuth client alone. Bearer `RESET_TOKEN`; 404 when that is unset. See below. |
+| `POST /sign-in/email` | Better Auth's own sign-in. The login page calls it in-process. |
+| `GET /identity/health` | The module's own health: the client id, the endpoint URLs, the JWKS URL, what happened to the client secret at boot, and whether the reset route exists. `/health` until #6; the app's `/health` is the app's, and carries `identity: {status, issuer, people}`. |
+| `POST /identity/admin/reset` | Back to the seeded personas, leaving the OAuth client alone. Bearer `RESET_TOKEN`; 404 when that is unset. See below. `/admin/reset` until #6. |
 
 Every Better Auth route hangs off the site root, so the URLs a human types into the
-Arcade dashboard have no `/api/auth` prefix to forget.
+Arcade dashboard have no `/api/auth` prefix to forget. Anything else is a 404 from here
+(`IDENTITY_PATHS` in `server.ts`), so an endpoint nobody routed is not reachable by accident.
+Where this document below says `/health` or `/admin/reset`, read `/identity/health` and
+`/identity/admin/reset`; where it says `cg-idp`, it is describing the demo's deployed
+service, whose measurements these are.
 
 ## ID tokens, the key set, and the User Source
 
@@ -53,7 +65,7 @@ ID token by default and points relying parties at `/oauth2/userinfo`, which woul
 `sub` — an opaque uuid — as the only identity on the token. DESIGN.md's third identity
 rule is that the Arcade `user_id`, the OAuth subject and the loan book's actor are the
 same string, joined on email, so `customIdTokenClaims` puts `email` and `email_verified`
-on the ID token, lowercased. `test/flow.test.ts` asserts the claim is byte-equal to what
+on the ID token, lowercased. `app-test/identity/flow.test.ts` asserts the claim is byte-equal to what
 `/oauth2/userinfo` returns for the same session.
 
 The signing key lives in the `jwks` table in `idp.db`, private half encrypted under
@@ -63,7 +75,7 @@ anything holding the old key set.
 
 ## The people
 
-Four personas, seeded from [`src/fixtures/people.json`](./src/fixtures/people.json) the
+Four personas, seeded from [`fixtures/people.json`](./fixtures/people.json) the
 first time `idp.db` is opened, in one transaction, following the loan book's pattern
 (#29): a seed that fails leaves no schema, so the next boot retries instead of coming up
 green and empty. All four personas use the same checked-in password,
@@ -95,9 +107,9 @@ One by default, named `Arcade`, created on first boot if absent: confidential,
 cannot be pinned from env.
 
 ```sh
-bun run --cwd apps/idp oauth-client           # client ids and endpoints
-bun run --cwd apps/idp oauth-client --json    # the same, machine-readable
-bun run --cwd apps/idp oauth-client --rotate  # mint a new secret, same client id
+bun run oauth-client           # client ids and endpoints
+bun run oauth-client --json    # the same, machine-readable
+bun run oauth-client --rotate  # mint a new secret, same client id
 ```
 
 ### A second client, if the two Arcade registrations should not share one
@@ -125,7 +137,7 @@ rotating costs a human one field in one Arcade registration, and which one must 
 guess this script makes for them.
 
 ```sh
-bun run --cwd apps/idp oauth-client --client arcade-user-source --rotate
+bun run oauth-client --client arcade-user-source --rotate
 ```
 
 Dropping a key from `IDP_OAUTH_CLIENTS` deletes nothing. The row stays on the disk and
@@ -200,7 +212,7 @@ else, and the live `cg-idp` refused Arcade for it (spike #75, 2026-09-11T17:38Z)
 ```
 
 Nothing on the Arcade side removes those rows, so this service accepts the request as
-sent. The rule, in `src/index.ts`:
+sent. The rule, in `server.ts`:
 
 | The request carries | What happens |
 |---|---|
@@ -233,7 +245,7 @@ curl -s https://<idp-host>/health | jq -r '.oauth.duplicate_client_credentials'
 # accepted when the Authorization: Basic pair and the body client_id/client_secret pair are identical; refused invalid_request when they differ
 ```
 
-`test/dual-client-credentials.test.ts` measures every row of that table over HTTP,
+`app-test/identity/dual-client-credentials.test.ts` measures every row of that table over HTTP,
 including a field-for-field replay of Arcade's request as the dashboard stores it.
 
 ### When the token endpoint says no, it says why
@@ -345,7 +357,7 @@ second `authorization_code` exchange 290 ms later. The second hit came from neit
 nor the browser — it is Arcade's, and the standing decision of 2026-09-11 is that the
 Arcade provider configuration is never edited and **the IdP adapts**.
 
-So `src/replay-tolerance.ts` refuses that one revocation. **This is a deliberate deviation
+So `replay-tolerance.ts` refuses that one revocation. **This is a deliberate deviation
 from RFC 6749 §4.1.2**, which says an authorization server SHOULD revoke the tokens
 previously issued for a code it sees replayed. That advice assumes a replay is evidence of
 a leaked code; here it is a measured property of one relying party, arriving with the same
@@ -466,14 +478,14 @@ state** — users, credentials, sessions, tokens, consents — while leaving the
 row and the `jwks` signing keys alone:
 
 ```sh
-bun run --cwd apps/idp reset
+bun run identity:reset
 ```
 
 It prints the client id before and after and exits non-zero if they differ. The client
 row is written unowned (no `userId`), so deleting every user cannot cascade into it either;
 Better Auth's own create-client endpoints would have made a signed-in user the owner.
-`test/flow.test.ts` runs the reset against the live service and completes a full flow
-afterwards with the pre-reset credentials; `test/db.test.ts` holds the cascade line.
+`app-test/identity/flow.test.ts` runs the reset against the live service and completes a full flow
+afterwards with the pre-reset credentials; `app-test/identity/db.test.ts` holds the cascade line.
 
 Deleting the disk (or the whole database) *is* a rotation. Do that only when you intend to
 re-register in Arcade.
@@ -484,7 +496,7 @@ re-register in Arcade.
 curl -fsS -X POST https://<idp-host>/admin/reset -H "authorization: Bearer $RESET_TOKEN"
 ```
 
-Same code as the script — `src/reset.ts`, one implementation and two callers — and the
+Same code as the script — `reset.ts`, one implementation and two callers — and the
 same assertion, returned as a **500** with the old and new ids when it ever fires. It
 exists because a presenter between takes has no shell on the service, and because a
 script in a Render shell attaches to whichever instance Render picked while the endpoint
@@ -493,122 +505,74 @@ is served by the process that is actually answering requests.
 `RESET_TOKEN` unset means the route does not exist: 404, and `/health` reports
 `reset: "disabled"`, so the 404 has an explanation somebody can find. It is the same
 variable and the same rules `apps/hooks` and `apps/loan-app` use, and `bun run reset` at
-the repo root presents one bearer to all three (#23). `test/reset-endpoint.test.ts` holds
+the repo root presents one bearer to all three (#23). `app-test/identity/reset-endpoint.test.ts` holds
 the client id, the re-seeded people signing in again, idempotence and both refusals.
 
 ## Running it
 
 ```sh
-bun install                    # at the repo root — see below
-bun run dev:idp                # :8083
-curl localhost:8083/health
+bun install                         # at the repo root
+bun run dev                         # the app, with this module on the app's port
+curl localhost:3000/identity/health
+bun run identity                    # or this module alone, on PORT (scripts/identity.ts)
 ```
 
-Tests boot the service exactly as Render does (`bun src/index.ts`, env only) and drive the
-authorization-code flow over HTTP — authorize, login, consent, code, token, userinfo:
+Its tests are `app-test/identity/`. Most boot `scripts/identity.ts` exactly as `apps/idp`
+was booted (env only) and drive the authorization-code flow over HTTP — authorize, login,
+consent, code, token, userinfo; `app-test/identity/app-one-port.test.ts` does the same
+against the real app on its one port:
 
 ```sh
-bun test apps/idp
+bun test ./app-test/identity/
 ```
 
-`src/schema.sql` is generated from the installed Better Auth (`bun run --cwd apps/idp
-generate:schema`); `test/schema.test.ts` fails when it is stale.
+`schema.sql` is generated from the installed Better Auth (`bun run generate:identity-schema`);
+`app-test/identity/schema.test.ts` fails when it is stale.
 
 ## The schema on a disk that already exists
 
-`idp.db` sits on a Render disk, so every schema change after the first meets a database
-that predates it. The revision lives in `PRAGMA user_version`, the same shape #60 put into
-`apps/hooks` and `apps/loan-app`, and there are three paths:
+**Since #6, a fresh schema and no upgrade path.** Better Auth 1.7.5 drops `account.issuer`,
+which 1.7.2 declared `NOT NULL`, so a disk written by the 1.7.2 build holds a column this
+build never writes and fails at its first seed or reset. DESIGN.md → Services records the
+choice: the demo held Better Auth at 1.7.2 to avoid a migration on a live disk, and the
+template's `idp.db` starts fresh instead. `SCHEMA_VERSION` is 2, and there are three paths:
 
-- **Fresh database** — `seed()`, unchanged: the DDL, the fixture rows *and* the version
-  stamp in one transaction, so a half-failed seed leaves no tables at all rather than a
-  schema with no people.
-- **Existing database** — idempotent DDL, no inserts, plus the one change that DDL
-  replay cannot express (below). `src/schema.sql` stays byte-identical to what Better Auth
-  compiles (so `generate:check` compares like with like) and `idempotentSchema` derives
-  the `CREATE ... IF NOT EXISTS` form at runtime. It **throws** on a statement it cannot
-  rewrite rather than skipping it, because a statement that silently does not run looks
-  exactly like a schema that is already current.
-- **A database this build cannot read** — `user_version` greater than `SCHEMA_VERSION`
-  throws `SchemaTooNewError` from `openPeople`, before the port opens, naming the file.
+- **Fresh database** — `seed()`: the DDL, the fixture rows *and* the version stamp in one
+  transaction, so a half-failed seed leaves no tables at all rather than a schema with no
+  people. `schema.sql` stays byte-identical to what Better Auth compiles (so
+  `generate:check` compares like with like) and `idempotentSchema` derives the
+  `CREATE ... IF NOT EXISTS` form, **throwing** on a statement it cannot rewrite.
+- **A database this build wrote** — opened as it is, no DDL, no inserts.
+- **Any other version** — newer throws `SchemaTooNewError`, older (0 before #70, 1 from #70
+  to #6) throws `SchemaTooOldError`, both from `openPeople`, before anything is served,
+  naming the file and the way out: delete it and restart, which reseeds — and rotates the
+  OAuth client, so Arcade has to be re-registered.
 
-**The limit on the replay half:** it buys new tables and new indexes. An added column
-needs a guarded `ALTER TABLE ... ADD COLUMN` here, the way `apps/loan-app` does it, or a
-reset.
-
-Before #70 there was no upgrade path at all — `seed()` was the only thing that ran the
-DDL, and it ran only when the `user` table was missing (#69). The JWT plugin adds the
-`jwks` table, so on the live disk the service would have come up green and failed on the
-first ID token.
-
-### The `user.email` collation, which replay cannot fix
-
-Version 1 also **rebuilds the `user` table**, so `email` is `COLLATE NOCASE`, and
-lowercases every address already stored.
-
-#58 made the column case-insensitive, but in `schema.sql` — and only a fresh seed ever
-runs that. An existing `idp.db` keeps the case-sensitive column it was created with, so a
-persona seeded as `Alice@…` still cannot log in, and the login page still reports it
-as "That email and password did not match". SQLite cannot change a column's collation in
-place, and the cheaper-looking remedy does not work:
-
-```
-Better Auth's lookup, measured:
-  select "primary".* from (select * from "user" where "user"."email" = ?) as "primary"
-```
-
-A bare `=` with **no `COLLATE` clause**, so SQLite takes the collation from the column's
-own declaration. Adding a `CREATE UNIQUE INDEX ... COLLATE NOCASE` therefore changes
-nothing about what that comparison means — measured on a pre-#58 schema, the indexed
-database still answers `401` to the correct password, and only rebuilding the column
-answers `200`. An index here would have been a control that silently does nothing.
-
-So version 1 follows SQLite's documented procedure: foreign keys off, new table under a
-scratch name, copy with `lower(email)`, drop, rename, `PRAGMA foreign_key_check`, foreign
-keys on. The `session`, `account` and OAuth rows that reference `user` survive it — with
-the constraints live, dropping `user` would cascade every one of them into nothing.
-
-If two people differ only by the case of their address they would collapse into one row,
-so the boot **refuses and rolls back** rather than picking a winner, and prints the query
-that finds them.
-
-`test/schema-upgrade.test.ts` holds all of it. Its fixture is
-[`test/fixtures/schema-pre-3d2dd9d.sql`](./test/fixtures/schema-pre-3d2dd9d.sql): the real
-pre-#58 `src/schema.sql`, **checked in and frozen**, with its provenance — the commit it
-was taken from, the `git show` that captured it, and why it must never be regenerated — in
-the file's own header.
-
-It is checked in rather than read out of git at test time because
-`actions/checkout@v4` fetches a single commit, so a test that resolves `3d2dd9d^` passes
-on a developer's clone and fails in CI — which is exactly what it did. A test must not
-depend on repository history.
-
-Frozen rather than transcribed, so it cannot drift into agreeing with the code it tests.
-Two assertions hold that: the SQL payload (every line that is not a `--` comment and not
-blank, which is all SQLite reads) is pinned to the SHA-256 of the same payload taken from
-the Git object, and the table set it must and must not contain is spelled out so a digest
-mismatch says what moved. Editing the header is free; editing a line of SQL is not.
+The demo's upgrade path — replaying the DDL onto a pre-#70 disk and rebuilding `user` with
+`COLLATE NOCASE` for a pre-#58 one (#69, #58) — went with #6, and so did its tests and the
+frozen pre-`3d2dd9d` fixture they read. `app-test/identity/schema-upgrade.test.ts` holds what
+is still true: the replay is idempotent, and every other version is refused.
 
 ### A workspace member, and still separable
 
-Until #187 this directory sat outside the root workspace with its own `bun.lock`, because
-Better Auth 1.7 requires zod 4 and the root manifest pinned every workspace to zod 3. The
-root now pins zod 4, so the IdP installs from the root lockfile like everything else and a
-fresh clone needs one `bun install`.
+It is a workspace member for its manifest, `package.json` here, which declares Better Auth
+and carries `cg.external` for `packages/policy-schema`'s sweep, as `lib/loans` carries
+`cg.governed`. It declares no `@cg/*` dependency, and knows no loan or policy vocabulary:
+`app-test/identity/knows-people-not-loans.test.ts` checks both.
 
-What membership does not change is the boundary. It stands in for a system outside the
-template, so a forker deletes it without touching anything else: it declares no `@cg/*`
-dependency, and no other workspace declares or imports it.
-`test/knows-people-not-loans.test.ts` checks both, where the old workspace exclusion used
-to make the second one true by construction.
+The other half of that test, "nothing else in the template depends on it", did not survive
+#6: the app mounts the provider, by DESIGN.md's decision. What replaces it is narrower and
+is what the fold needs — `only-identity-mints.test.ts`: only the identity routes, the app's
+`/health` and `instrumentation.ts` reach the provider, through `instance.ts`, and nothing
+outside the identity module imports Better Auth, its signing keys or its issuance.
 
 ## Environment
 
 | Variable | Purpose |
 |---|---|
-| `PORT` | Render injects it. Locally `8083`. |
+| `PORT` | The app's. `scripts/identity.ts` binds it too (`0` for whatever the OS gives). |
 | `IDP_DB_PATH` | `/data/idp.db` on Render, `./idp.db` locally. Parent directory is created. |
 | `BETTER_AUTH_SECRET` | Signs sessions and the OAuth query, and encrypts the ID-token signing key at rest. Generated by Render. Required in production; a fixed dev value otherwise. Changing it on a pre-#70 disk is what turns the client-secret migration into a rotation. |
-| `IDP_PUBLIC_URL` | Public origin and OAuth issuer. Falls back to Render's `RENDER_EXTERNAL_URL`, then `http://localhost:PORT`. |
+| `APP_PUBLIC_HOST` | The app's public host; the issuer is it with its scheme — http for localhost and 127.0.0.1, https otherwise. Falls back to `localhost:PORT`. It replaced `IDP_PUBLIC_URL` on #6. |
 | `IDP_OAUTH_REDIRECT_URIS` | Comma-separated. Defaults to Arcade Cloud's callback. |
 | `PERSONA_LOAN_OFFICER_EMAIL`, `PERSONA_CREDIT_ANALYST_EMAIL`, `PERSONA_VP_CREDIT_EMAIL`, `PERSONA_CHIEF_CREDIT_OFFICER_EMAIL` | The four role addresses, read at first seed. Lowercased before they are stored; case does not have to match Arcade. |
