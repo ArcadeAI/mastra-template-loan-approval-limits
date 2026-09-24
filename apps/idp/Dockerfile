@@ -10,7 +10,8 @@ WORKDIR /app
 # Manifests first, so a source-only change reuses the install layer.
 COPY package.json bun.lock ./
 COPY apps/idp/package.json ./apps/idp/
-COPY apps/loan-app/package.json ./apps/loan-app/
+# The loan module, a workspace member at lib/loans since #5.
+COPY lib/loans/package.json ./lib/loans/
 COPY packages/governance-core/package.json ./packages/governance-core/
 COPY packages/policy-schema/package.json ./packages/policy-schema/
 
