@@ -56,6 +56,15 @@ jobs:
         with:
           chrome-version: stable
 
+      # Mastra Studio runs under Node, not Bun, and `mastra` and `@mastra/core`
+      # need Node 22.13 or later. `app-test/studio-entry.test.ts` imports the
+      # Studio entry with `node` and `app-test/studio-dev-server.test.ts` boots
+      # `mastra dev`, so the Node on PATH is pinned here rather than left to
+      # whatever the runner image ships (#8).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Test
         run: bun test
         env:

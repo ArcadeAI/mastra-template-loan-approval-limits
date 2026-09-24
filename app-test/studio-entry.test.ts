@@ -416,6 +416,9 @@ describe("the entry Studio loads under Node", () => {
     const node = Bun.spawn(
       [
         "node",
+        // Stated, because type stripping is only on by default from Node 22.18,
+        // and Mastra's floor is 22.13.
+        "--experimental-strip-types",
         "--input-type=module",
         "-e",
         `const { mastra } = await import(${JSON.stringify(ENTRY)});` +
