@@ -9,8 +9,10 @@ import { readPersonaEmailOverrides } from "../../../packages/policy-schema/contr
 export const DEFAULT_ARCADE_REDIRECT_URI = "https://cloud.arcade.dev/api/v1/oauth/callback";
 
 /**
- * A fixed secret for local runs only. Refused under NODE_ENV=production —
- * Render generates a real one (`generateValue: true` in render.yaml).
+ * A fixed secret for local runs only, and published in this file. Refused
+ * under NODE_ENV=production (Render generates a real one, `generateValue: true`
+ * in render.yaml), and since #9 refused whenever the issuer is not this
+ * machine, whatever NODE_ENV says: see {@link publicHostWithoutSecret}.
  */
 const DEV_SECRET = "cg-idp-dev-secret-not-for-production-0000000000";
 
@@ -161,6 +163,10 @@ export function readConfig(env: Record<string, string | undefined> = process.env
   // a localhost or 127.0.0.1 host, https for anything else, so a local run
   // needs no tunnel. Unset, it is the app's own port on localhost.
   const baseURL = issuerOf(env);
+  if (!secret) {
+    const refusal = publicHostWithoutSecret(baseURL);
+    if (refusal) throw new Error(refusal);
+  }
 
   const redirectUris = splitList(env.IDP_OAUTH_REDIRECT_URIS ?? DEFAULT_ARCADE_REDIRECT_URI);
   const clients = readClients(env, redirectUris);
@@ -175,6 +181,28 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     clients,
     resetToken: env.RESET_TOKEN?.trim() ?? "",
   };
+}
+
+/**
+ * Why a blank `BETTER_AUTH_SECRET` is refused for this issuer, or `null` (#9).
+ *
+ * The development secret is published above. It signs sessions and encrypts
+ * the ID-token signing key, so on an issuer anyone can reach — the ngrok host
+ * `bun run dev` is documented behind — anyone could forge a session or a
+ * token. Only localhost and 127.0.0.1 keep the zero-config fallback, which is
+ * what a fresh clone boots on. The refusal makes the provider fail closed
+ * (`instance.ts`): no sign-in, no approval, no hop-2 exchange, and `/health`
+ * says why in these words.
+ */
+export function publicHostWithoutSecret(baseURL: string): string | null {
+  const host = new URL(baseURL).hostname;
+  if (host === "localhost" || host === "127.0.0.1") return null;
+  return (
+    `BETTER_AUTH_SECRET is not set and the issuer is ${baseURL}, which is not this machine: ` +
+    `the development secret is published in this repository, so the identity module will not sign ` +
+    `sessions or tokens with it. Run \`bun run setup-arcade ${host}\`, which fills it in, or set ` +
+    `BETTER_AUTH_SECRET in .env (openssl rand -hex 32), and restart.`
+  );
 }
 
 export function usingDevSecret(config: IdpConfig): boolean {
