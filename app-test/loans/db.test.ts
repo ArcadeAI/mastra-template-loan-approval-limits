@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 
 import { Database } from "bun:sqlite";
 
-import type { LoanSeed } from "../src/db.ts";
+import type { LoanSeed } from "../../lib/loans/db.ts";
 import {
   countLoans,
   getLoan,
@@ -16,7 +16,7 @@ import {
   recordDecision,
   searchLoans,
   seed,
-} from "../src/db.ts";
+} from "../../lib/loans/db.ts";
 
 const ONE_LOAN: LoanSeed = {
   loan_id: "LN-9001",

@@ -1,7 +1,7 @@
 /**
- * The HTTP surface, exercised over the wire against the service booted the
- * way Render boots it — `bun src/index.ts`, env only — not by calling handlers
- * in-process.
+ * The HTTP surface, exercised over the wire against the loan module on a
+ * socket of its own — `bun scripts/loans.ts`, env only, laid out under `/bank`
+ * exactly as the app serves it (#5) — not by calling handlers in-process.
  *
  * Tokens are validated against a stand-in identity provider that this file
  * runs itself: it serves `/oauth2/userinfo` and knows two tokens. The real one
@@ -14,7 +14,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { LoanRecord, LoanSummary } from "../src/db.ts";
+import type { LoanRecord, LoanSummary } from "../../lib/loans/db.ts";
 
 /**
  * `Response.json()` is `Promise<unknown>`, so every read off a body below has
@@ -104,9 +104,10 @@ beforeAll(async () => {
   });
 
   const port = freePort();
-  baseUrl = `http://127.0.0.1:${port}`;
+  // The runner lays the module out the way the app does, under /bank (#5).
+  baseUrl = `http://127.0.0.1:${port}/bank`;
 
-  child = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "index.ts")], {
+  child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
     env: {
       ...process.env,
       PORT: String(port),

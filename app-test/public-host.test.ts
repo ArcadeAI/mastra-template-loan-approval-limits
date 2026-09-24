@@ -13,7 +13,7 @@
  * DevTools console, where nobody running the demo is looking.
  *
  * The table below is shared, verbatim, with
- * `apps/loan-app/test/public-host.test.ts` and `app-test/control-plane/public-host.test.ts`
+ * `app-test/loans/public-host.test.ts` and `app-test/control-plane/public-host.test.ts`
  * — the three copies of the check are written out rather than imported, so each
  * one is pinned by its own suite.
  */
@@ -136,7 +136,7 @@ test("the panel's stream source refuses a bare service name in either mode", () 
 
 /**
  * The three copies of the check are written out rather than shared, because
- * `apps/loan-app` depends on nothing outside itself on purpose and a shared
+ * the loan module (`lib/loans/`) depends on nothing outside itself on purpose and a shared
  * module would be the dependency edge it must not have. The cost of a copy is
  * drift, and drift in *this* code is a control that silently permits — so the
  * marked region is compared byte for byte here.
@@ -168,5 +168,8 @@ test("the three copies of the check are byte-identical", () => {
   const web = region("lib", "public-host.ts");
 
   expect(region("lib", "control-plane", "public-host.ts")).toBe(web);
-  expect(region("apps", "loan-app", "src", "public-host.ts")).toBe(web);
+  // The loan module's copy, in `lib/loans/` since #5. Still a copy rather than
+  // an import of `lib/public-host.ts`: the module depends on nothing else in
+  // the app, because it is the part a forker replaces.
+  expect(region("lib", "loans", "public-host.ts")).toBe(web);
 });

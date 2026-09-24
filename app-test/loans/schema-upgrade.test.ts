@@ -22,7 +22,7 @@ import {
   recordDecision,
   searchLoans,
   seed,
-} from "../src/db.ts";
+} from "../../lib/loans/db.ts";
 
 /** The schema exactly as #30 shipped it: no `decided_by`. */
 const SCHEMA_AT_30 = `

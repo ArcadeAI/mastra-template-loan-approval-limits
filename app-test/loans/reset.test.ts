@@ -1,6 +1,7 @@
 /**
- * `POST /admin/reset`, over the wire, against the service booted the way
- * Render boots it — `bun src/index.ts`, env only.
+ * `POST /admin/reset`, over the wire, against the loan module on a socket of
+ * its own — `bun scripts/loans.ts`, env only, under `/bank` as the app serves
+ * it (#5).
  *
  * The claim under test is the one #23 needs: after a take of the demo has
  * approved `LN-2291`, one call puts the book back to the rows the fixture
@@ -18,7 +19,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { LoanRecord } from "../src/db.ts";
+import type { LoanRecord } from "../../lib/loans/db.ts";
 
 const RESET_TOKEN = "loan-app-reset-token-for-tests";
 const DANA = "alice@example.test";
@@ -57,10 +58,11 @@ const started: Instance[] = [];
 
 async function boot(env: Record<string, string>): Promise<Instance> {
   const port = freePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
+  // The runner lays the module out the way the app does, under /bank (#5).
+  const baseUrl = `http://127.0.0.1:${port}/bank`;
   const dbPath = join(tmpdir(), `cg-loan-app-${crypto.randomUUID()}`, "loans.db");
 
-  const child = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "index.ts")], {
+  const child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
     env: {
       ...process.env,
       PORT: String(port),
