@@ -102,6 +102,9 @@ WEB=$((BASE + 0)); HOOKS=$((BASE + 1)); LOAN=$((BASE + 2)); IDP=$((BASE + 3))
 # directory, so each service gets its own file with its own PORT. Verified:
 # `PORT` in `apps/hooks/.env.local` is what the hooks service binds.
 #
+# The web app is the exception since #3: it lives at the repo root, so its
+# PORT goes in the root file below rather than in a file of its own.
+#
 # A shell-level `PORT="${CG_PORT_HOOKS:-8081}" bun run ...` does NOT work and
 # was tried first: Bun injects .env into the script's process, not into the
 # shell that expands `${...}`, so the default always won.
@@ -129,17 +132,27 @@ write_service_env() {  # $1 = app dir, $2 = its port
   } > "$dir/.env.local"
 }
 
-write_service_env web "$WEB"
 write_service_env hooks "$HOOKS"
 write_service_env loan-app "$LOAN"
 write_service_env idp "$IDP"
 
-# The root file carries no bare PORT — anything run from the repo root would
-# inherit it. It documents the block and gives root-level `bun test` the
-# cross-service hosts.
+# The root file documents the block, gives root-level `bun test` the
+# cross-service hosts, and since #3 carries the app's PORT, because the app is
+# the root and `bun scripts/next.ts dev` loads this file.
+#
+# That PORT does not reach the other three services. `bun run dev:hooks` loads
+# this file into the Bun process running the script, not into the shell it
+# spawns, so `bun run --cwd apps/hooks dev` starts without a PORT in its
+# environment and reads apps/hooks/.env.local's. Measured on #3 with a root
+# `.env.local` and a child directory holding a different PORT: the child
+# printed its own. (It is the same Bun behaviour the note above found the hard
+# way.) `bun test` loads neither file: Bun skips `.env.local` under
+# `NODE_ENV=test`.
 {
   echo "# Written by scripts/orca-setup.sh. Do not edit; setup rewrites it."
   echo "# This worktree owns ports $BASE-$((BASE + BLOCK - 1))."
+  echo "# PORT is the app's, which lives at the root; each apps/<svc> has its own."
+  echo "PORT=$WEB"
   echo "CG_PORT_BASE=$BASE"
   echo "CG_PORT_WEB=$WEB"
   echo "CG_PORT_HOOKS=$HOOKS"

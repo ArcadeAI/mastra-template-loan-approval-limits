@@ -390,10 +390,10 @@ describe("the panel's Reset button leaves the IdP alone too", () => {
     expect((await approveAsArcade()).status).toBe(200);
     const before = (await (await fetch(`${idp.baseUrl}/health`)).json()) as { people: number };
 
-    // Exactly the request `apps/web/lib/governance/control-plane.ts`'s
+    // Exactly the request `lib/governance/control-plane.ts`'s
     // `runReset` sends for the `demo` mode — one address, one body. Posted
-    // here rather than imported because that module is Next-side code and the
-    // root tsconfig has no DOM lib for it; `apps/web/test/control-plane-route.test.ts`
+    // here rather than imported because that module is Next-side code, and
+    // until #3 the root tsconfig had no DOM lib for it; `app-test/control-plane-route.test.ts`
     // holds the other half, that neither mode has any address but cg-hooks.
     const pressed = await fetch(`${hooks.baseUrl}/admin/reset`, {
       method: "POST",

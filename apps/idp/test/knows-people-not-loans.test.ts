@@ -72,6 +72,9 @@ describe("apps/idp knows people, not loans", () => {
     for await (const path of new Glob("{apps,packages}/*/package.json").scan(REPO)) {
       if (path !== "apps/idp/package.json") manifests.push(path);
     }
+    // The web app's manifest is the root one since #3, when it moved out of
+    // `apps/web` to the repo root.
+    manifests.push("package.json");
     // Vacuous if the scan found nothing to check.
     expect(manifests.length).toBeGreaterThan(0);
 
@@ -85,10 +88,14 @@ describe("apps/idp knows people, not loans", () => {
     const importing = [];
     let scanned = 0;
     const specifier = new RegExp(`from\\s+["'](${name}(/[^"']*)?|[^"']*apps/idp/[^"']*|(\\.\\./)+idp/[^"']*)["']`);
-    for await (const path of new Glob("{apps,packages}/*/{src,lib,app,scripts}/**/*.{ts,tsx}").scan(REPO)) {
-      if (path.startsWith("apps/idp/")) continue;
-      scanned += 1;
-      if (specifier.test(stripComments(await Bun.file(join(REPO, path)).text()))) importing.push(path);
+    // The second glob is the web app at the repo root (#3), the same three
+    // directories the first one read under `apps/web`.
+    for (const pattern of ["{apps,packages}/*/{src,lib,app,scripts}/**/*.{ts,tsx}", "{lib,app,scripts}/**/*.{ts,tsx}"]) {
+      for await (const path of new Glob(pattern).scan(REPO)) {
+        if (path.startsWith("apps/idp/")) continue;
+        scanned += 1;
+        if (specifier.test(stripComments(await Bun.file(join(REPO, path)).text()))) importing.push(path);
+      }
     }
     expect(scanned).toBeGreaterThan(0);
     expect(importing).toEqual([]);

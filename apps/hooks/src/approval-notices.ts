@@ -24,7 +24,7 @@
  * is disconnected at the moment of the decision does not get it on reconnect.
  * That is a real gap and it is closed on the client side, which re-reads
  * `GET /approvals/{id}` when it reconnects rather than assuming the socket was
- * up (see `apps/web/lib/governance/approval-stream.ts`).
+ * up (see `lib/governance/approval-stream.ts`).
  *
  * **It is published strictly after the transaction commits.** Same seam as
  * `record()`'s, for a sharper reason: the transaction that records `approved`

@@ -54,15 +54,21 @@ function readJson(path: string): Manifest {
   return JSON.parse(readFileSync(path, "utf8")) as Manifest;
 }
 
-/** Every workspace manifest in the repo, keyed by directory. */
+/**
+ * Every workspace manifest in the repo, keyed by directory — and the root
+ * one, which is the web app's since #3 moved it out of `apps/web`.
+ */
 function workspaces(): Array<{ dir: string; manifest: Manifest }> {
-  return ["apps", "packages"].flatMap((group) =>
-    readdirSync(join(REPO_ROOT, group))
-      .map((entry) => join(REPO_ROOT, group, entry))
-      .filter((dir) => statSync(dir).isDirectory())
-      .filter((dir) => existsSync(join(dir, "package.json")))
-      .map((dir) => ({ dir, manifest: readJson(join(dir, "package.json")) })),
-  );
+  return [
+    { dir: REPO_ROOT, manifest: readJson(join(REPO_ROOT, "package.json")) },
+    ...["apps", "packages"].flatMap((group) =>
+      readdirSync(join(REPO_ROOT, group))
+        .map((entry) => join(REPO_ROOT, group, entry))
+        .filter((dir) => statSync(dir).isDirectory())
+        .filter((dir) => existsSync(join(dir, "package.json")))
+        .map((dir) => ({ dir, manifest: readJson(join(dir, "package.json")) })),
+    ),
+  ];
 }
 
 describe("resolvable by package name", () => {

@@ -268,7 +268,7 @@ services:
     runtime: docker
     plan: starter
     region: oregon
-    dockerfilePath: ./apps/web/Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
     autoDeployTrigger: commit
@@ -463,7 +463,7 @@ services:
       # (the host part of the URL shown there). This one is the worst of the
       # three to get wrong: the value reaches the browser, so a bare service
       # name fails in a visitor's DevTools rather than in a log.
-      # `apps/web/lib/public-host.ts` refuses one before that, and with
+      # `lib/public-host.ts` refuses one before that, and with
       # GOVERNANCE_STREAM=hooks above, leaving it blank is the error state
       # rather than a quiet replay.
       - key: HOOKS_PUBLIC_HOST

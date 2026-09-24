@@ -96,7 +96,7 @@ if (import.meta.main) {
   } catch (cause) {
     console.error(`[dev-idp] ${cause instanceof Error ? cause.message : String(cause)}`);
     // 78 is sysexits' EX_CONFIG: the environment is wrong, not the invocation.
-    // `apps/web/scripts/next.ts` exits 64, EX_USAGE, for the other case.
+    // `scripts/next.ts` exits 64, EX_USAGE, for the other case.
     process.exit(78);
   }
 

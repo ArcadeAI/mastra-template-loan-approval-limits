@@ -152,7 +152,7 @@ this service exists to disprove, and it reports `disarmed` with its own warning 
 looking like a clean payload.
 
 Disarming leaves act 3's field redaction alone, so the control run is about act 4 and nothing
-else. `apps/web/test/act4-control-run.test.ts` runs the beat against both planes and asserts
+else. `app-test/act4-control-run.test.ts` runs the beat against both planes and asserts
 the difference in the bytes sent to the model; with `ANTHROPIC_API_KEY` set it also measures
 the difference in behaviour.
 
@@ -419,7 +419,7 @@ data: {"id":"evt_4k7xq2m9hz","ts":"2026-09-09T18:22:41.006Z","hook":"pre",…}
 `data:` is one `GovernanceEvent` — the audit row, not a summary of it, so the panel renders
 the audit log rather than a prettier parallel story. `id:` is the audit row's id, which is
 also the correlation token from #6, which is what makes a resume possible. The client is
-`apps/web/lib/governance/subscribe.ts` (#21); it was written to this shape before the server
+`lib/governance/subscribe.ts` (#21); it was written to this shape before the server
 existed, and `bun run --cwd apps/hooks interop:21` runs *that module, unmodified* against a
 real server rather than leaving two implementations of a format to agree on paper.
 

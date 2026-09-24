@@ -36,6 +36,16 @@ NOT_WORTH_COPYING = shutil.ignore_patterns(
 )
 
 
+#: The web app's own directories. It lives at the repo root since #3, so a
+#: sweep of `apps/` and `packages/` alone would no longer read it.
+APP_DIRS = ("app", "components", "lib", "scripts", "app-test")
+
+
+def _typescript_trees(root: Path) -> list[Path]:
+    """Every directory holding a service's or package's TypeScript."""
+    return [root / "apps", root / "packages", *(root / name for name in APP_DIRS)]
+
+
 def _sources(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
     skip = {"node_modules", ".venv", "__pycache__", ".next", "dist", ".git"}
     return [
@@ -54,7 +64,7 @@ class TestNothingReachesIn:
         reaches_in = re.compile(r"""(?:from|import|require\()\s*['"][^'"]*tools/approvals""")
         offenders = [
             str(path.relative_to(REPO_ROOT))
-            for directory in (REPO_ROOT / "apps", REPO_ROOT / "packages")
+            for directory in _typescript_trees(REPO_ROOT)
             for path in _sources(directory, (".ts", ".tsx"))
             if reaches_in.search(path.read_text(encoding="utf-8"))
         ]
@@ -174,7 +184,7 @@ class TestDeletingItActuallyWorks:
             forked = self._repo_without_the_toolkit(Path(tmp) / "repo")
             offenders = [
                 str(path.relative_to(forked))
-                for directory in (forked / "apps", forked / "packages")
+                for directory in _typescript_trees(forked)
                 for path in _sources(directory, (".ts", ".tsx"))
                 if reaches_in.search(path.read_text(encoding="utf-8"))
             ]
