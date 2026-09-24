@@ -50,11 +50,10 @@ const GOOD_SECRET = "3f9a1c7e5b2d84069a1fe73c05b8d42e6c917ab3fd50e28c47196baf3d0
 
 /** Everything a cg-web needs. Individual tests take keys away. */
 const COMPLETE = {
-  IDP_ISSUER: "https://cg-idp-or5b.onrender.com",
+  APP_PUBLIC_HOST: "cg-web-sa31.onrender.com",
   IDP_CLIENT_ID: "client-c",
   IDP_CLIENT_SECRET: "client-c-secret",
   SESSION_SECRET: GOOD_SECRET,
-  PUBLIC_URL: "https://cg-web-sa31.onrender.com",
   ARCADE_GATEWAY_ID: "cg-demo-us",
   ARCADE_API_KEY: "arcade-key",
   // The agent, since #14. In this list for the same reason as the rest: a
@@ -116,9 +115,11 @@ describe("the banner, with ARCADE_GATEWAY_ID absent", () => {
     // `gatewayProblems` is a superset of `signinProblems` by construction.
     // Printing five identical sentences under two headings is how a banner
     // becomes something people stop reading.
-    const problems = configurationProblems(readIdentitySurface({ PUBLIC_URL: COMPLETE.PUBLIC_URL }));
-    expect(problems.signin).toContain("IDP_ISSUER is not set");
-    expect(problems.gateway).not.toContain("IDP_ISSUER is not set");
+    // `IDP_CLIENT_ID` since #6, when the issuer became the app's own origin
+    // and stopped being a variable that could be unset.
+    const problems = configurationProblems(readIdentitySurface({ APP_PUBLIC_HOST: COMPLETE.APP_PUBLIC_HOST }));
+    expect(problems.signin).toContain("IDP_CLIENT_ID is not set");
+    expect(problems.gateway).not.toContain("IDP_CLIENT_ID is not set");
     expect(problems.gateway).toContain("ARCADE_GATEWAY_ID is not set");
   });
 });
@@ -229,7 +230,7 @@ describe("the banner, with ANTHROPIC_API_KEY absent", () => {
   test("it does not repeat the gateway's problems under the agent heading", () => {
     // `agentProblems` is a superset of `gatewayProblems` by construction, the
     // same way `gatewayProblems` is a superset of `signinProblems`.
-    const problems = configurationProblems(readIdentitySurface({ PUBLIC_URL: COMPLETE.PUBLIC_URL }));
+    const problems = configurationProblems(readIdentitySurface({ APP_PUBLIC_HOST: COMPLETE.APP_PUBLIC_HOST }));
     expect(problems.gateway).toContain("ARCADE_GATEWAY_ID is not set");
     expect(problems.agent).not.toContain("ARCADE_GATEWAY_ID is not set");
     expect(problems.agent).toContain("ANTHROPIC_API_KEY is not set");

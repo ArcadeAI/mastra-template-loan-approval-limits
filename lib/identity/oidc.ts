@@ -1,10 +1,11 @@
 /**
- * Sign-in against `apps/idp` as **client C**.
+ * Sign-in against the app's own Better Auth as **client C**.
  *
- * `DESIGN.md` → **Identity**: every persona is a real person in `apps/idp` and
- * `apps/web` is a real sign-in against it, under its own OAuth client. Client C
- * is separate from the two registrations Arcade holds (the User Source's and
- * the `cg-idp` auth provider's) — spike #75 settled that one client per relying
+ * `DESIGN.md` → **Identity**: every persona is a real person in the app's own
+ * Better Auth (`lib/identity/provider/`, `apps/idp` until #6) and the web UI is
+ * a real sign-in against it, under its own OAuth client. Client C is separate
+ * from the two registrations Arcade holds (the User Source's and the
+ * `app-identity` auth provider's) — spike #75 settled that one client per relying
  * party is the shape, after a shared one left hop 2 failing at the token
  * endpoint.
  *
@@ -14,7 +15,16 @@
  * bank's own screens read the loan module with it as the signed-in person.
  * `lib/identity/session.ts` → `IdpToken` has the argument and the measurement;
  * this module's job is only to obtain and renew one.
+ *
+ * **Every server-side call here is in-process since #6.** The provider is part
+ * of the app, and its issuer is `APP_PUBLIC_HOST`, the tunnel: a `fetch` to it
+ * would carry the app's own traffic out through ngrok and back in (the finding
+ * from #4). So the token exchange, the refresh, userinfo and the auth-method
+ * lookup are `Request`s handed to this process's provider through
+ * `identityFetch` (`link.ts`), and never touch the network. Only
+ * `authorizeUrl` names the public issuer, because a browser follows it.
  */
+import { identityFetch } from "./link.ts";
 
 /** What `/oauth2/userinfo` answers with. `email` is the only field this service needs. */
 export interface Userinfo {
@@ -72,11 +82,12 @@ export function authorizeUrl(request: AuthorizeRequest): string {
  * in both directions inside one afternoon (#61, then spike #75's verifier), and
  * the failure mode is the expensive kind: a relying party that looks correctly
  * configured, fails at a step no hook observes, and gets blamed on the other
- * end. `apps/idp` publishes the method per client since #79, so the lookup is
- * by client id with the top-level field as the fallback.
+ * end. The provider publishes the method per client since #79, at
+ * `/identity/health` since #6, so the lookup is by client id with the
+ * top-level field as the fallback.
  */
 async function advertisedAuthMethod(issuer: string, clientId: string): Promise<string | undefined> {
-  const health = (await fetch(`${issuer}/health`)
+  const health = (await identityFetch(new Request(`${issuer}/identity/health`))
     .then((response) => (response.ok ? response.json() : null))
     .catch(() => null)) as
     | {
@@ -164,11 +175,13 @@ async function tokenRequest(
       form.client_secret = options.clientSecret;
     }
 
-    const response = await fetch(`${options.issuer}/oauth2/token`, {
-      method: "POST",
-      headers,
-      body: new URLSearchParams(form).toString(),
-    });
+    const response = await identityFetch(
+      new Request(`${options.issuer}/oauth2/token`, {
+        method: "POST",
+        headers,
+        body: new URLSearchParams(form).toString(),
+      }),
+    );
     const body = await response.text();
     if (response.ok) return { ok: true, token: JSON.parse(body) as TokenSet };
     last = { status: response.status, body };
@@ -221,9 +234,9 @@ export type UserinfoResult =
 
 /** The signed-in person's email, lowercase, or the reason there is none. */
 export async function fetchUserinfo(issuer: string, accessToken: string): Promise<UserinfoResult> {
-  const response = await fetch(`${issuer}/oauth2/userinfo`, {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
+  const response = await identityFetch(
+    new Request(`${issuer}/oauth2/userinfo`, { headers: { authorization: `Bearer ${accessToken}` } }),
+  );
   const body = await response.text();
   if (!response.ok) return { ok: false, failure: "request-failed", status: response.status, body };
 

@@ -1,13 +1,16 @@
 /**
- * `bun run reset` — the single command, end to end against all three real
- * services.
+ * `bun run reset` — the single command, end to end against the real app and
+ * all three of its databases.
  *
- * Each service booted the way Render boots it (`bun src/index.ts`, env only),
- * each on a port the OS handed out, each with its own database in a temporary
- * directory. The command runs as a **subprocess**, exactly as a presenter runs
- * it between takes, and everything is then read back over the services' own
- * HTTP surfaces. Nothing here opens a `.db` file: a test that read the disk
- * could pass against a service that never noticed the rows moved.
+ * The app booted the way a presenter runs it (`test/app.ts`), on a port the OS
+ * handed out, with its own `governance.db`, `loans.db` and `idp.db` in a
+ * temporary directory. Until #6 this was three services, each on its own port;
+ * the identity provider was the last to fold in, and the command now resets
+ * the three modules at one address. The command runs as a **subprocess**,
+ * exactly as a presenter runs it between takes, and everything is then read
+ * back over the modules' own HTTP surfaces. Nothing here opens a `.db` file: a
+ * test that read the disk could pass against a module that never noticed the
+ * rows moved.
  *
  * Since #123 the command has two scopes, and this file drives whichever one
  * the claim is about: `--hard` where the assertion is about all three
@@ -26,29 +29,23 @@
  *      prove that is a failure rather than a green tick.
  *
  * The loan module validates bearer tokens against an identity provider, and
- * the one it is pointed at here is a stand-in serving `/oauth2/userinfo` and
- * nothing else. The real `apps/idp` boots too — it has its own reset to run —
- * but joining the two would mean walking a whole authorize flow to read one
- * loan, which is `apps/idp/test/flow.test.ts`'s job and not this file's.
+ * the one it is pointed at here (`IDENTITY_HOST`) is a stand-in serving
+ * `/oauth2/userinfo` and nothing else. The app's own provider has its own
+ * reset to run, but joining the two would mean walking a whole authorize flow
+ * to read one loan, which is `app-test/identity/flow.test.ts`'s job and
+ * `test/reset-grants.test.ts`'s, not this file's.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { Server, Subprocess } from "bun";
-import { mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import type { Server } from "bun";
 import { join } from "node:path";
+
+import { bootApp, freePort, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const RESET_TOKEN = "root-reset-token-for-tests";
 const HOOK_SECRET = "root-reset-hook-secret-for-tests";
 const DANA = "alice@example.test";
 const OVER_LIMIT_LOAN = "LN-2291";
-
-interface Instance {
-  child: Subprocess;
-  host: string;
-  baseUrl: string;
-  dir: string;
-}
 
 interface LoanBody {
   loan_id: string;
@@ -74,83 +71,13 @@ interface LoanHealth {
   loans: number;
 }
 
-/** A port the OS says is free, rather than a guess. `conftest.py::_free_port`. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
-const started: Instance[] = [];
-
-/**
- * `mount` is the path the instance serves under: empty for the services, and
- * `/bank` for the loan module since #5, whose runner lays it out as the app
- * does. `host` stays the bare address, because that is what the reset command
- * is handed; `baseUrl` carries the mount, so reads below use the same paths.
- */
-async function boot(
-  name: string,
-  entry: string,
-  env: Record<string, string>,
-  mount = "",
-): Promise<Instance> {
-  const port = freePort();
-  const host = `127.0.0.1:${port}`;
-  const baseUrl = `http://${host}${mount}`;
-  const dir = join(tmpdir(), `cg-reset-${name}-${crypto.randomUUID()}`);
-  mkdirSync(dir, { recursive: true });
-
-  // Anything the developer's own shell carries for these services is
-  // deliberately dropped: a PERSONA_* or an IDP_* from a local run would make
-  // this test about their environment.
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) =>
-        value !== undefined &&
-        !key.startsWith("PERSONA_") &&
-        !key.startsWith("IDP_") &&
-        !key.endsWith("_PUBLIC_HOST") &&
-        key !== "RESET_TOKEN",
-    ),
-  ) as Record<string, string>;
-
-  const child = Bun.spawn(["bun", join(ROOT, entry)], {
-    env: { ...inherited, PORT: String(port), ...env },
-    stdout: Bun.file(join(dir, "stdout.log")),
-    stderr: "pipe",
-  });
-
-  const deadline = Date.now() + 30_000;
-  for (;;) {
-    try {
-      // The control plane answers under /hooks since #4, as the app mounts it.
-      const health = entry.includes("control-plane") ? "/hooks/health" : "/health";
-      if ((await fetch(`${baseUrl}${health}`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `${name} did not come up:\n${await new Response(child.stderr as ReadableStream).text()}`,
-      );
-    }
-    await Bun.sleep(50);
-  }
-
-  const instance = { child, host, baseUrl, dir };
-  started.push(instance);
-  return instance;
-}
-
-let idp: Instance;
-let hooks: Instance;
-let loanApp: Instance;
+let app: App;
 let userinfo: Server<unknown>;
+
+/** The three modules, each at its own paths on the one app. */
+const hooks = { get baseUrl() { return app.origin; } };
+const idp = { get baseUrl() { return `${app.origin}/identity`; } };
+const loanApp = { get baseUrl() { return `${app.origin}/bank`; } };
 
 /** The command, run the way a presenter runs it. */
 async function runResetCommand(
@@ -162,9 +89,7 @@ async function runResetCommand(
     env: {
       ...process.env,
       RESET_TOKEN,
-      IDP_PUBLIC_HOST: idp.host,
-      HOOKS_PUBLIC_HOST: hooks.host,
-      LOAN_APP_PUBLIC_HOST: loanApp.host,
+      APP_PUBLIC_HOST: app.host,
       ...overrides,
     },
     stdout: "pipe",
@@ -246,37 +171,18 @@ beforeAll(async () => {
     },
   });
 
-  [idp, hooks, loanApp] = await Promise.all([
-    boot("idp", "apps/idp/src/index.ts", {
-      RESET_TOKEN,
-      IDP_DB_PATH: join(tmpdir(), `cg-reset-idp-${crypto.randomUUID()}`, "idp.db"),
-      BETTER_AUTH_SECRET: "root-reset-test-secret-".padEnd(48, "x"),
-      IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
-    }),
-    boot("hooks", "scripts/control-plane.ts", {
-      RESET_TOKEN,
-      ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
-      GOVERNANCE_DB_PATH: join(tmpdir(), `cg-reset-hooks-${crypto.randomUUID()}`, "governance.db"),
-      PERSONA_LOAN_OFFICER_EMAIL: DANA,
-    }),
-    boot(
-      "loan-app",
-      "scripts/loans.ts",
-      {
-        RESET_TOKEN,
-        LOANS_DB_PATH: join(tmpdir(), `cg-reset-loan-${crypto.randomUUID()}`, "loans.db"),
-        IDP_PUBLIC_HOST: `127.0.0.1:${userinfo.port}`,
-      },
-      "/bank",
-    ),
-  ]);
-});
+  app = await bootApp({
+    RESET_TOKEN,
+    ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
+    PERSONA_LOAN_OFFICER_EMAIL: DANA,
+    BETTER_AUTH_SECRET: "root-reset-test-secret-".padEnd(48, "x"),
+    IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
+    IDENTITY_HOST: `127.0.0.1:${userinfo.port}`,
+  });
+}, 240_000);
 
-afterAll(() => {
-  for (const instance of started) {
-    instance.child.kill();
-    rmSync(instance.dir, { recursive: true, force: true });
-  }
+afterAll(async () => {
+  await app?.stop();
   userinfo?.stop(true);
 });
 
@@ -364,7 +270,7 @@ describe("one command, three databases", () => {
     expect(performance.now() - started).toBeLessThan(30_000);
   });
 
-  test("every service reports that its reset route exists", async () => {
+  test("every module reports that its reset route exists", async () => {
     const [hooksBody, idpBody, loanBody] = await Promise.all([
       hooksHealth(),
       idpHealth(),
@@ -394,21 +300,27 @@ describe("when it cannot do its job it says so and exits non-zero", () => {
   });
 
   test("a bare service name is refused before anything is reset", async () => {
-    const { code, err } = await runResetCommand({ HOOKS_PUBLIC_HOST: "cg-hooks" });
+    const { code, err } = await runResetCommand({ APP_PUBLIC_HOST: "cg-hooks" });
     expect(code).toBe(78);
-    expect(err).toContain("HOOKS_PUBLIC_HOST=cg-hooks");
+    expect(err).toContain("APP_PUBLIC_HOST=cg-hooks");
     expect(err).toContain("onrender.com");
   });
 
-  test("an unreachable service is reported, and the others still run", async () => {
+  /**
+   * Until #6 this was "an unreachable service is reported, and the others
+   * still run", with one of three hosts pointed at a dead port. There is one
+   * host now, so an unreachable app is every module unreachable at once; what
+   * survives is the rest of the claim — every module is still attempted, and
+   * each says so on its own line, so a presenter reads every problem in one
+   * run rather than one per run.
+   */
+  test("an unreachable app is reported for every module, and the command still tries each", async () => {
     const dead = `127.0.0.1:${freePort()}`;
-    const { code, out } = await runHardReset({ LOAN_APP_PUBLIC_HOST: dead });
+    const { code, out } = await runHardReset({ APP_PUBLIC_HOST: dead });
     expect(code).not.toBe(0);
-    expect(out).toContain("UNREACHABLE");
-    // The two upstream of it were still put back: a presenter wants every
-    // problem in one run, not one per run.
-    expect(out).toMatch(/\[reset\] idp\s+OK/);
-    expect(out).toMatch(/\[reset\] hooks\s+OK/);
+    expect(out).toMatch(/\[reset\] idp\s+UNREACHABLE/);
+    expect(out).toMatch(/\[reset\] hooks\s+UNREACHABLE/);
+    expect(out).toMatch(/\[reset\] loan-app\s+UNREACHABLE/);
   });
 
   test("--target render reads the RENDER_-prefixed addresses, and says which are missing", async () => {
@@ -416,19 +328,21 @@ describe("when it cannot do its job it says so and exits non-zero", () => {
     expect(code).toBe(78);
     // Not the local variable: pointing `--target render` at a localhost value
     // would be the command silently resetting the wrong environment.
-    expect(err).toContain("RENDER_HOOKS_PUBLIC_HOST is unset");
-    expect(err).toContain("cg-hooks");
-    // And not a variable this scope was never going to read: a between-takes
-    // reset that refused to put the loan book back because RENDER_IDP_PUBLIC_HOST
-    // was unset would be blocked on an address it has no use for.
-    expect(err).not.toContain("RENDER_IDP_PUBLIC_HOST");
+    expect(err).toContain("RENDER_APP_PUBLIC_HOST is unset");
+    // The one service there is since #6, which holds all three modules.
+    expect(err).toContain("cg-web");
   });
 
-  test("--hard --target render asks for the IdP's address too", async () => {
+  /**
+   * Until #6: "--hard --target render asks for the IdP's address too", when
+   * the IdP was a service with an address of its own. It is a module of the
+   * app now, so the hard reset asks for the same one address.
+   */
+  test("--hard --target render asks for the same one address", async () => {
     const { code, err } = await runHardReset({}, ["--target", "render"]);
     expect(code).toBe(78);
-    expect(err).toContain("RENDER_IDP_PUBLIC_HOST is unset");
-    expect(err).toContain("cg-idp");
+    expect(err).toContain("RENDER_APP_PUBLIC_HOST is unset");
+    expect(err).toContain("cg-web");
   });
 
   test("a misspelt --hard is refused rather than quietly read as a soft reset", async () => {

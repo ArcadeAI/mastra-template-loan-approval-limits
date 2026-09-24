@@ -5,7 +5,7 @@
 #   1. Claim a block of ports no other live worktree holds, and write them to
 #      an untracked .env.local.
 #   2. Install dependencies. One `bun install` at the root covers every
-#      workspace, apps/idp included since #187.
+#      workspace, the identity provider (lib/identity/provider) included.
 #
 # Wire it up in the Orca app: Repo settings -> hooks -> setup script:
 #   bash scripts/orca-setup.sh
@@ -116,31 +116,15 @@ STUDIO=$((BASE + 5))
 # All of these are untracked — .gitignore's `.env.local` matches at any depth.
 shared() {
   cat <<ENVEOF
-# Host-form, matching .env.example: consumers add the scheme. The control
-# plane is part of the app since #4, so HOOKS_PUBLIC_HOST is the app's port,
-# and the loan API since #5 (under /bank), so LOAN_APP_PUBLIC_HOST is too.
-# CG_PORT_HOOKS and CG_PORT_LOAN_APP stay claimed in the block and nothing
-# binds them.
-WEB_PUBLIC_HOST=localhost:$WEB
-HOOKS_PUBLIC_HOST=localhost:$WEB
-LOAN_APP_PUBLIC_HOST=localhost:$WEB
-IDP_PUBLIC_HOST=localhost:$IDP
-IDP_PUBLIC_URL=http://localhost:$IDP
+# Host-form, matching .env.example: consumers add the scheme. One host since
+# #6: the control plane (#4), the loan API (#5, under /bank) and the identity
+# provider (#6) are all the app, on the app's port, and so is the issuer.
+# IDENTITY_HOST and CONTROL_PLANE_HOST are unset on purpose: both default to
+# the app's own listener. CG_PORT_HOOKS, CG_PORT_LOAN_APP and CG_PORT_IDP stay
+# claimed in the block and nothing binds them.
+APP_PUBLIC_HOST=localhost:$WEB
 ENVEOF
 }
-
-write_service_env() {  # $1 = app dir, $2 = its port
-  local dir="$WORKTREE/apps/$1"
-  [ -d "$dir" ] || return 0
-  {
-    echo "# Written by scripts/orca-setup.sh. Do not edit; setup rewrites it."
-    echo "PORT=$2"
-    echo
-    shared
-  } > "$dir/.env.local"
-}
-
-write_service_env idp "$IDP"
 
 # The root file documents the block, gives root-level `bun test` the
 # cross-service hosts, and since #3 carries the app's PORT, because the app is
@@ -157,7 +141,7 @@ write_service_env idp "$IDP"
 {
   echo "# Written by scripts/orca-setup.sh. Do not edit; setup rewrites it."
   echo "# This worktree owns ports $BASE-$((BASE + BLOCK - 1))."
-  echo "# PORT is the app's, which lives at the root; each apps/<svc> has its own."
+  echo "# PORT is the app's, which lives at the root. Every service is part of it since #6."
   echo "PORT=$WEB"
   echo "CG_PORT_BASE=$BASE"
   echo "CG_PORT_WEB=$WEB"

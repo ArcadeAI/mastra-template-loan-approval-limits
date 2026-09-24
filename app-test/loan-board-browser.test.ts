@@ -37,7 +37,8 @@ import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHt
 import { chunk, chunkName, joinChunks, openSealed, seal } from "../lib/identity/seal.ts";
 import { LOAN_POLL_INTERVAL_MS } from "../lib/loan-context/loans.ts";
 import { SESSION_COOKIE, type Session } from "../lib/identity/session.ts";
-import { Browser, PEOPLE, SESSION_SECRET, signInAs, startIdentityHarness, type IdentityHarness } from "./identity-harness.ts";
+import { appIdentityEnv } from "./app-identity.ts";
+import { Browser, PEOPLE, SESSION_SECRET, signInAs } from "./identity-harness.ts";
 
 const WEB = join(import.meta.dir, "..");
 
@@ -65,20 +66,21 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
   async () => {
     if (chromeResolution.path === null) throw new Error(missingBrowserMessage(chromeResolution));
     const CHROME = chromeResolution.path;
-    let identity: IdentityHarness | undefined;
     let next: Subprocess | undefined;
     let chrome: Subprocess | undefined;
     let cdp: Cdp | undefined;
     let profile: string | undefined;
     let workspace: string | undefined;
     try {
-      identity = await startIdentityHarness();
       workspace = join(tmpdir(), `cg-loan-board-${crypto.randomUUID()}`);
       mkdirSync(workspace, { recursive: true });
 
       const webPort = freePort();
       const debugPort = freePort();
       const origin = `http://127.0.0.1:${webPort}`;
+      // The app is its own identity provider since #6: its own throwaway
+      // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
+      const appIdentity = await appIdentityEnv(origin, join(workspace, "identity"));
       // The loan book is the app's own module since #5: Charlie's approvals
       // below go to the app's `/bank/…`, the same route `tools/loan` calls.
       const loanAppHost = `127.0.0.1:${webPort}`;
@@ -95,15 +97,14 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
           // The app mounts the control plane since #4; a throwaway one, not
           // a governance.db in the repo.
           GOVERNANCE_DB_PATH: ":memory:",
-          PUBLIC_URL: origin,
           SESSION_SECRET,
-          IDP_ISSUER: identity.idpUrl,
-          IDP_CLIENT_ID: identity.config.identity.idpClientId,
-          IDP_CLIENT_SECRET: identity.config.identity.idpClientSecret,
+          ...appIdentity.env,
           // The app's loan module: its own `loans.db` in this test's
-          // workspace, and bearers checked at the real IdP.
+          // workspace, and bearers checked at the app's own identity
+          // provider, over its local listener — the default, stated because
+          // the ambient environment may carry another.
           LOANS_DB_PATH: join(workspace, "loans.db"),
-          IDP_PUBLIC_HOST: new URL(identity.idpUrl).host,
+          IDENTITY_HOST: `localhost:${webPort}`,
           // So the decision line can name the person rather than the address.
           PERSONA_LOAN_OFFICER_EMAIL: PEOPLE.dana.email,
           PERSONA_CREDIT_ANALYST_EMAIL: PEOPLE.sam.email,
@@ -156,7 +157,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       // Alice's browser, holding the cookie a real sign-in produced — a real
       // authorization-code flow against the real `apps/idp`, with a real
       // password, through the real handlers.
-      const alice = await sessionFor(identity, "dana");
+      const alice = await sessionFor({ webUrl: origin }, "dana");
       const cookies = chunk(await seal(alice, SESSION_SECRET)).map((value, index) => ({
         name: chunkName(SESSION_COOKIE, index),
         value,
@@ -175,7 +176,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
 
       // Charlie's bearer, from Charlie's own sign-in. The approval below is
       // made as him and the loan module derives the actor from this token.
-      const charlie = await sessionFor(identity, "riley");
+      const charlie = await sessionFor({ webUrl: origin }, "riley");
       const charlieBearer = charlie.idp?.access_token;
       if (charlieBearer === undefined) throw new Error("Charlie's session carries no IdP token");
 
@@ -258,7 +259,6 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       cdp?.close();
       await stopProcess(chrome);
       await stopProcess(next);
-      await identity?.stop();
       if (profile !== undefined) rmSync(profile, { recursive: true, force: true });
       if (workspace !== undefined) rmSync(workspace, { recursive: true, force: true });
     }
@@ -267,7 +267,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
 );
 
 /** A real sign-in, unsealed back into the `Session` a browser would be carrying. */
-async function sessionFor(harness: IdentityHarness, persona: keyof typeof PEOPLE): Promise<Session> {
+async function sessionFor(harness: { webUrl: string }, persona: keyof typeof PEOPLE): Promise<Session> {
   const browser = new Browser();
   await signInAs(browser, harness, persona, { stopAt: "/api/arcade/start" });
   const session = await openSealed<Session>(joinChunks(SESSION_COOKIE, browser.cookies), SESSION_SECRET);

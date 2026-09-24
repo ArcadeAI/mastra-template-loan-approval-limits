@@ -25,9 +25,9 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      # One install covers every workspace. apps/idp joined the workspace in
-      # #187, so its separate install and typecheck steps are gone: the root
-      # install reaches it and `bun run typecheck` filters over it.
+      # One install covers every workspace. The identity provider is part of
+      # the app since #6 (lib/identity/provider), so the root install and the
+      # root typecheck reach it; it has no install or typecheck of its own.
       - name: Typecheck
         run: bun run typecheck
 
@@ -40,7 +40,7 @@ jobs:
       # idp.db's schema is generated from the installed Better Auth. A stale
       # file fails `bun test` too, but this names the fix.
       - name: idp schema is regenerated from the installed Better Auth
-        run: bun run --cwd apps/idp generate:check
+        run: bun run generate:identity-schema:check
 
       # `app-test/home-loan-next-browser.test.ts` drives the real Next page
       # in a real headless Chrome. Until #152 it looked only for the macOS
@@ -150,16 +150,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # No loan-app image since #5: the loan module ships inside the web one.
-        service: [web, idp]
+        # No loan-app image since #5 and no idp image since #6: the loan module
+        # and the identity provider ship inside the web one.
+        service: [web]
         include:
-          # cg-idp refuses to boot under NODE_ENV=production without a
-          # BETTER_AUTH_SECRET, on purpose: on Render the secret is generated
-          # once and encrypts the OAuth client secret at rest, and a boot that
-          # silently fell back to a known key would be worse than no boot. The
-          # smoke test hands it a throwaway one.
-          - service: idp
-            smoke_env: -e BETTER_AUTH_SECRET=ci-smoke-only-not-a-real-secret-0000
           # cg-web refuses to run without its two bearers under
           # NODE_ENV=production, and since #4 it holds both: it is the control
           # plane too (cg-hooks was folded in), so Arcade signs its hooks with
@@ -171,12 +165,21 @@ jobs:
           # that the control plane's policy loaded, or this job would pass on an
           # image that governs nothing. Throwaway here; both are `sync: false`
           # in render.yaml.
+          #
+          # Since #6 it is the identity provider too, which refuses to boot
+          # under NODE_ENV=production without a BETTER_AUTH_SECRET, on purpose:
+          # the secret encrypts the ID-token signing key at rest, and a boot
+          # that silently fell back to a known key would be worse than no boot.
+          # The app stays up and reports `identity: failed`, so the step checks
+          # that the identity provider booted as well as the policy.
           - service: web
             dockerfile: ./Dockerfile
             smoke_env: >-
               -e ARCADE_HOOK_SIGNING_SECRET=ci-smoke-only-not-a-real-secret
               -e APPROVALS_STORE_TOKEN=ci-smoke-only-not-a-real-token
+              -e BETTER_AUTH_SECRET=ci-smoke-only-not-a-real-secret-0000
             smoke_expect: '"policy":{"status":"ready"'
+            smoke_expect_also: '"identity":{"status":"ok"'
 
     steps:
       - uses: actions/checkout@v4
@@ -192,9 +195,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          # The web app's Dockerfile is at the root since #3; every other
-          # service's is in its own directory under apps/. There is no hooks
-          # image since #4: the control plane ships inside the web one.
+          # The web app's Dockerfile is at the root since #3, and since #6 it is
+          # the only one: the control plane (#4), the loan module (#5) and the
+          # identity provider (#6) ship inside it.
           file: ${{ matrix.dockerfile || format('./apps/{0}/Dockerfile', matrix.service) }}
           push: false
           load: true
@@ -212,12 +215,13 @@ jobs:
           for i in $(seq 1 30); do
             if body=$(curl -fsS http://localhost:8080/health); then
               echo "$body"
-              expect='${{ matrix.smoke_expect }}'
-              if [ -n "$expect" ] && ! grep -qF "$expect" <<<"$body"; then
-                echo "::error::${{ matrix.service }}'s /health does not contain $expect"
-                docker logs svc
-                exit 1
-              fi
+              for expect in '${{ matrix.smoke_expect }}' '${{ matrix.smoke_expect_also }}'; do
+                if [ -n "$expect" ] && ! grep -qF "$expect" <<<"$body"; then
+                  echo "::error::${{ matrix.service }}'s /health does not contain $expect"
+                  docker logs svc
+                  exit 1
+                fi
+              done
               exit 0
             fi
             sleep 1

@@ -19,7 +19,7 @@ import { SESSION_COOKIE, clearSession, readSession, writeSession, type Session }
 const SECRET = "a-session-secret-for-the-suite-0123456789";
 
 const config = (overrides: Record<string, string> = {}) =>
-  readWebConfig({ SESSION_SECRET: SECRET, PUBLIC_URL: "https://cg-web-sa31.onrender.com", ...overrides });
+  readWebConfig({ SESSION_SECRET: SECRET, APP_PUBLIC_HOST: "cg-web-sa31.onrender.com", ...overrides });
 
 /**
  * One byte of a sealed value, deterministically changed.
@@ -273,13 +273,13 @@ describe("the attributes a browser is given", () => {
     }
   });
 
-  test("Secure is dropped for a loopback PUBLIC_URL, because a browser would drop the cookie", async () => {
+  test("Secure is dropped for a loopback APP_PUBLIC_HOST, because a browser would drop the cookie", async () => {
     const headers = new Headers();
     await writeSession(
       headers,
       new Request("http://localhost:4400/"),
       { email: "alice@bank.example", signed_in_at: 1 },
-      config({ PUBLIC_URL: "http://localhost:4400" }),
+      config({ APP_PUBLIC_HOST: "localhost:4400" }),
     );
     for (const raw of headers.getSetCookie()) {
       expect(raw).toContain("HttpOnly");

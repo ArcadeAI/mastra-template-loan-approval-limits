@@ -4,11 +4,11 @@
  *
  * The measurement behind it is #59: `render.yaml` derived every cross-service
  * host with `fromService … property: host`, and Render emitted the bare service
- * name — `IDP_PUBLIC_HOST` on `cg-loan-app` was `cg-idp-or5b`, not
+ * name — `IDENTITY_HOST` on `cg-loan-app` was `cg-idp-or5b`, not
  * `cg-idp-or5b.onrender.com`. Consumers prepend a scheme and nothing else, so
  * the request went somewhere DNS cannot resolve.
  *
- * `HOOKS_PUBLIC_HOST` is the worst of the three to get wrong, because the panel
+ * `APP_PUBLIC_HOST` is the worst of the three to get wrong, because the panel
  * opens `GET /events` from the browser: the failure would land in a visitor's
  * DevTools console, where nobody running the demo is looking.
  *
@@ -74,36 +74,36 @@ const REFUSED = [
 ];
 
 test.each(ACCEPTED)("%p is a host something can resolve", (value) => {
-  expect(() => assertPublicHost("HOOKS_PUBLIC_HOST", value)).not.toThrow();
+  expect(() => assertPublicHost("APP_PUBLIC_HOST", value)).not.toThrow();
 });
 
 test.each([undefined, "", "   "])("%p is not an error; consumers have defaults", (value) => {
-  expect(() => assertPublicHost("HOOKS_PUBLIC_HOST", value)).not.toThrow();
-  expect(publicHost("HOOKS_PUBLIC_HOST", value, "localhost:8081")).toBe("localhost:8081");
+  expect(() => assertPublicHost("APP_PUBLIC_HOST", value)).not.toThrow();
+  expect(publicHost("APP_PUBLIC_HOST", value, "localhost:8081")).toBe("localhost:8081");
 });
 
 test.each(REFUSED)("%p is refused: it is a service name, not a hostname", (value) => {
-  expect(() => assertPublicHost("HOOKS_PUBLIC_HOST", value)).toThrow(PublicHostError);
+  expect(() => assertPublicHost("APP_PUBLIC_HOST", value)).toThrow(PublicHostError);
 });
 
 test("the refusal names the variable, its value, and where the real one comes from", () => {
   // The whole worth of this check is the message: whoever reads it is about to
   // go and find the right string, and the right string is on one specific page.
   try {
-    assertPublicHost("HOOKS_PUBLIC_HOST", "cg-hooks");
+    assertPublicHost("APP_PUBLIC_HOST", "cg-hooks");
     throw new Error("expected a refusal");
   } catch (cause) {
     expect(cause).toBeInstanceOf(PublicHostError);
     const { message } = cause as Error;
-    expect(message).toContain("HOOKS_PUBLIC_HOST=cg-hooks");
+    expect(message).toContain("APP_PUBLIC_HOST=cg-hooks");
     expect(message).toContain("Render dashboard");
     expect(message).toContain("cg-web-sa31");
   }
 });
 
 test("readWebConfig refuses a bare service name, and passes a hostname through", () => {
-  expect(() => readWebConfig({ HOOKS_PUBLIC_HOST: "cg-hooks" })).toThrow(PublicHostError);
-  expect(readWebConfig({ HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com" }).hooksHost).toBe(
+  expect(() => readWebConfig({ APP_PUBLIC_HOST: "cg-hooks" })).toThrow(PublicHostError);
+  expect(readWebConfig({ APP_PUBLIC_HOST: "cg-hooks.onrender.com" }).hooksHost).toBe(
     "cg-hooks.onrender.com",
   );
   // The app's own host since #4, when the control plane folded into it.
@@ -121,14 +121,14 @@ test("readWebConfig refuses a bare service name, and passes a hostname through",
  * fine on a deployment that cannot reach the control plane at all.
  */
 test("the panel's stream source refuses a bare service name in either mode", () => {
-  expect(() => resolvePanelStream({ HOOKS_PUBLIC_HOST: "cg-hooks" })).toThrow(PublicHostError);
+  expect(() => resolvePanelStream({ APP_PUBLIC_HOST: "cg-hooks" })).toThrow(PublicHostError);
   expect(() =>
-    resolvePanelStream({ GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: "cg-hooks" }),
+    resolvePanelStream({ GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: "cg-hooks" }),
   ).toThrow(PublicHostError);
 
   const live = resolvePanelStream({
     GOVERNANCE_STREAM: "hooks",
-    HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com",
+    APP_PUBLIC_HOST: "cg-hooks.onrender.com",
   });
   expect(live).toHaveProperty("url", "https://cg-hooks.onrender.com/hooks/events");
   expect(resolvePanelStream({}).mode).toBe("fixture");

@@ -3,14 +3,15 @@
  *
  * `render.yaml` used to derive every cross-service address with
  * `fromService … property: host`. Measured on 2026-09-10 (#59): Render emits
- * the **bare service name**, never the FQDN — `IDP_PUBLIC_HOST` arrived on
+ * the **bare service name**, never the FQDN — `IDENTITY_HOST` arrived on
  * `cg-loan-app` as `cg-idp-or5b`. Consumers prepend a scheme and nothing else,
  * so the request went to `https://cg-idp-or5b/oauth2/userinfo`, DNS failed, and
  * the caller reported a network error that read as "the dependency is down"
  * when the dependency was healthy and the URL was malformed.
  *
- * This service holds `LOAN_APP_PUBLIC_HOST`, which had the same defect and had
- * not bitten yet only because nothing here reads it. Checking it at boot is the
+ * The control plane checks `APP_PUBLIC_HOST` (#6; before it, the loan API's
+ * own host variable), which could carry the same defect and would not bite
+ * here, because nothing here reads through it. Checking it at boot is the
  * point: the value is wrong from the moment it is set, and the only honest
  * place to say so is startup rather than the first redaction pass that needs
  * the loan book.

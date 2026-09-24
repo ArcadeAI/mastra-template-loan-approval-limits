@@ -39,7 +39,7 @@ export interface CookieOptions {
    * `Secure` is on for every cookie this service writes except over loopback.
    *
    * Not a preference: the session cookie holds gateway bearer tokens, and the
-   * deployment is HTTPS-only (`PUBLIC_URL` is the Render URL). The exception is
+   * deployment is HTTPS-only (`APP_PUBLIC_HOST` is the public host). The exception is
    * narrow on purpose — a browser silently drops a `Secure` cookie sent over
    * plain http, so a local run against `http://localhost:4400` would look like
    * a sign-in that does nothing.

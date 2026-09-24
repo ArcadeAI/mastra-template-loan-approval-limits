@@ -38,12 +38,11 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from arcade_core.schema import ToolAuthorizationContext, ToolContext, ToolSecretItem
 
-from approvals import APPROVALS_STORE_TOKEN_SECRET, HOOKS_HOST_SECRET, WEB_HOST_SECRET
+from approvals import APP_HOST_SECRET, APPROVALS_STORE_TOKEN_SECRET
 from tests.test_routing import CASES, SUBJECTS
 
 STORE_TOKEN = "store-token-for-tests"
 SLACK_TOKEN = "xoxp-test-token"
-WEB_HOST = "cg-web.example.test"
 
 DANA = SUBJECTS["dana"]
 SAM = SUBJECTS["sam"]
@@ -394,8 +393,7 @@ def make_context(store_host: str, user_id: str, slack_token: str = SLACK_TOKEN) 
     return ToolContext(
         authorization=ToolAuthorizationContext(token=slack_token),
         secrets=[
-            ToolSecretItem(key=HOOKS_HOST_SECRET, value=store_host),
-            ToolSecretItem(key=WEB_HOST_SECRET, value=WEB_HOST),
+            ToolSecretItem(key=APP_HOST_SECRET, value=store_host),
             ToolSecretItem(key=APPROVALS_STORE_TOKEN_SECRET, value=STORE_TOKEN),
         ],
         user_id=user_id,

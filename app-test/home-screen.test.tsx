@@ -1005,10 +1005,11 @@ describe("the fork seam", () => {
    */
   test("nothing this service serves opens the loan book's database", () => {
     // Since #4 the app opens governance.db (the control plane,
-    // `lib/control-plane/`) and since #5 loans.db (the loan module,
-    // `lib/loans/`). So the rule is stated as what it always meant: bun:sqlite
-    // only under those two modules, and only the loan module reads the variable
-    // that locates the loan book's file. (The control plane's reset names
+    // `lib/control-plane/`), since #5 loans.db (the loan module,
+    // `lib/loans/`) and since #6 idp.db (the identity provider,
+    // `lib/identity/provider/`). So the rule is stated as what it always meant:
+    // bun:sqlite only under those three modules, and only the loan module reads
+    // the variable that locates the loan book's file. (The control plane's reset names
     // `loans.db` in its answer, to say it was not touched.)
     const opening: string[] = [];
     const locating: string[] = [];
@@ -1022,7 +1023,8 @@ describe("the fork seam", () => {
     }
     expect(opening.length).toBeGreaterThan(0);
     for (const path of opening) {
-      expect({ path, owner: path.startsWith("lib/control-plane/") || path.startsWith("lib/loans/") }).toEqual({
+      const owner = ["lib/control-plane/", "lib/loans/", "lib/identity/provider/"].some((module) => path.startsWith(module));
+      expect({ path, owner }).toEqual({
         path,
         owner: true,
       });
@@ -1051,13 +1053,18 @@ describe("the fork seam", () => {
 
   /**
    * Since #5 no module here reads the loan book at an address: the board reads
-   * the loan module in-process, so `LOAN_APP_PUBLIC_HOST` is the address
-   * `tools/loan` is given, and the control plane's boot check below.
+   * the loan module in-process. Until #6 that was a statement about the loan
+   * API's own host variable, which only `tools/loan` and the control plane's
+   * boot check read. #6 replaced it with `APP_PUBLIC_HOST`, the app's one
+   * public host, which more modules read for what it is — the app's origin —
+   * and the list below is exactly those. That none of them reaches the app's
+   * own modules through it, the loan book included, is
+   * `app-test/server-side-readers.test.ts`.
    */
   test("nothing this service serves reads the loan book over the network", () => {
     const reaching = ["lib", "app", "components"]
       .flatMap((directory) => walk(join(WEB, directory)))
-      .filter((path) => withoutComments(readFileSync(path, "utf8")).includes("LOAN_APP_PUBLIC_HOST"))
+      .filter((path) => withoutComments(readFileSync(path, "utf8")).includes("APP_PUBLIC_HOST"))
       .map((path) => path.slice(WEB.length + 1));
 
     // Since #4 the control plane's config is in this service too, and it
@@ -1065,7 +1072,15 @@ describe("the fork seam", () => {
     // service name; `app-test/control-plane/public-host.test.ts` pins that).
     // It never reads the loan book with it. `lib/loan-context/read.ts` was on
     // this list until #5, when it stopped reading the loan book over HTTP.
-    expect(reaching.sort()).toEqual(["lib/control-plane/config.ts"]);
+    // Since #6: the app's own config (its origin, `appPublicHost`), the
+    // panel's stream (the browser's address for `/hooks/events`) and the
+    // identity provider's issuer.
+    expect(reaching.sort()).toEqual([
+      "lib/config.ts",
+      "lib/control-plane/config.ts",
+      "lib/governance/stream-url.ts",
+      "lib/identity/provider/config.ts",
+    ]);
   });
 
   /**

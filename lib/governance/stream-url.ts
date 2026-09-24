@@ -110,7 +110,7 @@ function fixtureRequested(params: Readonly<Record<string, string | string[] | un
  *
  * | value | what the panel does |
  * |---|---|
- * | `hooks` | watches `HOOKS_PUBLIC_HOST` — the live control plane. Without a host: **unconfigured** |
+ * | `hooks` | watches `APP_PUBLIC_HOST` — the live control plane. Without a host: **unconfigured** |
  * | `fixture` | replays #5's sequence, labelled `FIXTURE REPLAY` |
  * | unset | the replay in development; **unconfigured** when deployed |
  *
@@ -134,9 +134,9 @@ export function resolvePanelStream(
   // set, and this is the address the *browser* is handed — so the alternative
   // to refusing here is a failed EventSource in a visitor's console. See
   // `../public-host.ts`.
-  assertPublicHost("HOOKS_PUBLIC_HOST", env["HOOKS_PUBLIC_HOST"]);
+  assertPublicHost("APP_PUBLIC_HOST", env["APP_PUBLIC_HOST"]);
 
-  const host = env["HOOKS_PUBLIC_HOST"]?.trim() ?? "";
+  const host = env["APP_PUBLIC_HOST"]?.trim() ?? "";
   const requested = env["GOVERNANCE_STREAM"]?.trim() ?? "";
 
   // Before the query string, so `?fixture=1` cannot paper over a variable that
@@ -144,7 +144,7 @@ export function resolvePanelStream(
   if (requested !== "" && !(STREAM_VALUES as readonly string[]).includes(requested)) {
     return unconfigured(
       `GOVERNANCE_STREAM=${requested} is not a stream this panel can watch. ` +
-        "Set it to `hooks` (with HOOKS_PUBLIC_HOST) to watch the live control plane, " +
+        "Set it to `hooks` (with APP_PUBLIC_HOST) to watch the live control plane, " +
         "or to `fixture` for the built-in replay.",
     );
   }
@@ -156,10 +156,10 @@ export function resolvePanelStream(
   if (requested === "hooks") {
     if (host === "") {
       return unconfigured(
-        "GOVERNANCE_STREAM=hooks, but HOOKS_PUBLIC_HOST is not set, so there is no address " +
-          "to watch. The control plane is part of this app, so it is this service's own host: " +
-          "read it off this service's page in the Render dashboard (the host part of the URL " +
-          "shown there) and set it here.",
+        "GOVERNANCE_STREAM=hooks, but APP_PUBLIC_HOST is not set, so there is no address " +
+          "to watch. The control plane is part of this app, so it is this app's own public " +
+          "host — the ngrok host Arcade reaches it at — and it is the same value the " +
+          "toolkits hold as their APP_PUBLIC_HOST secret.",
       );
     }
     return { mode: "hooks", url: `${baseUrl(host)}${HOOKS_STREAM_PATH}`, host };
@@ -168,7 +168,7 @@ export function resolvePanelStream(
   if (isDeployed(env)) {
     return unconfigured(
       "GOVERNANCE_STREAM is not set. A deployed panel is told which stream to watch rather " +
-        "than guessing: set it to `hooks`, with HOOKS_PUBLIC_HOST, for the live control " +
+        "than guessing: set it to `hooks`, with APP_PUBLIC_HOST, for the live control " +
         "plane, or to `fixture` to say on screen that this is a replay.",
     );
   }
@@ -217,7 +217,7 @@ export function approvalStreamUrl(
     const stream = resolvePanelStream(env);
     return stream.mode === "hooks" ? stream.url : null;
   } catch {
-    // A bare service name in `HOOKS_PUBLIC_HOST`. The page throws on it loudly
+    // A bare service name in `APP_PUBLIC_HOST`. The page throws on it loudly
     // where a developer sees it; this is asked from the same page and must not
     // throw twice.
     return null;

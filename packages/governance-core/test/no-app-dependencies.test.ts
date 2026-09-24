@@ -69,8 +69,15 @@ function readJson(path: string): Record<string, unknown> {
  */
 function appPackageNames(): string[] {
   const appsDir = join(REPO_ROOT, "apps");
-  return readdirSync(appsDir)
-    .filter((entry) => statSync(join(appsDir, entry)).isDirectory())
+  // No `apps/` at all since #6 folded the last service into the app, and git
+  // does not keep an empty directory, so a fresh clone has none. Measured: the
+  // unguarded `readdirSync` threw inside this file's `describe`, and Bun
+  // reported "1 error" beside "0 fail" while this block's three tests were
+  // never registered — the boundary silently unchecked. The root manifest
+  // below is the app either way.
+  const entries = existsSync(appsDir) ? readdirSync(appsDir) : [];
+  return entries
+    .filter((entry: string) => statSync(join(appsDir, entry)).isDirectory())
     .filter((entry) => existsSync(join(appsDir, entry, "package.json")))
     .map((entry) => readJson(join(appsDir, entry, "package.json")).name)
     // The root manifest is the web app's since #3 moved it out of `apps/web`.

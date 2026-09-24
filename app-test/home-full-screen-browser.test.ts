@@ -105,7 +105,7 @@ interface StreamConnection {
 }
 
 interface HooksStandIn {
-  /** HOST form, as `HOOKS_PUBLIC_HOST` takes it. */
+  /** HOST form, as `APP_PUBLIC_HOST` takes it. */
   host: string;
   connections: StreamConnection[];
   /** Push one frame to every connected browser. */
@@ -219,14 +219,14 @@ async function measureHome(options: {
   hooksHost?: string;
   /**
    * The identity provider the app's loan module presents bearers to
-   * (`IDP_PUBLIC_HOST`), HOST-form. The loan book is in the app since #5, so
+   * (`IDENTITY_HOST`), HOST-form. The loan book is in the app since #5, so
    * this is the one address its answer depends on; until #5 the option was the
    * loan API's own address.
    *
    * Defaults to a port this process bound and released, so the module cannot
    * say who the bearer is and the loan book comes back `unavailable` — the
    * state the default always produced. It may **not** default to the
-   * worktree's own `IDP_PUBLIC_HOST`: that is whatever `.env.local` says, and
+   * worktree's own `IDENTITY_HOST`: that is whatever `.env.local` says, and
    * the page would then depend on what else happens to be running.
    */
   loanIdpHost?: string;
@@ -250,7 +250,6 @@ async function measureHome(options: {
       // The app mounts the control plane since #4; a throwaway one, not
       // a governance.db in the repo.
       GOVERNANCE_DB_PATH: ":memory:",
-      PUBLIC_URL: origin,
       ARCADE_API_URL: harness.gateway.url,
       ARCADE_API_KEY: "arcade-key-for-full-screen-browser",
       ARCADE_GATEWAY_ID: "cg-demo-us",
@@ -259,17 +258,23 @@ async function measureHome(options: {
       ANTHROPIC_API_KEY: "not-used-by-this-test",
       MODEL_ID: "claude-sonnet-5",
       SESSION_SECRET,
-      IDP_ISSUER: harness.config.identity.idpIssuer,
+      // The session below is sealed by hand, so nothing here signs in: the
+      // identity provider is the app's own since #6, and it gets a throwaway
+      // idp.db rather than `./idp.db`, which is the developer's.
+      IDP_DB_PATH: ":memory:",
       IDP_CLIENT_ID: "web",
       IDP_CLIENT_SECRET: "not-used-by-this-test",
       APPROVALS_STORE_TOKEN: "store-token-for-agent-tests",
       // A throwaway loan book: it may not default to `./loans.db`, which is
       // the developer's own.
       LOANS_DB_PATH: ":memory:",
-      IDP_PUBLIC_HOST: options.loanIdpHost ?? `localhost:${freePort()}`,
+      IDENTITY_HOST: options.loanIdpHost ?? `localhost:${freePort()}`,
     };
-    if (options.hooksHost !== undefined) env["HOOKS_PUBLIC_HOST"] = options.hooksHost;
-    else delete env["HOOKS_PUBLIC_HOST"];
+    // The app's origin since #6 — its issuer and every redirect_uri — and the
+    // panel's stream host. A case with a control plane of its own points it
+    // there, which is the one thing that case is about; nothing in it signs
+    // in, so the issuer naming that host is never followed.
+    env["APP_PUBLIC_HOST"] = options.hooksHost ?? new URL(origin).host;
     // Server-side reads of the control plane go here since #4.
     if (options.hooksHost !== undefined) env["CONTROL_PLANE_HOST"] = options.hooksHost;
     else delete env["CONTROL_PLANE_HOST"];

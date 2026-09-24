@@ -7,8 +7,8 @@ the tool wrote. A record living inside the worker would be a record nobody can
 open. So the request is persisted where `DESIGN.md` says approvals live:
 `governance.db`, owned by the control plane, reached over the public internet
 the same way Arcade reaches the hooks themselves. The control plane is part of
-the app since #4, so `HOOKS_PUBLIC_HOST` is the app's own host, and the four
-endpoints are under `/api/approvals` there.
+the app since #4, so its host is the app's own, `APP_PUBLIC_HOST` (#6), and
+the four endpoints are under `/api/approvals` there.
 
 **The contract is written down in Markdown, not here.** See "The approvals
 store contract" in `tools/approvals/README.md`: request and response bodies,
@@ -53,8 +53,7 @@ from approvals.routing import Subject
 
 __all__ = [
     "APPROVALS_STORE_TOKEN_SECRET",
-    "HOOKS_HOST_SECRET",
-    "WEB_HOST_SECRET",
+    "APP_HOST_SECRET",
     "base_url",
     "create_request",
     "fetch_roster",
@@ -62,10 +61,14 @@ __all__ = [
 ]
 
 #: HOST-form, like every service address in this repo. Delivered to the
-#: deployed toolkit as Arcade secrets, uploaded by `arcade deploy` from `.env`,
+#: deployed toolkit as an Arcade secret, uploaded by `arcade deploy` from `.env`,
 #: because that is the one configuration channel a deployed toolkit has.
-HOOKS_HOST_SECRET = "HOOKS_PUBLIC_HOST"
-WEB_HOST_SECRET = "WEB_PUBLIC_HOST"
+#:
+#: One host since #6: the app's. The approvals store (the control plane) and
+#: the approval page are both part of the app, which used to be two services
+#: with a host secret each, so the store's calls and the approval link are
+#: built from the same value.
+APP_HOST_SECRET = "APP_PUBLIC_HOST"
 #: Shared bearer the control plane requires on the approvals endpoints.
 APPROVALS_STORE_TOKEN_SECRET = "APPROVALS_STORE_TOKEN"
 

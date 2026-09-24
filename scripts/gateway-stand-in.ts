@@ -1099,7 +1099,7 @@ function authorizationChallenge(authorizationUrl: string): string {
  * and nothing was listening where anybody was calling.
  *
  * That is #56's bug exactly, and this is #56's fix:
- * `scripts/dev-idp.ts` reads the port out of `IDP_PUBLIC_HOST` —
+ * `scripts/dev-idp.ts` reads the port out of `IDENTITY_HOST` —
  * the address the loan API already asks for — so the two agree by construction.
  * `ARCADE_API_URL` is the same kind of value here: it is where the app is
  * told to reach Arcade, so binding it leaves no second number to keep in step.
@@ -1153,7 +1153,7 @@ if (import.meta.main) {
   }
 
   const gatewayId = env.ARCADE_GATEWAY_ID?.trim() || "cg-demo-us";
-  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:3000";
+  const hooksHost = env.APP_PUBLIC_HOST?.trim() || "localhost:3000";
   // Both toolkits always — the agent has to be able to see
   // `Approvals_RequestApproval`, because the pre-hook's remediation sentence
   // names it (#89). The store token is what decides whether they *run*.
@@ -1163,7 +1163,7 @@ if (import.meta.main) {
     hooksHost,
     hookSigningSecret: env.ARCADE_HOOK_SIGNING_SECRET?.trim() || "cg-hooks-dev-secret-not-for-production",
     // The app's own default since #5: the loan API is a module of the app.
-    loanAppHost: env.LOAN_APP_PUBLIC_HOST?.trim() || "localhost:3000",
+    loanAppHost: env.APP_PUBLIC_HOST?.trim() || "localhost:3000",
     loanToolkit: env.ARCADE_LOAN_TOOLKIT?.trim() || "Loan",
     // Advertised either way; runnable only with a store token.
     approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT?.trim() || "Approvals",
@@ -1171,7 +1171,7 @@ if (import.meta.main) {
       ? {}
       : {
           approvalsStoreToken: storeToken,
-          webPublicHost: env.PUBLIC_URL?.trim() || env.WEB_PUBLIC_HOST?.trim() || "localhost:3000",
+          webPublicHost: env.APP_PUBLIC_HOST?.trim() || "localhost:3000",
         }),
     port,
     onCall: ({ user_id, tool, outcome }) => console.log(`[gateway-stand-in] ${outcome} ${tool} as ${user_id}`),

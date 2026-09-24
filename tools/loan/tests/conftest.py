@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from arcade_core.schema import ToolAuthorizationContext, ToolContext, ToolSecretItem
 
-from loan import LOAN_APP_HOST_SECRET
+from loan import APP_HOST_SECRET
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LOAN_APP_ENTRYPOINT = REPO_ROOT / "scripts" / "loans.ts"
@@ -77,7 +77,7 @@ def loan_app_host(idp_port: int) -> str:
         **os.environ,
         "PORT": str(port),
         "LOANS_DB_PATH": str(tmp / "loans.db"),
-        "IDP_PUBLIC_HOST": f"localhost:{idp_port}",
+        "IDENTITY_HOST": f"localhost:{idp_port}",
     }
     child = subprocess.Popen(
         [bun, str(LOAN_APP_ENTRYPOINT)],
@@ -113,7 +113,7 @@ def make_context(loan_app_host: str, token: str) -> ToolContext:
     """What the Arcade engine hands a tool at runtime: a token and a secret."""
     return ToolContext(
         authorization=ToolAuthorizationContext(token=token),
-        secrets=[ToolSecretItem(key=LOAN_APP_HOST_SECRET, value=loan_app_host)],
+        secrets=[ToolSecretItem(key=APP_HOST_SECRET, value=loan_app_host)],
         user_id=TOKENS.get(token),
     )
 

@@ -55,7 +55,6 @@ const BAR_HEIGHT = 34;
  * last test rather than a fixture of the first three.
  */
 const CONFIGURED: Record<string, string> = {
-  IDP_ISSUER: "http://127.0.0.1:1/idp-not-called-by-this-test",
   IDP_CLIENT_ID: "web",
   IDP_CLIENT_SECRET: "not-used-by-this-test",
   ARCADE_GATEWAY_ID: "cg-demo-us",
@@ -102,14 +101,19 @@ async function withBrowser(
       // The app mounts the control plane since #4; a throwaway one, not
       // a governance.db in the repo.
       GOVERNANCE_DB_PATH: ":memory:",
-      PUBLIC_URL: origin,
-      // The app holds the loan book since #5 (until then this pointed
-      // `LOAN_APP_PUBLIC_HOST` at a port nothing listened on). A throwaway
-      // one: it may not default to `./loans.db`, which is the developer's own.
+      // The app's origin, which is also its identity provider's issuer since
+      // #6 (it replaced `PUBLIC_URL`).
+      APP_PUBLIC_HOST: new URL(origin).host,
+      // The app holds the loan book since #5 (until then this pointed the
+      // loan API's own host variable at a port nothing listened on). A
+      // throwaway one: it may not default to `./loans.db`, which is the
+      // developer's own.
       LOANS_DB_PATH: ":memory:",
+      // And the identity provider since #6: not `./idp.db` either.
+      IDP_DB_PATH: ":memory:",
       ...env,
     };
-    for (const name of ["GOVERNANCE_STREAM", "HOOKS_PUBLIC_HOST"]) delete environment[name];
+    for (const name of ["GOVERNANCE_STREAM"]) delete environment[name];
     for (const [name, value] of Object.entries(env)) {
       if (value === "") delete environment[name];
     }

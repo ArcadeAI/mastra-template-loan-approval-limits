@@ -477,11 +477,12 @@ export async function measurePanelChrome(options: MeasureOptions = {}): Promise<
             // The app holds the loan book since #5; a throwaway one, not a
             // loans.db in the repo.
             LOANS_DB_PATH: ":memory:",
-            PUBLIC_URL: origin,
+            // And the identity provider since #6: not `./idp.db` either.
+            IDP_DB_PATH: ":memory:",
             // The live stream, pointed at the stub. Without this the page
             // resolves to the replay and there is no health strip to measure.
             GOVERNANCE_STREAM: "hooks",
-            HOOKS_PUBLIC_HOST: `127.0.0.1:${hooksPort}`,
+            APP_PUBLIC_HOST: `127.0.0.1:${hooksPort}`,
             // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
             // defaults to the app's own listener; this test's control plane is elsewhere.
             CONTROL_PLANE_HOST: `127.0.0.1:${hooksPort}`,

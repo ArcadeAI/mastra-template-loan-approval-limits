@@ -51,7 +51,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       PORT: "",
-      HOOKS_PUBLIC_HOST: hooks.host,
+      APP_PUBLIC_HOST: hooks.host,
       ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
       APPROVALS_STORE_TOKEN: STORE_TOKEN,
     },

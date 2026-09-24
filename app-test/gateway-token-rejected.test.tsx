@@ -126,8 +126,7 @@ function surfaceFor(arcadeApiUrl: string): IdentitySurface {
     ARCADE_APPROVALS_TOOLKIT: "Approvals",
     ANTHROPIC_API_KEY: "gateway-rejection-suite-anthropic-key",
     SESSION_SECRET,
-    PUBLIC_URL: "http://localhost:1",
-    IDP_ISSUER: "http://localhost:1",
+    APP_PUBLIC_HOST: "localhost:1",
     IDP_CLIENT_ID: "web",
     IDP_CLIENT_SECRET: "gateway-rejection-suite-client-secret",
   });

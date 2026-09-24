@@ -12,20 +12,25 @@ that basis; the wording is the asset.
 
 ## Identity, not authority
 
-Every tool requires OAuth against our own identity provider, `apps/idp` (#36),
-registered in Arcade under the provider id `cg-idp` (#13). The tool forwards the
+Every tool requires OAuth against our own identity provider, the app's identity
+module (`lib/identity/provider/`, `apps/idp` until #6), registered in Arcade under
+the provider id `app-identity` (`IDP_PROVIDER_ID`; `cg-idp` until #6). The id is
+fixed: `OAuth2(id=...)` is read at import, so register the provider under
+exactly this string. The tool forwards the
 user's token to the API as a bearer token and the API derives the actor from it.
 No tool takes an actor as an argument — the test suite asserts that.
 
 The auth requirement is a credential check, not the governance gate. Arcade
 evaluates it *before* the `/pre` hook, so a refusal there fires no hook, writes
 no audit row and shows nothing on the panel. Limits, roles and separation of
-duties stay in `apps/hooks`.
+duties stay in the control plane (`lib/control-plane/`).
 
 ## Configuration
 
-One value: `LOAN_APP_PUBLIC_HOST`, HOST-form like every address in this repo:
-the app's host, since the loan API is part of the app. The tools add the
+One value: `APP_PUBLIC_HOST`, HOST-form like every address in this repo: the
+app's host, since the loan API is part of the app — the same secret, and the
+same value, `tools/approvals` holds (#6; it was the loan API's own variable
+until then). The tools add the
 `/bank` path themselves (`API_BASE_PATH`).
 It reaches the deployed toolkit as an Arcade secret, uploaded by `arcade deploy`
 from the repo's `.env`, because a secret is the one configuration channel a
@@ -86,8 +91,10 @@ with `tool.name` in `SearchLoans`, `GetLoan`, `ApproveLoan`, `DenyLoan`.
 extension in that project is pointed at a receiver; spike #2 found the
 workers-API toolkit name and the payload's `tool.toolkit` identical.
 
-Two operational notes. `LOAN_APP_PUBLIC_HOST` was uploaded with a placeholder
-and must be re-set to the real Render host once `cg-loan-app` exists
-(`arcade secret set LOAN_APP_PUBLIC_HOST <host>`). And the tools require the
-`cg-idp` auth provider, which #13 registers; until then a call fails the
-requirement check before any hook fires — by design, see above.
+Two operational notes. `APP_PUBLIC_HOST` has to be set as an Arcade secret to
+the app's public host (the ngrok host) before a call can reach it
+(`arcade secret set APP_PUBLIC_HOST <host>`), and a deployment that still holds
+the old variable name must be redeployed, because the tools now declare the new
+one. And the tools require the `app-identity` auth provider; until it is
+registered a call fails the requirement check before any hook fires — by
+design, see above.

@@ -31,6 +31,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { identityLink, linkIdentity } from "../lib/identity/link.ts";
 import { nonce, pkce } from "../lib/identity/oidc.ts";
 import { readLoanBook } from "../lib/loan-context/read.ts";
 import { openLoanBook } from "../lib/loans/db.ts";
@@ -41,10 +42,9 @@ let identity: IdentityHarness;
 /** A real loan module over its own `loans.db`, handed to the reader in-process (#5). */
 let loans: LoanModule;
 let workspace: string;
-/** Every `grant_type` the IdP's token endpoint was asked for, through the proxy. */
+/** Every `grant_type` the IdP's token endpoint was asked for, counted at the in-process link. */
 let grants: string[] = [];
-let idpProxy: ReturnType<typeof Bun.serve>;
-/** What `readLoanBook` is told the IdP is: the proxy, so its token calls are counted. */
+/** What `readLoanBook` is told the IdP is: the harness's, whose token calls are counted below. */
 let idpConfig: { issuer: string; clientId: string; clientSecret: string };
 
 beforeAll(async () => {
@@ -61,31 +61,31 @@ beforeAll(async () => {
     resetToken: "",
   });
 
-  idpProxy = Bun.serve({
-    port: 0,
+  // Every refresh the reader makes reaches the provider in-process since #6
+  // (`lib/identity/link.ts`), not over HTTP, so the counting sits where the
+  // proxy used to: around the linked provider, passing every request on
+  // untouched.
+  const linked = identityLink();
+  if (linked === undefined) throw new Error("the identity harness linked no provider");
+  linkIdentity({
+    failure: linked.failure,
     async fetch(request) {
       const url = new URL(request.url);
-      const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
-      if (url.pathname === "/oauth2/token" && body !== undefined) {
-        grants.push(new URLSearchParams(body).get("grant_type") ?? "unknown");
+      if (url.pathname === "/oauth2/token" && request.method === "POST") {
+        grants.push(new URLSearchParams(await request.clone().text()).get("grant_type") ?? "unknown");
       }
-      return fetch(`${identity.idpUrl}${url.pathname}${url.search}`, {
-        method: request.method,
-        headers: request.headers,
-        ...(body === undefined ? {} : { body }),
-      });
+      return linked.fetch(request);
     },
   });
 
   idpConfig = {
-    issuer: `http://localhost:${idpProxy.port}`,
+    issuer: identity.idpUrl,
     clientId: identity.config.identity.idpClientId,
     clientSecret: identity.config.identity.idpClientSecret,
   };
 }, 90_000);
 
 afterAll(async () => {
-  idpProxy?.stop(true);
   loans?.db.close();
   await identity?.stop();
   rmSync(workspace, { recursive: true, force: true });

@@ -11,13 +11,19 @@
  * IdP's user records instead of at the poll. #151 was the same mistake in
  * another fault surface: a screen asserting something that did not occur.
  *
- * So these drive the real handler, over HTTP, against a provider that fails in
- * each of the three different ways, and assert on what the page *says*.
+ * So these drive the real handler against a provider that fails in each of
+ * the three different ways, and assert on what the page *says*.
+ *
+ * Since #6 the handler reaches the provider in-process, through
+ * `lib/identity/link.ts`, never over the network, so the stand-in is linked
+ * there rather than served on a port: the handler's requests to it are the
+ * same `Request`s it would send the app's own Better Auth.
  */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 
 import { readIdentitySurface } from "../lib/config.ts";
 import { signinCallback } from "../lib/identity/handlers.ts";
+import { linkIdentity } from "../lib/identity/link.ts";
 import { SIGNIN_COOKIE, writeLeg, type SigninLeg } from "../lib/identity/session.ts";
 
 const SESSION_SECRET = "userinfo-failure-suite-secret-0123456789";
@@ -29,12 +35,11 @@ let userinfoAnswer: { status: number; body: string; contentType?: string } = {
   body: JSON.stringify({ sub: "alice", email: "alice@bank.example" }),
 };
 
-const idp = Bun.serve({
-  port: 0,
-  async fetch(request) {
+const idp = {
+  async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     // `advertisedAuthMethod` reads this before every token request.
-    if (pathname === "/health") return Response.json({ oauth: { token_endpoint_auth_method: "client_secret_basic" } });
+    if (pathname === "/identity/health") return Response.json({ oauth: { token_endpoint_auth_method: "client_secret_basic" } });
     if (pathname === "/oauth2/token") {
       await request.text();
       return Response.json({ access_token: "at-alice", token_type: "Bearer", expires_in: 3600 });
@@ -47,18 +52,18 @@ const idp = Bun.serve({
     }
     return new Response("not found", { status: 404 });
   },
-});
+};
+linkIdentity({ fetch: idp.fetch, failure: () => null });
 
 const config = readIdentitySurface({
-  IDP_ISSUER: `http://localhost:${idp.port}`,
+  APP_PUBLIC_HOST: "localhost:3999",
   IDP_CLIENT_ID: "client-c",
   IDP_CLIENT_SECRET: "client-c-secret",
-  PUBLIC_URL: "http://localhost:3999",
   SESSION_SECRET,
 });
 
 afterAll(() => {
-  idp.stop(true);
+  linkIdentity(undefined);
 });
 
 afterEach(() => {

@@ -16,6 +16,7 @@ from arcade_core.errors import ToolExecutionError
 
 from approvals import Decision, app, decide, request_approval
 from approvals.slack import lookup_user_by_email
+from approvals.store import base_url
 from tests.conftest import (
     CAST,
     DANA,
@@ -84,8 +85,8 @@ class TestDefinition:
             for t in app._catalog
         }
         assert secrets == {
-            "RequestApproval": ["APPROVALS_STORE_TOKEN", "HOOKS_PUBLIC_HOST", "WEB_PUBLIC_HOST"],
-            "Decide": ["APPROVALS_STORE_TOKEN", "HOOKS_PUBLIC_HOST"],
+            "RequestApproval": ["APPROVALS_STORE_TOKEN", "APP_PUBLIC_HOST"],
+            "Decide": ["APPROVALS_STORE_TOKEN", "APP_PUBLIC_HOST"],
         }
 
     def test_describes_every_tool_and_every_argument(self) -> None:
@@ -353,7 +354,10 @@ class TestTheSlackMessage:
             if block["type"] == "actions"
             for element in block["elements"]
         )
-        assert button["url"] == f"https://cg-web.example.test/approvals/{result['request_id']}"
+        # On the app's own host since #6: the store and the approval page are
+        # both the app, behind the one `APP_PUBLIC_HOST` secret. Until then
+        # the link had a host secret of its own, the web UI's.
+        assert button["url"] == f"{base_url(store.host)}/approvals/{result['request_id']}"
         assert result["approval_url"] == button["url"]
 
     @pytest.mark.parametrize("smell", ["token", "signature", "sig=", "hmac", "jwt", "secret"])

@@ -76,8 +76,7 @@ beforeEach(() => {
     ARCADE_APPROVALS_TOOLKIT: "Approvals",
     ANTHROPIC_API_KEY: "gateway-refresh-suite-anthropic-key",
     SESSION_SECRET,
-    PUBLIC_URL: WEB_URL,
-    IDP_ISSUER: WEB_URL,
+    APP_PUBLIC_HOST: new URL(WEB_URL).host,
     IDP_CLIENT_ID: "web",
     IDP_CLIENT_SECRET: "gateway-refresh-suite-client-secret",
   });

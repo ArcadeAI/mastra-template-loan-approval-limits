@@ -5,7 +5,7 @@
  * `governance.db` on disk this test can edit behind its back — which is the
  * only way to produce the two states that matter: a policy that drifted from
  * the shipped fixture, and one that no longer compiles. Nothing about the unit
- * under test is stubbed; what is substituted is `HOOKS_PUBLIC_HOST`, because
+ * under test is stubbed; what is substituted is `APP_PUBLIC_HOST`, because
  * the port the OS handed the subprocess is not knowable until it has booted.
  *
  * `RESET_TOKEN` is the one credential in this system with no development

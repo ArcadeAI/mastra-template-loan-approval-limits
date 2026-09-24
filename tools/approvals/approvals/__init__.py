@@ -52,8 +52,7 @@ from approvals.slack import (
 )
 from approvals.store import (
     APPROVALS_STORE_TOKEN_SECRET,
-    HOOKS_HOST_SECRET,
-    WEB_HOST_SECRET,
+    APP_HOST_SECRET,
     base_url,
     create_request,
     fetch_roster,
@@ -62,9 +61,8 @@ from approvals.store import (
 
 __all__ = [
     "APPROVALS_STORE_TOKEN_SECRET",
-    "HOOKS_HOST_SECRET",
+    "APP_HOST_SECRET",
     "SLACK_SCOPES",
-    "WEB_HOST_SECRET",
     "Decision",
     "app",
     "approval_url",
@@ -93,8 +91,9 @@ app = MCPApp(
 # audit row and shows nothing on the panel: rehearse the Slack authorization
 # rather than discovering it on stage.
 _requires_slack = Slack(scopes=SLACK_SCOPES)
-_store_secrets = [HOOKS_HOST_SECRET, APPROVALS_STORE_TOKEN_SECRET]
-_request_secrets = [*_store_secrets, WEB_HOST_SECRET]
+# Both tools read the same two since #6: the app's host, where the store and the
+# approval page both live, and the store's bearer.
+_secrets = [APP_HOST_SECRET, APPROVALS_STORE_TOKEN_SECRET]
 
 
 class Decision(str, Enum):
@@ -102,14 +101,14 @@ class Decision(str, Enum):
     DENIED = "denied"
 
 
-def approval_url(web_host: str, request_id: str) -> str:
+def approval_url(app_host: str, request_id: str) -> str:
     """The approval page for one request. The id, and nothing else.
 
     No query string, because a query string is where a token arrives. #19
     authorises the clicker at click time; this URL identifies the request and
     says nothing about who may act on it.
     """
-    return f"{base_url(web_host)}/approvals/{request_id}"
+    return f"{base_url(app_host)}/approvals/{request_id}"
 
 
 def describe_rule(
@@ -140,7 +139,7 @@ def describe_rule(
     )
 
 
-@app.tool(requires_auth=_requires_slack, requires_secrets=_request_secrets)
+@app.tool(requires_auth=_requires_slack, requires_secrets=_secrets)
 async def request_approval(
     context: Context,
     action: Annotated[
@@ -171,11 +170,10 @@ async def request_approval(
             developer_message="context.user_id was empty on request_approval.",
         )
 
-    hooks_host = context.get_secret(HOOKS_HOST_SECRET)
+    app_host = context.get_secret(APP_HOST_SECRET)
     store_token = context.get_secret(APPROVALS_STORE_TOKEN_SECRET)
-    web_host = context.get_secret(WEB_HOST_SECRET)
 
-    roster = await fetch_roster(hooks_host, store_token)
+    roster = await fetch_roster(app_host, store_token)
     try:
         routed: RoutingResult = route_approval(amount, requester_id, roster)
     except ValueError as exc:
@@ -203,7 +201,7 @@ async def request_approval(
     requester = next((s for s in roster if s.user_id == requester_id), None)
 
     created = await create_request(
-        hooks_host,
+        app_host,
         store_token,
         {
             "requester_id": requester_id,
@@ -234,7 +232,7 @@ async def request_approval(
         amount=amount,
         justification=justification,
         rule_tripped=describe_rule(record.get("rule"), requester, action, amount),
-        approval_url=approval_url(web_host, str(request_id)),
+        approval_url=approval_url(app_host, str(request_id)),
         candidate_display_names=tuple(
             s.display_name or s.user_id for s in routed.candidates
         ),
@@ -282,7 +280,7 @@ async def request_approval(
     }
 
 
-@app.tool(requires_secrets=_store_secrets)
+@app.tool(requires_secrets=_secrets)
 async def decide(
     context: Context,
     request_id: Annotated[str, "The approval request being answered."],
@@ -307,7 +305,7 @@ async def decide(
         )
 
     updated = await record_decision(
-        context.get_secret(HOOKS_HOST_SECRET),
+        context.get_secret(APP_HOST_SECRET),
         context.get_secret(APPROVALS_STORE_TOKEN_SECRET),
         request_id,
         {

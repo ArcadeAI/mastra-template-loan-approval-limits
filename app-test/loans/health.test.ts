@@ -21,8 +21,10 @@ import { GET } from "../../app/health/route.ts";
 import fixture from "../../lib/loans/fixtures/loans.json" with { type: "json" };
 import { closeLoanModule } from "../../lib/loans/instance.ts";
 import { bootTestControlPlane } from "../control-plane-instance.ts";
+import { openTestIdentity } from "../identity-instance.ts";
 
 bootTestControlPlane();
+await openTestIdentity();
 
 const scratch = mkdtempSync(join(tmpdir(), "cg-loans-health-"));
 const previous = process.env.LOANS_DB_PATH;
@@ -35,7 +37,7 @@ afterAll(() => {
 });
 
 async function health(): Promise<{ status: number; body: Record<string, unknown> }> {
-  const response = GET();
+  const response = await GET();
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
