@@ -1,0 +1,19 @@
+{
+  "name": "@cg/identity-provider",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "//": [
+    "The app's identity provider since #6, when apps/idp folded into lib/identity/provider. It is a workspace member for this manifest, as lib/loans is for its own: the app serves it (the routes under app/oauth2, app/login, app/consent, app/jwks, app/.well-known, app/sign-in and app/identity), scripts/identity.ts runs it on a port of its own, and the root tsconfig typechecks it. It has no scripts; `oauth-client`, `identity:reset` and `generate:identity-schema` are the root's.",
+    "`external: true` is read by packages/policy-schema's workspace sweep, which otherwise requires every workspace to declare @cg/policy-schema. This one must not: it knows people, not policy, and a forker with a real IdP replaces it. `app-test/identity/knows-people-not-loans.test.ts` fails if the flag goes or an @cg/* dependency arrives, and `app-test/identity/only-identity-mints.test.ts` fails if another module reaches its signing keys or its token issuance.",
+    "Better Auth is pinned exactly, the same version as the root manifest's: replay-tolerance.ts and authorization-code.ts quote the plugin's internals by version."
+  ],
+  "cg": {
+    "external": true
+  },
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.5",
+    "better-auth": "1.7.5",
+    "zod": "4.6.5"
+  }
+}

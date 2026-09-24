@@ -12,7 +12,11 @@
  *   throw new APIError("BAD_REQUEST", { error: "invalid_grant", error_description: "invalid code" });
  * }
  * ```
- * (`dist/introspect-C6P1zrTr.mjs:1893..1900`, plugin 1.7.2.)
+ * (`dist/introspect-njKASm3q.mjs:1893..1902`, plugin 1.7.5; re-read on #6 when
+ * the fold took 1.7.5. In 1.7.2 it was the same code at the same lines of
+ * `dist/introspect-C6P1zrTr.mjs`. `revokeTokensIssuedForAuthorizationCode` is
+ * at line 1528 and deletes `oauthAccessToken`, then `oauthRefreshToken`, by a
+ * lone `authorizationCodeId` equality.)
  *
  * The refusal is correct and stays. The revocation is what turned #100 from a
  * harmless duplicate into a dead grant: `revokeTokensIssuedForAuthorizationCode`
@@ -54,17 +58,19 @@ const ISSUED_TOKEN_MODELS = new Set(["oauthAccessToken", "oauthRefreshToken"]);
 interface WhereClause {
   field: string;
   value?: unknown;
-  operator?: string;
-  connector?: string;
+  operator?: string | undefined;
+  connector?: string | undefined;
 }
 
 /**
  * Whether one `deleteMany` is the replay revocation and nothing else.
  *
- * Deliberately exact rather than broad. Across plugin 1.7.2 there are four
- * `deleteMany` calls on these models — three key on `clientId`+`userId` or on
- * `refreshId` (`invalidateRefreshTokenFamily`, refresh rotation, `/oauth2/revoke`)
- * and are real revocations a user or client asked for. Only
+ * Deliberately exact rather than broad. Across plugin 1.7.5 (as across 1.7.2)
+ * there are four `deleteMany` calls on these models — three key on
+ * `clientId`+`userId` or on `refreshId` (`invalidateRefreshFamily`,
+ * `introspect-njKASm3q.mjs:1509` and `:1517`, and `revokeRefreshToken`,
+ * `authorize-riRRCSbC.mjs:3539`, which `/oauth2/revoke` reaches) and are real
+ * revocations a user or client asked for. Only
  * `revokeTokensIssuedForAuthorizationCode` deletes by a lone `authorizationCodeId`
  * equality, so that is the whole predicate: right model, exactly one clause, that
  * field, a plain equality.

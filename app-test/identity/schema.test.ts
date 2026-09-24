@@ -7,9 +7,9 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 
-import { compileSchema } from "../src/schema.ts";
+import { compileSchema } from "../../lib/identity/provider/schema.ts";
 
-const SCHEMA_SQL = join(import.meta.dir, "..", "src", "schema.sql");
+const SCHEMA_SQL = join(import.meta.dir, "..", "..", "lib", "identity", "provider", "schema.sql");
 
 test("src/schema.sql matches what the installed Better Auth generates", async () => {
   const checkedIn = await Bun.file(SCHEMA_SQL).text();

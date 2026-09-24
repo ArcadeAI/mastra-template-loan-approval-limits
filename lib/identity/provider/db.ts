@@ -3,9 +3,9 @@
  * `account`, `verification`) plus the OAuth provider plugin's (`oauthClient`,
  * tokens, consents).
  *
- * This service knows who someone is and nothing else: no titles, no limits, no
- * loans. Authority lives in `apps/hooks`; the loan book lives in the business
- * system. Everything here is identity.
+ * The identity module knows who someone is and nothing else: no titles, no
+ * limits, no loans. Authority lives in the control plane; the loan book lives
+ * in the loan module. Everything here is identity.
  */
 import { Database } from "bun:sqlite";
 import { hashPassword } from "better-auth/crypto";
@@ -149,39 +149,46 @@ export function idempotentSchema(generated: string): string {
 }
 
 /**
- * The DDL that actually runs, in both bootstrap paths: inside `seed()`'s
- * transaction on a fresh database, and on its own against a database that
- * predates a table added since. See `SCHEMA_VERSION`.
+ * The DDL that actually runs, inside `seed()`'s transaction on a fresh
+ * database. Still passed through `idempotentSchema`, although since #6 nothing
+ * replays it against an older disk (see `SCHEMA_VERSION`): the pass costs
+ * nothing, and its refusal of a statement form it does not recognise is how a
+ * Better Auth upgrade that emits a new one is caught at import rather than at
+ * the first seed.
  */
 const SCHEMA = idempotentSchema(GENERATED_SCHEMA);
 
 /**
  * The schema revision this build writes, recorded in `PRAGMA user_version`.
- * Bump it in the same commit as any change to `src/schema.sql` or to
- * `upgradeSchema`.
+ * Bump it in the same commit as any change to `schema.sql`.
  *
- * Version 1 is the schema at #70 — Better Auth's tables, the OAuth provider
- * plugin's, and `jwks` from the JWT plugin. A database written before this
- * existed reads back 0, the SQLite default, which is exactly the "needs the
- * upgrade path" answer, so no disk has to be touched by hand to adopt this.
+ * **Version 2 is a fresh schema (#6): Better Auth 1.7.5.** 1.7.5 drops
+ * `account.issuer`, which 1.7.2 declared `NOT NULL` with a unique index on
+ * `(issuer, accountId)`. A disk written by the 1.7.2 build therefore holds a
+ * column this build never writes, and the first seed or reset against it fails
+ * on that constraint. DESIGN.md → Services records the choice: the demo held
+ * Better Auth at 1.7.2 because moving would have needed a migration on a live
+ * disk, and the template's `idp.db` starts fresh instead. So there is no
+ * upgrade path, and a disk stamped older than this is refused with the way out,
+ * the same as one stamped newer.
  *
- * **What version 1 does:** replays the idempotent DDL, so a table or index
- * added since a disk was written simply appears (`jwks`, from the JWT plugin),
- * and rebuilds `user` so `email` is `COLLATE NOCASE` and every stored address
- * is lowercase (#58, which only a fresh seed got). The rebuild is not
- * expressible as DDL replay — see `rebuildUserWithNocaseEmail`.
- *
- * **The limit on the replay half: new tables and new indexes.** An added
- * column, a widened `CHECK`, a renamed index — none of those are expressible
- * as `CREATE ... IF NOT EXISTS`, none of them happen by replay, and each needs
- * an explicit step here (a guarded `ALTER TABLE`, the way `apps/loan-app` does
- * it, or a table rebuild) or a reset.
+ * Versions 0 and 1 were the demo's `apps/idp`: 0 before the JWT plugin (#70),
+ * 1 from #70 on. Both are refused.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** The schema revision recorded on disk. 0 on anything written before #70. */
 export function readSchemaVersion(db: Database): number {
   return db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
+}
+
+/** How to get from a disk this build cannot read to one it can, said the same way for both directions. */
+function resetAdvice(path: string): string {
+  return (
+    `Reset it: stop the app, delete ${path} (and its -wal and -shm siblings), ` +
+    `and restart — the fixture reseeds on an empty disk. Note that deleting the file ` +
+    `also rotates the OAuth client, so Arcade has to be re-registered afterwards.`
+  );
 }
 
 /**
@@ -199,22 +206,40 @@ export class SchemaTooNewError extends Error {
     super(
       `idp.db at ${path} was written by a newer build (PRAGMA user_version ${found}; ` +
         `this build understands ${SCHEMA_VERSION}) and cannot be migrated backwards. ` +
-        `Reset it: stop the service, delete ${path} (and its -wal and -shm siblings), ` +
-        `and restart — the fixture reseeds on an empty disk. Note that deleting the file ` +
-        `also rotates the OAuth client, so Arcade has to be re-registered afterwards.`,
+        resetAdvice(path),
     );
     this.name = "SchemaTooNewError";
   }
 }
 
 /**
+ * Thrown at boot when `idp.db` was written by an older schema than this build's
+ * fresh one — see {@link SCHEMA_VERSION} for why there is no upgrade path.
+ * Refused rather than opened, because opening it comes up green and fails at
+ * the first reset, on a `NOT NULL` column nothing here writes.
+ */
+export class SchemaTooOldError extends Error {
+  constructor(
+    readonly path: string,
+    readonly found: number,
+  ) {
+    super(
+      `idp.db at ${path} was written by an older schema (PRAGMA user_version ${found}; ` +
+        `this build writes ${SCHEMA_VERSION}, Better Auth 1.7.5's, and does not upgrade older disks). ` +
+        resetAdvice(path),
+    );
+    this.name = "SchemaTooOldError";
+  }
+}
+
+/**
  * Opens the people database, bootstrapping it from the fixture only when it
- * has no schema, and bringing an older schema forward when it has one.
+ * has no schema, and refusing one written by any other schema version.
  *
- * Seed-if-empty rather than seed-on-boot: `idp.db` lives on a Render disk, so
- * a consent granted on stage is still there after a restart. Getting back to a
- * clean state is `scripts/reset.ts`, never a side effect of deploying — and
- * that reset leaves the OAuth client alone, see `resetPeople`.
+ * Seed-if-empty rather than seed-on-boot: `idp.db` lives on a disk, so a
+ * consent granted on stage is still there after a restart. Getting back to a
+ * clean state is the reset, never a side effect of deploying — and that reset
+ * leaves the OAuth client alone, see `resetPeople`.
  */
 export async function openPeople(path: string, people: PersonSeed[] = loadPeople()): Promise<Database> {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
@@ -224,7 +249,7 @@ export async function openPeople(path: string, people: PersonSeed[] = loadPeople
   db.exec("PRAGMA foreign_keys = ON");
 
   try {
-    if (hasSchema(db)) upgradeSchema(db, path);
+    if (hasSchema(db)) checkSchemaVersion(db, path);
     else await seed(db, people);
   } catch (cause) {
     // Leave no half-open handle behind: the caller is about to exit, and a
@@ -238,155 +263,15 @@ export async function openPeople(path: string, people: PersonSeed[] = loadPeople
 }
 
 /**
- * Brings a database created by an earlier schema up to the current one,
- * keeping every row.
+ * A disk that already has a schema is opened only when it is this build's.
  *
- * `hasSchema` only asks whether the `user` table exists, which is the right
- * question for "is this seeded?" and the wrong one for "is this current?".
- * Before #70 that was the only question anyone asked, and `seed()` was the
- * only thing that ran the DDL — so a table added after a disk existed could
- * never be created on it (#69). The JWT plugin adds exactly such a table,
- * `jwks`: on the live `cg-idp` disk this code would have come up green and
- * crash-looped on the first authorize, which is what `cg-hooks` did on #60.
- * What is "current" is `PRAGMA user_version`, not one table's existence.
- *
- * Additive and idempotent, and nothing else: replaying `SCHEMA`, which is
- * `CREATE ... IF NOT EXISTS` throughout, so a table or index added after this
- * disk existed simply appears.
- *
- * **No inserts.** The rows on this disk are the state the demo is in, and
- * `resetPeople` is what re-seeds people — deliberately, never at boot.
+ * **No inserts and no DDL.** The rows on this disk are the state the demo is
+ * in, and `resetPeople` is what re-seeds people — deliberately, never at boot.
  */
-function upgradeSchema(db: Database, path: string): void {
+function checkSchemaVersion(db: Database, path: string): void {
   const found = readSchemaVersion(db);
   if (found > SCHEMA_VERSION) throw new SchemaTooNewError(path, found);
-  if (found === SCHEMA_VERSION) return;
-
-  // `PRAGMA foreign_keys` is a no-op inside a transaction, so it goes here.
-  // The `user` rebuild below drops a table five others reference; with the
-  // constraints live, that drop would cascade every session, account, token
-  // and consent into nothing. Off for the rebuild, checked before the commit,
-  // on again afterwards — SQLite's own documented procedure for changing a
-  // column definition.
-  db.exec("PRAGMA foreign_keys = OFF");
-  try {
-    // One transaction, so a half-applied upgrade rolls back to a database that
-    // still reads its old version and tries again on the next boot.
-    db.transaction(() => {
-      db.exec(SCHEMA);
-      rebuildUserWithNocaseEmail(db, path);
-      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-
-      // Step 10 of that procedure, inside the transaction so a violation rolls
-      // the whole thing back rather than leaving orphaned rows behind.
-      const orphans = db.query<{ table: string }, []>("PRAGMA foreign_key_check").all();
-      if (orphans.length > 0) {
-        throw new Error(
-          `idp.db at ${path}: rebuilding "user" left ${orphans.length} row(s) with no person ` +
-            `to belong to. Rolled back; the database is untouched.`,
-        );
-      }
-    })();
-  } finally {
-    db.exec("PRAGMA foreign_keys = ON");
-  }
-}
-
-/** The scratch name the rebuilt `user` table is built under. */
-const USER_REBUILD_TABLE = "user_rebuilding_for_nocase_email";
-
-/**
- * Rebuilds `user` so `email` is `COLLATE NOCASE`, lowercasing every stored
- * address on the way.
- *
- * #58 made `user.email` case-insensitive and lowercased the seed, but only in
- * `schema.sql` — which **only a fresh seed ever runs**. The deployed `cg-idp`
- * disk keeps the case-sensitive column it was created with, so a persona whose
- * A role email variable carrying a capital letter still cannot log in, and the login
- * page still reports that as "That email and password did not match". #58
- * survived a whole sitting on exactly that sentence.
- *
- * Measured before choosing how to fix it, because the two candidates are not
- * equivalent. Better Auth's lookup is:
- *
- *     select "primary".* from (select * from "user" where "user"."email" = ?) as "primary"
- *
- * A bare `=` with **no `COLLATE` clause**, so SQLite takes the collation from
- * the column's own declaration. A `CREATE UNIQUE INDEX ... COLLATE NOCASE`
- * therefore changes nothing about what that comparison means: measured on a
- * pre-#58 schema, the indexed database still answers 401 with the right
- * password, and only rebuilding the column answers 200. **The table has to be
- * rebuilt; the index would have been a control that silently does nothing.**
- *
- * SQLite's documented procedure for changing a column definition: new table
- * under a scratch name, copy, drop the old, rename. `ALTER TABLE ... RENAME`
- * is not used on the *old* table, because with foreign keys enabled that
- * rewrites the `REFERENCES` clauses in `session`, `account` and the three
- * OAuth tables to point at the scratch name.
- *
- * Unconditional on the 0 → 1 step rather than conditional on detecting the
- * collation. `PRAGMA user_version` is the gate, it runs exactly once per disk,
- * and rebuilding a column that was already `NOCASE` reaches the same state —
- * so there is no detection to get subtly wrong, which is the failure mode this
- * whole file exists to avoid.
- */
-function rebuildUserWithNocaseEmail(db: Database, path: string): void {
-  const create = /create table if not exists "user" \([^;]*\)/i.exec(SCHEMA)?.[0];
-  if (!create) {
-    throw new Error(
-      `idp.db schema: no 'create table "user"' statement to rebuild from — Better Auth changed shape`,
-    );
-  }
-  // The same refusal `src/schema.ts` makes when it patches the collation in:
-  // a rebuild that quietly produced a case-sensitive column would leave the
-  // disk exactly as broken as before, and say it had migrated.
-  if (!/collate\s+nocase/i.test(create)) {
-    throw new Error(
-      `idp.db schema: "user"."email" is not 'collate nocase' in the generated schema, so ` +
-        `rebuilding the table would not make the lookup case-insensitive. Refusing to ` +
-        `report a migration that does nothing. See src/schema.ts.`,
-    );
-  }
-
-  const columnsOf = (table: string): string[] =>
-    db
-      .query<{ name: string }, []>(`PRAGMA table_info("${table}")`)
-      .all()
-      .map((column) => column.name);
-
-  const existing = columnsOf("user");
-  db.exec(create.replace(/if not exists "user"/i, `"${USER_REBUILD_TABLE}"`));
-
-  // Only the columns both shapes have. A column the new table requires and the
-  // old one never had is a migration this code cannot do; the insert fails
-  // inside the transaction and the disk is left as it was.
-  const carried = columnsOf(USER_REBUILD_TABLE).filter((column) => existing.includes(column));
-  const target = carried.map((column) => `"${column}"`).join(", ");
-  const source = carried
-    // The other half of #58's rule, applied to the rows already on the disk:
-    // the column is now case-insensitive to *compare*, but the value itself
-    // has to be lowercase, because it is the join key `apps/hooks` and the
-    // loan book hold byte-for-byte.
-    .map((column) => (column === "email" ? `lower("email")` : `"${column}"`))
-    .join(", ");
-
-  try {
-    db.exec(`INSERT INTO "${USER_REBUILD_TABLE}" (${target}) SELECT ${source} FROM "user"`);
-  } catch (cause) {
-    if (/UNIQUE|constraint/i.test(String(cause))) {
-      throw new Error(
-        `idp.db at ${path}: two people differ only by the case of their email, so they ` +
-          `collapse into one row once "user"."email" is case-insensitive. Rolled back. ` +
-          `Decide which row is the person, delete the other, and restart. ` +
-          `Find them with: SELECT lower(email), COUNT(*) FROM "user" GROUP BY 1 HAVING COUNT(*) > 1;`,
-        { cause },
-      );
-    }
-    throw cause;
-  }
-
-  db.exec('DROP TABLE "user"');
-  db.exec(`ALTER TABLE "${USER_REBUILD_TABLE}" RENAME TO "user"`);
+  if (found < SCHEMA_VERSION) throw new SchemaTooOldError(path, found);
 }
 
 function hasSchema(db: Database): boolean {
@@ -473,9 +358,9 @@ export async function resetPeople(db: Database, people: PersonSeed[] = loadPeopl
  * string on SQLite, and every row id as a random string, so rows written here
  * are indistinguishable from rows Better Auth writes itself. The credential
  * account is what `emailAndPassword` sign-in looks up: `providerId` is the
- * literal `"credential"`, `issuer` is `"local:credential"` (1.7 added it, and
- * sign-in silently fails without it), and `accountId` is the user's own id.
- * All three read off a row Better Auth's own sign-up wrote.
+ * literal `"credential"` and `accountId` is the user's own id, both read off a
+ * row Better Auth's own sign-up wrote. 1.7.2 also required `issuer`
+ * (`"local:credential"`); 1.7.5 dropped the column (#6).
  */
 function insertPeople(db: Database, people: HashedPerson[]): void {
   // Prepared after the DDL (the tables have to exist to compile against) and
@@ -486,8 +371,8 @@ function insertPeople(db: Database, people: HashedPerson[]): void {
     VALUES ($id, $name, $email, 1, $now, $now)
   `);
   const insertAccount = db.prepare<unknown, Record<string, string | number>>(`
-    INSERT INTO "account" ("id", "issuer", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt")
-    VALUES ($id, 'local:credential', $userId, 'credential', $userId, $password, $now, $now)
+    INSERT INTO "account" ("id", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt")
+    VALUES ($id, $userId, 'credential', $userId, $password, $now, $now)
   `);
 
   try {

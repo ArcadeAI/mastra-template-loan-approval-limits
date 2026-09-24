@@ -8,11 +8,11 @@
 import { oauthProvider } from "@better-auth/oauth-provider";
 import type { Database } from "bun:sqlite";
 import { betterAuth } from "better-auth";
-import type { BetterAuthOptions } from "better-auth";
+import type { BetterAuthOptions, BetterAuthPlugin } from "better-auth";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { jwt } from "better-auth/plugins/jwt";
 
-/** Where the login and consent pages live. `index.ts` serves them; the plugin redirects to them. */
+/** Where the login and consent pages live. `server.ts` serves them; the plugin redirects to them. */
 export const LOGIN_PAGE = "/login";
 export const CONSENT_PAGE = "/consent";
 
@@ -53,7 +53,7 @@ export const JWKS_PATH = "/jwks";
 
 export interface AuthConfig {
   db: Database;
-  /** Public origin, e.g. `https://cg-idp.onrender.com`. Also the OAuth issuer. */
+  /** Public origin, e.g. `https://<APP_PUBLIC_HOST>`. Also the OAuth issuer. */
   baseURL: string;
   /** Signs sessions, signs the OAuth query, and encrypts the stored JWKS private key. */
   secret: string;
@@ -301,8 +301,25 @@ export const RATE_LIMIT = {
 } as const;
 
 /**
+ * A plugin, typed as what `BetterAuthOptions.plugins` holds.
+ *
+ * Better Auth's published plugin types declare optional OpenAPI fields as
+ * `x?: T` and then assign `undefined` to them, which this repo's
+ * `exactOptionalPropertyTypes` rejects. `apps/idp` turned the setting off in a
+ * tsconfig of its own; the identity module is part of the app since #6 and is
+ * checked by the app's tsconfig, and `tsc` checks a file under the settings of
+ * whichever project imports it, so the difference is absorbed here instead, at
+ * the two places a plugin is built. Nothing is lost: nothing in this module
+ * calls a plugin endpoint through `auth.api`, only `auth.handler`,
+ * `auth.api.getSession` and `auth.$context`, which are Better Auth's own.
+ */
+function plugin(value: unknown): BetterAuthPlugin {
+  return value as BetterAuthPlugin;
+}
+
+/**
  * The options, separately from the instance, because `scripts/generate-schema.ts`
- * derives `src/schema.sql` from exactly these — the table set depends on the
+ * derives `schema.sql` from exactly these — the table set depends on the
  * plugin list, and a schema generated from a different configuration is how
  * the seed and the library end up disagreeing about a column.
  */
@@ -337,10 +354,12 @@ export function authOptions({ db, baseURL, secret }: AuthConfig) {
       // (the plugin's default). Changing that secret does not rotate the key
       // pair, it makes the stored one unreadable — same blast radius the
       // secret already had for the OAuth client row.
-      jwt({
-        jwks: { keyPairConfig: { alg: ID_TOKEN_ALG, modulusLength: ID_TOKEN_MODULUS_LENGTH } },
-      }),
-      oauthProvider({
+      plugin(
+        jwt({
+          jwks: { keyPairConfig: { alg: ID_TOKEN_ALG, modulusLength: ID_TOKEN_MODULUS_LENGTH } },
+        }),
+      ),
+      plugin(oauthProvider({
         loginPage: LOGIN_PAGE,
         consentPage: CONSENT_PAGE,
         scopes: [...SCOPES],
@@ -364,7 +383,7 @@ export function authOptions({ db, baseURL, secret }: AuthConfig) {
           revoke: { ...RATE_LIMIT.revoke },
           register: { ...RATE_LIMIT.register },
         },
-      }),
+      })),
     ],
   } satisfies BetterAuthOptions;
 }
