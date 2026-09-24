@@ -124,12 +124,15 @@ describe("both services guard production the same way", () => {
     // Which means the image smokes have to supply one, or the container exits
     // before /health and the job fails. That is what happened to `build hooks
     // image` on round 2, and it is why `build web image` is given one too.
+    //
+    // Since #4 there is no hooks image: the control plane ships in the web
+    // one, so that one smoke is handed both bearers. It was `hooks` and `web`,
+    // one store token each, until then.
     const workflow = sourceOf(".github", "workflows", "ci.yml");
-    const smokes = workflow.match(/-e APPROVALS_STORE_TOKEN=/g) ?? [];
-    expect(smokes.length).toBeGreaterThanOrEqual(2);
-    for (const service of ["hooks", "web"]) {
-      expect(workflow).toContain(`- service: ${service}`);
-    }
+    const web = workflow.slice(workflow.indexOf("- service: web"));
+    expect(workflow).toContain("- service: web");
+    expect(workflow).not.toContain("- service: hooks");
+    expect(web).toMatch(/smoke_env:[\s\S]*?-e ARCADE_HOOK_SIGNING_SECRET=[\s\S]*?-e APPROVALS_STORE_TOKEN=/);
   });
 });
 
