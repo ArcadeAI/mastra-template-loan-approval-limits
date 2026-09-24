@@ -89,6 +89,13 @@ export type ControlPlaneReport = ControlPlaneStatus | ControlPlaneUnreachable;
 /** The subset of `cg-hooks`' `/health` this service reads. */
 interface HooksHealth {
   status?: unknown;
+  /**
+   * The control plane's own roll-up, when `/health` is the app's (#4): there
+   * the top-level `status` is the whole app's (`ok`/`degraded`) and this is
+   * the `healthy`/`degraded` `cg-hooks` used to answer with. Absent from the
+   * standalone runner's `/health`, whose top-level `status` is that one.
+   */
+  control_plane?: { status?: unknown };
   reset?: unknown;
   warnings?: unknown;
   policy?: { status?: unknown; revision?: unknown; error?: unknown };
@@ -171,7 +178,7 @@ export async function readControlPlane(
   return {
     reachable: true,
     host,
-    status: body.status === "healthy" ? "healthy" : "degraded",
+    status: (body.control_plane?.status ?? body.status) === "healthy" ? "healthy" : "degraded",
     policy: {
       status: typeof body.policy?.status === "string" ? body.policy.status : "unknown",
       revision: typeof body.policy?.revision === "number" ? body.policy.revision : null,
