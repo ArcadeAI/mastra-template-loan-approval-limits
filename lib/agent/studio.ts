@@ -256,7 +256,17 @@ export async function studioTools(
   const gatewayUrl = mcpUrl(config.arcadeApiUrl, config.identity.gatewayId);
 
   let live = await gatewayToken(studio.holder, config);
-  if (live.token === null) throw new Error(`Studio has no gateway token: ${live.reason}. To authorize, ${authorize}.`);
+  if (live.token === null) {
+    // The seam's reasons are worded for a browser. The two that are about
+    // having nothing at all get Studio's own sentence; a failed refresh keeps
+    // the seam's, which says what the authorization server answered.
+    const why = studio.holder.gateway
+      ? live.reason
+      : studio.holder.gateway_rejected_at
+        ? "the gateway refused the token this Studio process held, so it was dropped"
+        : "nobody has authorized this Studio process yet";
+    throw new Error(`Studio has no gateway token: ${why}. To authorize, ${authorize}.`);
+  }
   studio.holder = live.holder;
 
   // The same one round trip the chat route makes, for the same reason:
