@@ -77,9 +77,9 @@ app = MCPApp(
     name="approvals",
     version="1.0.0",
     instructions=(
-        "Human-in-the-loop approvals. When a tool call is refused for exceeding your "
-        "authority, request_approval escalates it to the one person whose authority "
-        "covers it and messages them; decide records that person's answer."
+        "Human-in-the-loop approvals. request_approval records a request for one "
+        "person's approval of an action and notifies the approver it routes to; decide "
+        "records that person's answer."
     ),
 )
 
@@ -145,28 +145,24 @@ async def request_approval(
     context: Context,
     action: Annotated[
         str,
-        "The action that was refused, named exactly as the refusal named it — for "
-        "example approve_loan.",
+        "The action the approval would cover — for example approve_loan.",
     ],
     resource_id: Annotated[
-        str, "The thing the action was going to act on — for example the loan ID LN-2291."
+        str, "What the action would act on, such as a loan application ID."
     ],
     amount: Annotated[
         float,
-        "The dollar amount the refused call carried. This is what determines who has "
-        "the authority to approve it, so pass the amount unchanged.",
+        "The amount the approval would cover, in US dollars.",
     ],
     justification: Annotated[
         str,
-        "Why this should be approved, in your own words and specific to this case. "
-        "The approver reads it verbatim and decides on it, so give the reasons rather "
-        "than restating the request.",
+        "The case for the action. The approver reads it verbatim.",
     ],
 ) -> Annotated[
     dict[str, Any],
-    "The request ID and the person it was routed to, so you can say who was asked.",
+    "The request ID and who was notified.",
 ]:
-    """Escalate an action you were refused authority for to the person who can approve it. Use this when a tool call was denied for exceeding your approval authority, and only then. You do not choose the approver: this routes the request to the individual holding the lowest authority sufficient to cover it, never to whoever is most senior and never to the person asking. It records the request, messages that person with everything they need to decide, and returns the request ID and who was asked. It does not wait for the answer and it does not grant you anything — after calling this, tell the user who was asked and stop; you will be told when they have decided."""
+    """Records a request for one person's approval of an action on a resource, and notifies the approver it routes to. Returns the request ID and who was notified."""
     requester_id = context.user_id or ""
     if not requester_id:
         raise ToolExecutionError(
@@ -289,13 +285,13 @@ async def request_approval(
 @app.tool(requires_secrets=_store_secrets)
 async def decide(
     context: Context,
-    request_id: Annotated[str, "The ID of the approval request being decided."],
-    decision: Annotated[Decision, "Whether the request is approved or denied."],
+    request_id: Annotated[str, "The approval request being answered."],
+    decision: Annotated[Decision, "The answer."],
     note: Annotated[
-        str | None, "A note to the requester explaining the decision. Optional."
+        str | None, "An optional note recorded with the decision."
     ] = None,
 ) -> Annotated[dict[str, Any], "The approval request as it stands after the decision."]:
-    """Record an approver's answer to an approval request. This is called on behalf of whoever clicked approve or deny on the approval page, and it records their answer against the request; it does not decide anything itself and it does not check whether they were entitled to. Whether this caller may decide this request — their role, their authority, and that they are not the person who asked — is settled before this runs."""
+    """Records an approver's answer against an approval request."""
     # No auth requirement on purpose. An OAuth requirement is evaluated *before*
     # the `/pre` hook, so a refusal there fires no hook, writes no audit row and
     # shows nothing on the panel — and the whole point of this tool is that its

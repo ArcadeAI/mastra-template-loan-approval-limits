@@ -153,7 +153,7 @@ async def search_loans(
         float | None, "Return only applications requesting at most this many US dollars."
     ] = None,
 ) -> Annotated[dict[str, Any], "The number of matching applications and their list-view fields."]:
-    """Find loan applications in the loan book, newest submission first. Use this when you do not already have a loan ID: to list what is awaiting a decision, or to find applications within a dollar range. All filters are optional and combine; with none supplied this returns every application on file. Each hit carries the list-view fields only — ID, borrower, amount, status, purpose and submission date. To read a borrower's financials, the underwriter's notes or the decisions already recorded, call get_loan with an ID from these results."""
+    """Find loan applications in the loan book, newest submission first: what is awaiting a decision, or what falls within a dollar range. All filters are optional and combine; with none supplied this returns every application on file. Each hit carries the list-view fields only — ID, borrower, amount, status, purpose and submission date. A borrower's financials, the underwriter's notes and the decisions already recorded are in get_loan's result for an ID from these hits."""
     params: dict[str, Any] = {}
     if status is not None:
         params["status"] = status.value
@@ -169,7 +169,7 @@ async def get_loan(
     context: Context,
     loan_id: LoanId,
 ) -> Annotated[dict[str, Any], "The complete loan application record."]:
-    """Read one loan application's complete file by ID. Returns everything the loan book holds on it: borrower details, the requested amount and purpose, credit score, annual revenue and years in business, the underwriter's notes, the borrower's bank account number and tax ID, and every approval or denial already recorded against it, oldest first. Use this whenever you need more than the list-view fields search_loans returns, and always before recording a decision on an application."""
+    """Read one loan application's complete file by ID. Returns everything the loan book holds on it: borrower details, the requested amount and purpose, credit score, annual revenue and years in business, the underwriter's notes, the borrower's bank account number and tax ID, and every approval or denial already recorded against it, oldest first."""
     return await _call(context, "GET", f"/loans/{loan_id}")
 
 
@@ -183,7 +183,7 @@ async def approve_loan(
         "application may be approved for less.",
     ],
 ) -> Annotated[dict[str, Any], "The application as it stands after the approval."]:
-    """Approve a loan application for a given dollar amount, committing the decision to the loan book: the approval is appended to the application's decision history and its status becomes 'approved'. Use this only to actually extend credit — it is a write against the bank's system of record, not a recommendation or a draft, and there is no undo. Returns the application as it stands after the approval."""
+    """Approve a loan application for a given dollar amount, committing the decision to the loan book: the approval is appended to the application's decision history and its status becomes 'approved'. Returns the application as it stands after the approval."""
     return await _call(context, "POST", f"/loans/{loan_id}/approve", json={"amount": amount})
 
 
@@ -197,5 +197,5 @@ async def deny_loan(
         "and read by auditors, so write it for a human.",
     ],
 ) -> Annotated[dict[str, Any], "The application as it stands after the denial."]:
-    """Decline a loan application with a stated reason, committing the decision to the loan book: the denial is appended to the application's decision history and its status becomes 'denied'. Use this only to actually decline the application — it is a write against the bank's system of record, and there is no undo. Returns the application as it stands after the denial."""
+    """Decline a loan application with a stated reason, committing the decision to the loan book: the denial is appended to the application's decision history and its status becomes 'denied'. Returns the application as it stands after the denial."""
     return await _call(context, "POST", f"/loans/{loan_id}/deny", json={"reason": reason})
