@@ -84,7 +84,7 @@ afterEach(() => {
   for (const instance of running.splice(0)) instance.stop();
 });
 
-/** A whole control plane, as `apps/hooks/src/index.ts` boots one. */
+/** A whole control plane, as `lib/control-plane/index.ts` boots one. */
 function start(setting: ScannerSetting): Running {
   const config = configFor(setting);
   const db = openGovernance(":memory:", config);

@@ -13,7 +13,7 @@
  * DevTools console, where nobody running the demo is looking.
  *
  * The table below is shared, verbatim, with
- * `apps/loan-app/test/public-host.test.ts` and `apps/hooks/test/public-host.test.ts`
+ * `apps/loan-app/test/public-host.test.ts` and `app-test/control-plane/public-host.test.ts`
  * — the three copies of the check are written out rather than imported, so each
  * one is pinned by its own suite.
  */

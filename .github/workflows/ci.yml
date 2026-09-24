@@ -141,7 +141,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [hooks, loan-app, web, idp]
+        service: [loan-app, web, idp]
         include:
           # cg-idp refuses to boot under NODE_ENV=production without a
           # BETTER_AUTH_SECRET, on purpose: on Render the secret is generated
@@ -150,34 +150,30 @@ jobs:
           # smoke test hands it a throwaway one.
           - service: idp
             smoke_env: -e BETTER_AUTH_SECRET=ci-smoke-only-not-a-real-secret-0000
-          # cg-hooks likewise refuses to boot in production without its two
-          # bearers, and for the same reason in both cases: a control plane
-          # that fell back to a known token would accept hook calls from
-          # anyone, and an approvals store that fell back to one would accept
-          # the approval record a human then acts on from anyone. Two secrets
-          # rather than one because they have two holders — Arcade signs the
-          # hooks, the deployed approvals toolkit and cg-web call /approvals —
-          # and neither is accepted in the other's place. Throwaway here; both
-          # are `sync: false` in render.yaml.
-          - service: hooks
+          # cg-web refuses to run without its two bearers under
+          # NODE_ENV=production, and since #4 it holds both: it is the control
+          # plane too (cg-hooks was folded in), so Arcade signs its hooks with
+          # one and the deployed approvals toolkit and the approval page present
+          # the other, and neither is accepted in the other's place. A control
+          # plane that fell back to a known token would accept hook calls from
+          # anyone. Without them the app still boots and /health still answers
+          # 200 — degraded, naming the refusal — so the step below also checks
+          # that the control plane's policy loaded, or this job would pass on an
+          # image that governs nothing. Throwaway here; both are `sync: false`
+          # in render.yaml.
+          - service: web
+            dockerfile: ./Dockerfile
             smoke_env: >-
               -e ARCADE_HOOK_SIGNING_SECRET=ci-smoke-only-not-a-real-secret
               -e APPROVALS_STORE_TOKEN=ci-smoke-only-not-a-real-token
-          # cg-web presents that same store token to the approvals endpoints
-          # when the approval page reads a request, so it refuses to boot
-          # without one for the same reason: a service that authenticated with
-          # a value published in its own source would do it quietly, because
-          # the fallback works locally. Round 3 of #52 caught the guard missing
-          # on this side.
-          - service: web
-            dockerfile: ./Dockerfile
-            smoke_env: -e APPROVALS_STORE_TOKEN=ci-smoke-only-not-a-real-token
+            smoke_expect: '"policy":{"status":"ready"'
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      # All four services are runtime: docker with hand-written Dockerfiles,
+      # All three services are runtime: docker with hand-written Dockerfiles,
       # so without this the entire container path is only ever exercised by a
       # Render deploy. A workspace added without its matching
       # `COPY packages/<new>/package.json` line would keep CI green and then
@@ -187,7 +183,8 @@ jobs:
         with:
           context: .
           # The web app's Dockerfile is at the root since #3; every other
-          # service's is in its own directory under apps/.
+          # service's is in its own directory under apps/. There is no hooks
+          # image since #4: the control plane ships inside the web one.
           file: ${{ matrix.dockerfile || format('./apps/{0}/Dockerfile', matrix.service) }}
           push: false
           load: true
@@ -203,7 +200,16 @@ jobs:
         run: |
           docker run -d --name svc -p 8080:8080 -e PORT=8080 ${{ matrix.smoke_env }} cg-${{ matrix.service }}:ci
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/health; then echo; exit 0; fi
+            if body=$(curl -fsS http://localhost:8080/health); then
+              echo "$body"
+              expect='${{ matrix.smoke_expect }}'
+              if [ -n "$expect" ] && ! grep -qF "$expect" <<<"$body"; then
+                echo "::error::${{ matrix.service }}'s /health does not contain $expect"
+                docker logs svc
+                exit 1
+              fi
+              exit 0
+            fi
             sleep 1
           done
           echo "::error::${{ matrix.service }} did not answer /health"

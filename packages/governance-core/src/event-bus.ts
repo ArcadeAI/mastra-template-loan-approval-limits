@@ -4,7 +4,7 @@
  * One publisher — the audit write — and as many subscribers as there are open
  * streams. Nothing here knows about HTTP, SQLite or the wire format: encoding a
  * batch as `text/event-stream` frames and holding a socket open is the hook
- * server's job (`apps/hooks/src/events.ts`). This module is the seam between
+ * server's job (`lib/control-plane/events.ts`). This module is the seam between
  * "a decision was recorded" and "somebody is watching", and it is here rather
  * than in `apps/hooks` because `DESIGN.md` lists the event bus in this package
  * and a subscriber registry is exactly as domain-free as the rest of it.

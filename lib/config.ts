@@ -128,7 +128,7 @@ export interface WebConfig {
 /**
  * The value `apps/hooks` falls back to when `APPROVALS_STORE_TOKEN` is unset
  * and it is not running in production — see `DEV_STORE_TOKEN` in
- * `apps/hooks/src/config.ts`.
+ * `lib/control-plane/config.ts`.
  *
  * Duplicated rather than imported because `apps/web` does not depend on
  * `apps/hooks` in the package graph and should not start to. The cost of a
@@ -202,7 +202,7 @@ export function readIdentitySurface(
 
 export function readWebConfig(env: Record<string, string | undefined> = process.env): WebConfig {
   const storeToken = env.APPROVALS_STORE_TOKEN?.trim();
-  // Same guard, same wording, as `apps/hooks/src/config.ts`. Round 3 of #52's
+  // Same guard, same wording, as `lib/control-plane/config.ts`. Round 3 of #52's
   // review caught it missing here: the control plane refused to boot without a
   // real token while the service that *presents* it fell back to a value
   // published in this file, so a production `apps/web` would have gone on

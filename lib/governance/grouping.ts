@@ -6,7 +6,7 @@
  *
  * - **A listing.** One `tools/list` from a persona is answered by several
  *   `/access` calls — four on the deployed gateway
- *   (`apps/hooks/src/access-audit.ts`) — and each of those writes one row per
+ *   (`lib/control-plane/access-audit.ts`) — and each of those writes one row per
  *   tool this control plane governs plus, when the call reached past the
  *   catalogue, one summary row (`tool: "*"`, #107). A burst of ten or so
  *   decisions lands in a rush, before the presenter has said anything, and
@@ -78,7 +78,7 @@ import type { GovernanceEvent, HookPoint } from "@cg/policy-schema";
  *
  * What the window actually has to cover is the gap between the **four
  * `/access` calls** the deployed gateway makes for one `tools/list`
- * (`apps/hooks/src/access-audit.ts`) — four HTTP round trips to Render, which
+ * (`lib/control-plane/access-audit.ts`) — four HTTP round trips to Render, which
  * nothing here can measure. Three seconds is an order of magnitude above every
  * burst that has been measured, comfortably above four round trips, and well
  * under the gap between two things a presenter does. If a deployed listing
@@ -102,7 +102,7 @@ export const LISTING_TOOL_SPREAD = 3;
 
 /**
  * The `tool` spelling of the row that stands for everything outside the
- * catalogue (#107). The same string `apps/hooks/src/access-audit.ts` exports
+ * catalogue (#107). The same string `lib/control-plane/access-audit.ts` exports
  * as `SUMMARY_TOOL`; it is repeated rather than imported because `apps/web`
  * does not depend on `apps/hooks` and the value is part of the event contract,
  * not of that module.

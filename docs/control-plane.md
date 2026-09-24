@@ -1,7 +1,16 @@
-# apps/hooks — the control plane
+# The control plane (`lib/control-plane/`)
 
-The service Arcade calls on every tool call. Owns `governance.db`, serves the three
+What Arcade calls on every tool call. Owns `governance.db`, serves the three
 contextual-access hooks, and records every decision it makes.
+
+**A module of the app since #4, not a service.** It was `apps/hooks`, a Bun service of its
+own; this file was its README. The app mounts every route below in-process, on the app's own
+port (`app/access/route.ts` and its siblings hand the request to `createControlPlane`'s
+handler), and boots it once per process from `instrumentation.ts`. The paths are the
+service's, except the approvals store, which moved under `/api/approvals` because the app's
+`/approvals/{id}` is the approval page. `scripts/control-plane.ts` puts the same handler on a
+port of its own for the test harnesses. Everything below that says "this service" means this
+module.
 
 ```
 POST /access   which tools this user may see       → { deny: Toolkits }
@@ -12,10 +21,10 @@ GET  /events   the live governance stream, plus `event: approval` (#20) → text
 GET  /health   policy revision, row counts, fixture drift — always 200      (no auth)
 POST /admin/reset  put the policy, or the whole demo, back to the fixture (bearer RESET_TOKEN)
 
-GET  /approvals/roster        every subject, so routing can show who was not asked
-POST /approvals               create an escalation; the store mints the id and the clock
-GET  /approvals/{id}          read one by opaque id — what the approval page is built on
-POST /approvals/{id}/decision record an outcome
+GET  /api/approvals/roster        every subject, so routing can show who was not asked
+POST /api/approvals               create an escalation; the store mints the id and the clock
+GET  /api/approvals/{id}          read one by opaque id — what the approval page is built on
+POST /api/approvals/{id}/decision record an outcome
 ```
 
 Every hook endpoint requires `Authorization: Bearer $ARCADE_HOOK_SIGNING_SECRET`, and so does
@@ -24,42 +33,46 @@ response bodies are the generated types in `@cg/policy-schema` — `deny` takes 
 `Toolkits` shape down to the innermost array of versions, which spike #2 measured is the one
 shape that does not take every tool in the project down with it.
 
-The four `/approvals` endpoints require a **different** bearer,
+The four `/api/approvals` endpoints require a **different** bearer,
 `Authorization: Bearer $APPROVALS_STORE_TOKEN` — the deployed `tools/approvals` worker and the
 approval page hold that one, Arcade holds the other, and neither is accepted in the other's
 place. The contract those four answer to is written out under "The approvals store contract" in
-[`tools/approvals/README.md`](../../tools/approvals/README.md), and is driven from both sides:
-`test/approvals-endpoints.test.ts` here and `tests/test_store_contract.py` there.
+[`tools/approvals/README.md`](../tools/approvals/README.md), and is driven from both sides:
+`app-test/control-plane/approvals-endpoints.test.ts` here and `tests/test_store_contract.py` there.
 
 **None of the four authorizes anything.** The bearer says the caller is the toolkit or the page
 rather than a stranger, and that is all it says. Whether the person looking may *decide* is a
 `/pre` decision on `Approvals.Decide` — see below.
 
 ```sh
-bun run dev:hooks                       # :8081
-bun run --cwd apps/hooks test
-bun run --cwd apps/hooks bench          # latency, over HTTP, including the 1.6 MB /access
-bun run --cwd apps/hooks interop:21     # the panel's own adapter against /events
+bun run dev                              # the app, which serves all of the above on its PORT
+bun test ./app-test/control-plane/       # the module, on a socket of its own
+bun test ./app-test/control-plane-app.test.ts   # the same routes, through the real app
+bun scripts/control-plane/bench.ts       # latency, over HTTP, including the 1.6 MB /access
+bun scripts/control-plane/interop-21.ts  # the panel's own adapter against /events
+bun scripts/control-plane.ts             # the module alone on PORT, as the harnesses run it
 ```
 
 Both bearers fall back to a development value when unset, so a local run needs no
-configuration. **Under `NODE_ENV=production` there is no fallback**: the service refuses to
-boot without `ARCADE_HOOK_SIGNING_SECRET` *and* `APPROVALS_STORE_TOKEN`, because a control
+configuration. **Under `NODE_ENV=production` there is no fallback**: the control plane refuses to
+run without `ARCADE_HOOK_SIGNING_SECRET` *and* `APPROVALS_STORE_TOKEN` — since #4 the app still
+starts, answers every hook 503 and says why on `/health`, because the same process serves
+sign-in and the bank — because a control
 plane that came up on a known token would accept hook calls from anyone, and an approvals
-store that did would accept the record a human then acts on from anyone. Booting the image
-locally therefore needs both:
+store that did would accept the record a human then acts on from anyone. Booting the app's
+image locally therefore needs both:
 
 ```sh
-docker build -f apps/hooks/Dockerfile -t cg-hooks:local .
+docker build -t cg-web:local .
 docker run --rm -p 8080:8080 -e PORT=8080 \
   -e ARCADE_HOOK_SIGNING_SECRET=local-only \
   -e APPROVALS_STORE_TOKEN=local-only \
-  cg-hooks:local
+  cg-web:local
 curl -fsS http://localhost:8080/health
 ```
 
-That is exactly what CI's `build hooks image` job does — build, boot under
-`NODE_ENV=production`, ask `/health` the question Render asks — so a new required variable
+That is what CI's `build web image` job does — build, boot under `NODE_ENV=production`, ask
+`/health` the question Render asks, and check the policy loaded — so a new required variable
 that nobody wired up fails there rather than on a deploy.
 
 ## The HTTP layer is thin
@@ -366,7 +379,7 @@ nothing about the policy in memory, so the cache keeps serving it and retries ne
 when the revision has been unreadable for 20 consecutive ticks (~5 s) does it fail closed, because
 at that point it can no longer promise an edit would be noticed.
 
-Measured (`bun run --cwd apps/hooks bench`, M-series laptop, in-memory database):
+Measured (`bun scripts/control-plane/bench.ts`, M-series laptop, in-memory database):
 
 | call | payload | audit rows | p50 | p95 |
 |---|---:|---:|---:|---:|
@@ -420,7 +433,7 @@ data: {"id":"evt_4k7xq2m9hz","ts":"2026-09-09T18:22:41.006Z","hook":"pre",…}
 the audit log rather than a prettier parallel story. `id:` is the audit row's id, which is
 also the correlation token from #6, which is what makes a resume possible. The client is
 `lib/governance/subscribe.ts` (#21); it was written to this shape before the server
-existed, and `bun run --cwd apps/hooks interop:21` runs *that module, unmodified* against a
+existed, and `bun scripts/control-plane/interop-21.ts` runs *that module, unmodified* against a
 real server rather than leaving two implementations of a format to agree on paper.
 
 **The audit write is the seam.** `record()` publishes to an in-process bus
@@ -519,7 +532,7 @@ account number into `audit_log` and served it to anyone who can reach this host;
 rewritten output in `after` is no safer, because a rule conditioned on clearance does not
 fire for a privileged subject and *their* "after" still holds the identifiers. The panel
 draws its masked diff from the paths, and the wire never carries a value a rule removed.
-Driver decision on #16, option A; `apps/hooks/test/post-redaction.test.ts` asserts it over
+Driver decision on #16, option A; `app-test/control-plane/post-redaction.test.ts` asserts it over
 the socket rather than in the renderer.
 
 The CORS preflight is not optional and is not cosmetic: the panel sends `cache-control` on
@@ -539,7 +552,7 @@ data: {"kind":"approval.granted","request_id":"apr_0m4x…","requester_id":"alic
        "decided_by":"charlie@bank.example","decided_at":"2026-09-14T…Z","grants_activated":1}
 ```
 
-It is emitted when `POST /approvals/{id}/decision` records an outcome, and it exists for one
+It is emitted when `POST /api/approvals/{id}/decision` records an outcome, and it exists for one
 consumer: the browser whose agent ended its turn waiting for that approval. The type is
 `ApprovalNotice` in `@cg/policy-schema`, so both sides are typed off one definition.
 
@@ -555,7 +568,7 @@ Three things about it, each of which is a decision rather than an accident
   notice has no row and therefore no position. Per the SSE spec a frame with no `id:` leaves
   the client's last event id untouched, so the governance replay is exactly as it was. The
   cost is that a notice is **live-only**: a browser disconnected at that moment does not get
-  it on reconnect, which `apps/web` closes by re-reading `GET /approvals/{id}` when its
+  it on reconnect, which `apps/web` closes by re-reading `GET /api/approvals/{id}` when its
   stream comes back rather than assuming the socket was up.
 - **It is published after the transaction commits**, like every governance frame, and for a
   sharper reason: that transaction is the one that turns the pre-hook's pending grant on.
@@ -662,7 +675,7 @@ duties.
 
 A grant is written by the pre-hook, when it allows a `Decide` that approves, and by nothing
 else — not by the toolkit, which has no database, and not by
-`POST /approvals/{id}/decision`, which records an outcome and confers nothing. It is scoped to
+`POST /api/approvals/{id}/decision`, which records an outcome and confers nothing. It is scoped to
 one tool, one resource, one amount ceiling, one use and an expiry (`GRANT_TTL_SECONDS`, default
 900), all resolved from the approval record rather than from the arguments of the call that
 triggered it. `action` is a bare name; `action-binding.ts` turns it into a tool and two argument
@@ -686,7 +699,7 @@ instead:
 | `active` | the winning recorded decision was `approved`. The only usable state. |
 | `void` | the winning recorded decision was `denied`. `revoked_at` is set too. |
 
-`POST /approvals/{id}/decision` is a **compare-and-swap**: it flips the request from `pending`
+`POST /api/approvals/{id}/decision` is a **compare-and-swap**: it flips the request from `pending`
 to the decision, and `changes === 1` is what declares this decision the winner. In that same
 transaction, a winning `approved` activates the request's pending grant and a winning `denied`
 voids it. A decision that loses the swap changes nothing, and therefore activates nothing and
@@ -726,8 +739,8 @@ whole Arcade project catalogue, and the shape of that takes two measurements:
 
 | | measured | where |
 |---|---|---|
-| `/access` **calls** per `tools/list` | **four** — one scoped to `Loan`, one enumerating every toolkit in the project, ~1.6 MB | [spike #2](../../docs/spikes/02-remote-mcp-hooks.md) |
-| `/access` **frames** per `tools/list`, on the deployed gateway | **8,278** — six `allow` (this project's six tools) and 8,272 `deny` | [spike #5 §11.3](../../docs/spikes/05-custom-verifier.md) |
+| `/access` **calls** per `tools/list` | **four** — one scoped to `Loan`, one enumerating every toolkit in the project, ~1.6 MB | [spike #2](./spikes/02-remote-mcp-hooks.md) |
+| `/access` **frames** per `tools/list`, on the deployed gateway | **8,278** — six `allow` (this project's six tools) and 8,272 `deny` | [spike #5 §11.3](./spikes/05-custom-verifier.md) |
 
 **Those two numbers divide, and the division is the thing to hold on to: 8,278 frames across
 four calls is a figure *per list*, and this service works *per call*.** A summary row is
@@ -790,7 +803,7 @@ fallback only while no policy has loaded — the one state in which there is no 
 the one in which the enumerating call would otherwise write thousands of fail-closed rows.
 
 Measured against the running service: **1,204 tools in, 5 rows out**, with Bob's hidden tool
-and its rule id intact; and `bun run --cwd apps/hooks bench`, **10,804 tools in, 5 rows out**.
+and its rule id intact; and `bun scripts/control-plane/bench.ts`, **10,804 tools in, 5 rows out**.
 The live per-listing figure needs a deploy to confirm. `test/access-audit.test.ts` is the only
 place this answer is asserted, so changing it is one file.
 
@@ -811,7 +824,7 @@ Nothing prunes `audit_log`. The DELETE trigger refuses one, and a compliance log
 quietly shortened is not one — so the bound is the disk, and it is stated rather than
 enforced at write time.
 
-Measured (`bun run --cwd apps/hooks bench`, the "audit_log on disk" section: 50,000 real rows
+Measured (`bun scripts/control-plane/bench.ts`, the "audit_log on disk" section: 50,000 real rows
 written by the real handlers over the real socket, in the mix this service actually writes —
 allows, a rule-authored denial, a summary row and act 2's rendered remediation — vacuumed
 into a file and compared with an empty `governance.db`):

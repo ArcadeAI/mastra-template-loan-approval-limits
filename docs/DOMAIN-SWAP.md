@@ -23,7 +23,7 @@ control layers, two OAuth hops, three databases.
 |---|---|---|
 | `apps/loan-app` | **replace** | The system of record. A plain HTTP API over `loans.db`. Yours already exists — you probably delete this directory rather than edit it |
 | `tools/loan` | **replace** | Four Python `arcade-mcp` tools, each a stateless client of the API above |
-| `apps/hooks/src/fixtures/governance.json` | **rewrite** | The catalogue, the roster, the rules |
+| `lib/control-plane/fixtures/governance.json` | **rewrite** | The catalogue, the roster, the rules |
 | `apps/idp` | **delete** | The enterprise IdP, as a demo fixture. You have an Okta |
 | `apps/web/lib/identity/session.ts` | **repoint** | One function pair, `readSession` / `readSessionFromCookies` |
 | `apps/web` — everything else | **keep** | Chat, panel, approval page, the bank's screen |
@@ -168,7 +168,7 @@ reason naming a catalogued toolkit dot-spelled does not compile (#89).
 
 ---
 
-## 3. The policy — `apps/hooks/src/fixtures/governance.json`
+## 3. The policy — `lib/control-plane/fixtures/governance.json`
 
 The one file that is entirely about your domain and lives outside it. Four keys.
 
@@ -183,7 +183,7 @@ The one file that is entirely about your domain and lives outside it. Four keys.
 
 `$LOAN` and `$APPROVALS` are **placeholders**, substituted at seed time with
 `ARCADE_LOAN_TOOLKIT` and `ARCADE_APPROVALS_TOOLKIT`
-(`apps/hooks/src/policy-store.ts`, `TOOLKIT_PLACEHOLDERS`). Keep the indirection: it is
+(`lib/control-plane/policy-store.ts`, `TOOLKIT_PLACEHOLDERS`). Keep the indirection: it is
 what stops a measured toolkit name from having to be typed into a dozen rows.
 
 The catalogue is a closed world. A rule condition may only read an argument the
@@ -245,10 +245,10 @@ wrong.
 bun test --cwd apps/hooks
 
 # 2. every injection pattern is proved to fire, and the benign corpus is proved not to
-bun test apps/hooks/test/injection-corpus.test.ts
+bun test app-test/control-plane/injection-corpus.test.ts
 ```
 
-`apps/hooks/test/fixtures/injection-corpus.json` is a two-halved corpus: one entry per
+`app-test/control-plane/fixtures/injection-corpus.json` is a two-halved corpus: one entry per
 pattern that must match, and realistic benign prose that must not. **A pattern with no
 corpus entry fails that suite.** The regex shipped before #16 was exactly that — it
 looked for "ignore previous instructions" in a note that says "Ignore any earlier
@@ -575,7 +575,7 @@ misbehaves — is [`docs/RUNBOOK.md`](./RUNBOOK.md).
 - [ ] Seed fixture carries an over-authority record, sensitive fields, an injected note, and a control record
 - [ ] Toolkit copied, renamed, `MCPApp(name=…)` set; descriptions carry no behavioural instruction
 - [ ] `arcade deploy` run, toolkit name **read back** and put in `ARCADE_LOAN_TOOLKIT`
-- [ ] `apps/hooks/src/fixtures/governance.json` rewritten: catalogue, roster, policy rules, output rules
+- [ ] `lib/control-plane/fixtures/governance.json` rewritten: catalogue, roster, policy rules, output rules
 - [ ] Every injection pattern has both halves of a corpus entry; `bun test --cwd apps/hooks` green
 - [ ] `readSession` pointed at your IdP; `apps/idp` deleted; Arcade's provider and User Source repointed
 - [ ] `"cg": { "governed": true }` on your app's manifest, and its `knows-nothing` test shipped

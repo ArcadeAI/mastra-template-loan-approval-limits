@@ -201,7 +201,7 @@ function fixtureFrames(): string {
 }
 
 /**
- * The CORS headers `apps/hooks/src/events.ts` sends, for the reason it states:
+ * The CORS headers `lib/control-plane/events.ts` sends, for the reason it states:
  * the panel puts `cache-control` on its first connect and `last-event-id` on
  * every resume, neither of which is a safelisted request header, so the browser
  * preflights. Without them the stream fails to open in a browser while

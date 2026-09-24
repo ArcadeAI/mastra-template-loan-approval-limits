@@ -1,5 +1,8 @@
 # One blueprint provisions every service Render is responsible for: `web`,
-# `hooks`, `loan-app` and `idp`. `tools/loan` and `tools/approvals` are
+# `loan-app` and `idp`. The control plane was a fourth, `cg-hooks`, until #4
+# folded it into the app: cg-web serves /access, /pre, /post, /events, /audit,
+# /admin/reset and the approvals store itself, and owns governance.db on its
+# own disk. `tools/loan` and `tools/approvals` are
 # deliberately absent — they are Python `arcade-mcp` toolkits and ship via
 # `arcade deploy`.
 #
@@ -17,8 +20,8 @@
 # nothing resets the OAuth client Arcade holds, and deleting `idp.db` would.
 # `docs/RUNBOOK.md` is the operational half of this file.
 #
-# All three database-owning services — cg-loan-app, cg-hooks, cg-idp — mount
-# a disk below.
+# All three database-owning services — cg-loan-app, cg-web (governance.db,
+# since #4), cg-idp — mount a disk below.
 #
 # Services with disks give up zero-downtime deploys — Render stops the old
 # instance before starting the new one. Irrelevant for a demo.
@@ -85,98 +88,12 @@ services:
         sync: false
       # The bearer POST /admin/reset requires (#23) — the loan book back to the
       # rows this image seeds, between takes, without a deploy. THE SAME VALUE
-      # as cg-hooks', cg-idp's and cg-web's: `bun run reset` presents one
+      # as cg-idp's and cg-web's: `bun run reset` presents one
       # bearer to all three services. Unset means the route does not exist —
       # 404, and /health reports `reset: "disabled"` — because an endpoint that
       # empties the bank's system of record and is reachable unauthenticated on
       # a public URL is a denial-of-demo button. Generate it yourself:
       # `openssl rand -hex 32`.
-      - key: RESET_TOKEN
-        sync: false
-
-  # The control plane. Serves /access, /pre and /post to Arcade Cloud, owns the
-  # policy and audit database, and fans decisions out to the UI over SSE.
-  - type: web
-    name: cg-hooks
-    runtime: docker
-    plan: starter
-    region: oregon
-    dockerfilePath: ./apps/hooks/Dockerfile
-    dockerContext: .
-    # Answers 200 whatever it finds, and says `status: degraded` with the
-    # compile error in the body when the policy will not load (#112). It used
-    # to answer 503 in that case: on 2026-09-14 a stale rule that #89's guard
-    # refuses took this instance out of rotation, Render served its own 502
-    # page over it, and a control plane that was correctly failing closed
-    # became one that was simply gone — with the fix unverifiable over HTTP.
-    # Readiness here is "the process is up and can tell you what is wrong".
-    healthCheckPath: /health
-    autoDeployTrigger: commit
-    # Delete this block to run the control plane ephemerally and pay nothing
-    # for storage — the service re-seeds itself from the fixture on every
-    # boot, and a rule edited on stage is gone at the next restart. Fine for a
-    # look at the demo, wrong for the demo itself (PRD story 30). 1 GB, the
-    # minimum, and it is one `disk:` key away from gone.
-    disk:
-      name: governance
-      mountPath: /data
-      sizeGB: 1
-    envVars:
-      - key: PORT
-        value: 8080
-      # On the disk, not /tmp. Seeded from the fixture only when there is no
-      # schema; after that, edits persist across restarts and redeploys.
-      # Resetting is `scripts/reset` (#23), never a redeploy.
-      - key: GOVERNANCE_DB_PATH
-        value: /data/governance.db
-      # The bearer token Arcade presents on /access, /pre and /post. Set the
-      # same value on the hook extension in the Arcade dashboard (#13).
-      - key: ARCADE_HOOK_SIGNING_SECRET
-        sync: false
-      # The bearer the four /approvals endpoints require. A different secret
-      # from the one above on purpose: the deployed approvals toolkit and
-      # cg-web hold this one, Arcade holds that one, and neither is accepted
-      # in the other's place. Set the same value here, on cg-web, and as an
-      # Arcade secret uploaded by `arcade deploy` from tools/approvals.
-      # Without it the store would take an approval record from anyone on the
-      # internet, and that record is what a human then acts on.
-      - key: APPROVALS_STORE_TOKEN
-        sync: false
-      # `tool.toolkit` as Arcade files the deployed toolkits — measured on
-      # #35 (Loan) and derived for Approvals until #18 deploys it. The seeded
-      # rules are keyed on these; a wrong value fails loudly at boot.
-      - key: ARCADE_LOAN_TOOLKIT
-        sync: false
-      - key: ARCADE_APPROVALS_TOOLKIT
-        sync: false
-      # The persona emails, same values as cg-web's and cg-idp's — the join
-      # key across the whole system. Read only when governance.db is first
-      # seeded.
-      - key: PERSONA_LOAN_OFFICER_EMAIL
-        sync: false
-      - key: PERSONA_CREDIT_ANALYST_EMAIL
-        sync: false
-      - key: PERSONA_VP_CREDIT_EMAIL
-        sync: false
-      - key: PERSONA_CHIEF_CREDIT_OFFICER_EMAIL
-        sync: false
-      # Host-form, consumer adds the scheme — `fromService` emits neither a
-      # scheme nor a hostname, and blueprints have no string interpolation. Read
-      # it off the cg-loan-app service page in the Render dashboard. See the
-      # note at the top of this file; the service refuses an unreachable value
-      # at boot.
-      - key: LOAN_APP_PUBLIC_HOST
-        sync: false
-      # The bearer POST /admin/reset requires — a third secret, and never
-      # either of the two above. Unset means the endpoint does not exist: it
-      # answers 404 and /health reports `reset: "disabled"`, because a reset
-      # button reachable without authentication on a public URL is a
-      # denial-of-demo vector, and one that fails open on a missing variable is
-      # the same thing with a longer fuse. Set the same value on cg-web, which
-      # is what the panel's Reset button posts through, and on cg-loan-app and
-      # cg-idp, which have endpoints of their own under this name (#23) — one
-      # value, and `bun run reset` presents it to all three. Generate it
-      # yourself: `openssl rand -hex 32`.
       - key: RESET_TOKEN
         sync: false
 
@@ -247,7 +164,7 @@ services:
       - key: PERSONA_CHIEF_CREDIT_OFFICER_EMAIL
         sync: false
       # The bearer POST /admin/reset requires (#23). THE SAME VALUE as
-      # cg-hooks', cg-loan-app's and cg-web's. The reset clears people,
+      # cg-loan-app's and cg-web's. The reset clears people,
       # sessions, tokens and consents and re-seeds the four personas; it never
       # touches the `oauthClient` row or the signing keys, and it asserts the
       # client ids are unchanged on both sides rather than trusting that.
@@ -270,11 +187,34 @@ services:
     region: oregon
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # Answers 200 whatever it finds (#112), and since #4 that includes the
+    # control plane: a policy that will not compile is `status: degraded` with
+    # the compile error in the body, never a 503 that takes the instance out of
+    # rotation and turns a control plane failing closed into one that is gone.
     healthCheckPath: /health
     autoDeployTrigger: commit
+    # governance.db, since #4 folded cg-hooks in. Seeded from the fixture only
+    # when there is no schema; after that, a rule edited on stage survives a
+    # restart and a redeploy. Resetting is `bun run reset` (#23), never a
+    # redeploy. 1 GB, the minimum; delete this block to run the control plane
+    # ephemerally, re-seeded on every boot.
+    disk:
+      name: governance
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: PORT
         value: 8080
+      # --- the control plane (#4, was cg-hooks) -----------------------------
+      # On the disk above, not /tmp.
+      - key: GOVERNANCE_DB_PATH
+        value: /data/governance.db
+      # The bearer token Arcade presents on /access, /pre and /post. Set the
+      # same value on the hook extension in the Arcade dashboard (#13). A
+      # different secret from APPROVALS_STORE_TOKEN on purpose: neither is
+      # accepted in the other's place.
+      - key: ARCADE_HOOK_SIGNING_SECRET
+        sync: false
       # --- the agent (#14) --------------------------------------------------
       # A Mastra agent in a route handler reaches the loan tools through the
       # gateway as the signed-in persona. DESIGN.md → Model, Integration.
@@ -294,7 +234,7 @@ services:
       - key: ARCADE_GATEWAY_ID
         sync: false
       # `tool.toolkit` as Arcade files the deployed loan toolkit — `Loan`,
-      # measured on #35, the same value cg-hooks holds. Here it is half of an
+      # measured on #35, the same value the control plane reads. Here it is half of an
       # ALLOW-LIST: the agent is given the tools whose wire names start with
       # `Loan_` or `Approvals_` and nothing else, so a live tools/list's eight
       # entries become six and the gateway's own `System_ManageAuthorization`
@@ -407,10 +347,11 @@ services:
       # our personas are not, the grant binds to whoever is signed in at
       # account.arcade.dev, and the tool re-challenges forever with nothing on
       # the panel to say why (DESIGN.md open risk 4).
-      # The approval page reads GET /approvals/{id} from cg-hooks, and presses
-      # Approvals.Decide through Arcade. Both need naming here: the same
-      # shared bearer cg-hooks requires, and the toolkit name the tool is
-      # executed under. A wrong toolkit name calls nothing.
+      # The approvals store's bearer (GET /api/approvals/{id} and the rest, served
+      # by this service since #4), and the toolkit name Approvals.Decide is
+      # executed under, which the approval page presses through Arcade. Set the
+      # same store token as an Arcade secret uploaded by `arcade deploy` from
+      # tools/approvals. A wrong toolkit name calls nothing.
       #
       # It is also the second half of the agent's allow-list (#89), which is why
       # it is required on this service rather than optional: without it the
@@ -431,8 +372,8 @@ services:
       # Which stream /panel watches. Three states, and the panel says which one
       # it is in on screen:
       #
-      #   hooks    the live control plane at HOOKS_PUBLIC_HOST. Badge:
-      #            `LIVE · cg-hooks.onrender.com`
+      #   hooks    the live control plane at HOOKS_PUBLIC_HOST — this service
+      #            itself since #4. Badge: `LIVE · <this service's host>`
       #   fixture  the built-in replay of #5's sequence. Badge: `FIXTURE REPLAY`
       #   unset    the replay under `next dev`; NO STREAM AT ALL when deployed —
       #            /panel renders an error state naming this variable and
@@ -459,8 +400,9 @@ services:
       #
       # `sync: false`, and stays that way: onrender.com subdomains are global
       # and Render suffixes a name that is taken, so this cannot be derived or
-      # guessed. Read it off the cg-hooks service page in the Render dashboard
-      # (the host part of the URL shown there). This one is the worst of the
+      # guessed. Since #4 it is THIS service's own host: read it off the cg-web
+      # service page in the Render dashboard (the host part of the URL shown
+      # there). This one is the worst of the
       # three to get wrong: the value reaches the browser, so a bare service
       # name fails in a visitor's DevTools rather than in a log.
       # `lib/public-host.ts` refuses one before that, and with
@@ -474,17 +416,20 @@ services:
       # Not through the gateway, and never with a service credential —
       # `DESIGN.md` → Business system has the reversal and the reasoning.
       #
-      # The same value cg-hooks and the Loan toolkit hold. `sync: false` for the
+      # The same value the Loan toolkit holds. `sync: false` for the
       # same reason as every other cross-service address here: read it off the
       # cg-loan-app service page. Leave it blank and this service falls back to
       # `localhost:8082`, which on Render means the loan cards say the loan book
       # could not be reached — loudly, and never as a policy refusal.
       - key: LOAN_APP_PUBLIC_HOST
         sync: false
-      # The same value as cg-hooks' RESET_TOKEN (#106). Held server-side only
-      # and never sent to the browser: the panel's Reset button posts to a
-      # route in this service, which is what presents the bearer to cg-hooks.
-      # Leave it blank and the button is not rendered at all, which is the
-      # correct state for a deployment nobody is presenting from.
+      # The bearer POST /admin/reset requires (#106), served by this service
+      # since #4, and the same value cg-loan-app and cg-idp hold, so `bun run
+      # reset` presents one value to all three. Held server-side only and never
+      # sent to the browser: the panel's Reset button posts to a route in this
+      # service, which presents the bearer. Leave it blank and /admin/reset
+      # answers 404, /health says `reset: "disabled"`, and the button is not
+      # rendered at all, which is the correct state for a deployment nobody is
+      # presenting from.
       - key: RESET_TOKEN
         sync: false

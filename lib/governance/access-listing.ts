@@ -28,7 +28,7 @@ import { aGovernanceEvent, FIXTURE_EPOCH } from "@cg/policy-schema";
 /** Sam, the credit analyst — the address `governance.json` seeds for him. */
 const SAM = "bob@bank.example";
 
-/** Act 1's rule, id and words as `apps/hooks/src/fixtures/governance.json` has them. */
+/** Act 1's rule, id and words as `lib/control-plane/fixtures/governance.json` has them. */
 const HIDES_APPROVE = {
   rule_id: "access.analysts-cannot-see-approve",
   reason: "Credit analysts do not hold approval authority; the tool is hidden from this role.",
@@ -63,7 +63,7 @@ const GOVERNED: ReadonlyArray<{ tool: string; hidden: boolean }> = [
  * The count is the deployed measurement: one `tools/list` produced 8,278
  * `/access` frames, six of them this project's tools and **8,272** denials of
  * everything else (`docs/spikes/05-custom-verifier.md`, quoted in
- * `apps/hooks/src/access-audit.ts`). So the card shows the order of magnitude
+ * `lib/control-plane/access-audit.ts`). So the card shows the order of magnitude
  * a real listing carries rather than a rounded stand-in.
  *
  * The builder also names the toolkits those 8,272 tools came from. That part
