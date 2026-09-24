@@ -1,9 +1,10 @@
-# One blueprint provisions every service Render is responsible for: `web`,
-# `loan-app` and `idp`. The control plane was a fourth, `cg-hooks`, until #4
-# folded it into the app: cg-web serves /access, /pre, /post, /events, /audit,
-# /admin/reset and the approvals store itself, and owns governance.db on its
-# own disk. `tools/loan` and `tools/approvals` are
-# deliberately absent — they are Python `arcade-mcp` toolkits and ship via
+# One blueprint provisions every service Render is responsible for: `web` and
+# `idp`. The control plane was a third, `cg-hooks`, until #4 folded it into
+# the app: cg-web serves /access, /pre, /post, /events, /audit, /admin/reset
+# and the approvals store itself, and owns governance.db on its own disk. The
+# loan API was a fourth, `cg-loan-app`, until #5 folded it in too: cg-web
+# serves it under /bank and owns loans.db on the same disk. `tools/loan` and
+# `tools/approvals` are deliberately absent — they are Python `arcade-mcp` toolkits and ship via
 # `arcade deploy`.
 #
 # Every service uses runtime: docker. Render does not detect Bun, so the
@@ -20,8 +21,8 @@
 # nothing resets the OAuth client Arcade holds, and deleting `idp.db` would.
 # `docs/RUNBOOK.md` is the operational half of this file.
 #
-# All three database-owning services — cg-loan-app, cg-web (governance.db,
-# since #4), cg-idp — mount a disk below.
+# Both database-owning services — cg-web (governance.db since #4, loans.db
+# since #5) and cg-idp — mount a disk below.
 #
 # Services with disks give up zero-downtime deploys — Render stops the old
 # instance before starting the new one. Irrelevant for a demo.
@@ -51,52 +52,6 @@
 # putting them in git. See `.env.example` for where to obtain each one.
 
 services:
-  # The governed business system: the bank's system of record, a plain HTTP
-  # API. Not an MCP server and not registered in Arcade — `tools/loan` calls it.
-  - type: web
-    name: cg-loan-app
-    runtime: docker
-    plan: starter
-    region: oregon
-    dockerfilePath: ./apps/loan-app/Dockerfile
-    dockerContext: .
-    healthCheckPath: /health
-    autoDeployTrigger: commit
-    # Delete this block to run the loan book ephemerally and pay nothing for
-    # storage — the service re-seeds itself from the fixture on every boot,
-    # which is fine for a look at the demo and wrong for anything you would
-    # keep. A blueprint sync should not hand a forker a paid disk by surprise,
-    # so: 1 GB, the minimum, and it is one `disk:` key away from gone.
-    disk:
-      name: loans
-      mountPath: /data
-      sizeGB: 1
-    envVars:
-      - key: PORT
-        value: 8080
-      # On the disk, not /tmp. The service creates the parent directory, so
-      # this also works unchanged against a bind mount or a local path.
-      - key: LOANS_DB_PATH
-        value: /data/loans.db
-      # Where bearer tokens are validated: the API asks this host's
-      # /oauth2/userinfo who the caller is. Host-form, consumer adds https.
-      # Read it off the cg-idp service page in the Render dashboard — in the
-      # live environment that is `cg-idp-or5b.onrender.com`, not `cg-idp`. See
-      # the note at the top of this file; the service refuses an address it
-      # could not reach at boot.
-      - key: IDP_PUBLIC_HOST
-        sync: false
-      # The bearer POST /admin/reset requires (#23) — the loan book back to the
-      # rows this image seeds, between takes, without a deploy. THE SAME VALUE
-      # as cg-idp's and cg-web's: `bun run reset` presents one
-      # bearer to all three services. Unset means the route does not exist —
-      # 404, and /health reports `reset: "disabled"` — because an endpoint that
-      # empties the bank's system of record and is reachable unauthenticated on
-      # a public URL is a denial-of-demo button. Generate it yourself:
-      # `openssl rand -hex 32`.
-      - key: RESET_TOKEN
-        sync: false
-
   # The enterprise's identity provider — a demo fixture standing in for the
   # real one. Better Auth as an OAuth 2.1 authorization server, with the login
   # and consent pages a persona sees the first time they authorize. Arcade is
@@ -164,7 +119,7 @@ services:
       - key: PERSONA_CHIEF_CREDIT_OFFICER_EMAIL
         sync: false
       # The bearer POST /admin/reset requires (#23). THE SAME VALUE as
-      # cg-loan-app's and cg-web's. The reset clears people,
+      # cg-web's. The reset clears people,
       # sessions, tokens and consents and re-seeds the four personas; it never
       # touches the `oauthClient` row or the signing keys, and it asserts the
       # client ids are unchanged on both sides rather than trusting that.
@@ -193,11 +148,13 @@ services:
     # rotation and turns a control plane failing closed into one that is gone.
     healthCheckPath: /health
     autoDeployTrigger: commit
-    # governance.db, since #4 folded cg-hooks in. Seeded from the fixture only
-    # when there is no schema; after that, a rule edited on stage survives a
-    # restart and a redeploy. Resetting is `bun run reset` (#23), never a
-    # redeploy. 1 GB, the minimum; delete this block to run the control plane
-    # ephemerally, re-seeded on every boot.
+    # governance.db, since #4 folded cg-hooks in, and loans.db, since #5
+    # folded cg-loan-app in: one disk, two files, each owned by one module.
+    # Each is seeded from its fixture only when it has no schema; after that, a
+    # rule edited on stage and a loan approved on stage survive a restart and a
+    # redeploy. Resetting is `bun run reset` (#23), never a redeploy. 1 GB, the
+    # minimum; delete this block to run both ephemerally, re-seeded on every
+    # boot.
     disk:
       name: governance
       mountPath: /data
@@ -214,6 +171,19 @@ services:
       # different secret from APPROVALS_STORE_TOKEN on purpose: neither is
       # accepted in the other's place.
       - key: ARCADE_HOOK_SIGNING_SECRET
+        sync: false
+      # --- the loan module (#5, was cg-loan-app) ----------------------------
+      # On the disk above, not /tmp. The module creates the parent directory,
+      # so this also works unchanged against a bind mount or a local path.
+      - key: LOANS_DB_PATH
+        value: /data/loans.db
+      # Where the loan module validates bearer tokens: it asks this host's
+      # /oauth2/userinfo who the caller is. Host-form, consumer adds https.
+      # Read it off the cg-idp service page in the Render dashboard — in the
+      # live environment that is `cg-idp-or5b.onrender.com`, not `cg-idp`. See
+      # the note at the top of this file; an address nothing could reach is a
+      # loan book that did not open, on /health and on every /bank route.
+      - key: IDP_PUBLIC_HOST
         sync: false
       # --- the agent (#14) --------------------------------------------------
       # A Mastra agent in a route handler reaches the loan tools through the
@@ -410,22 +380,18 @@ services:
       # rather than a quiet replay.
       - key: HOOKS_PUBLIC_HOST
         sync: false
-      # Where the bank's own screens read the loan book, since #157: the `/`
-      # cards and the `/loans` board call cg-loan-app's HTTP API directly, as
-      # the signed-in person, with the IdP access token from their own sign-in.
-      # Not through the gateway, and never with a service credential —
-      # `DESIGN.md` → Business system has the reversal and the reasoning.
-      #
-      # The same value the Loan toolkit holds. `sync: false` for the
-      # same reason as every other cross-service address here: read it off the
-      # cg-loan-app service page. Leave it blank and this service falls back to
-      # `localhost:8082`, which on Render means the loan cards say the loan book
-      # could not be reached — loudly, and never as a policy refusal.
+      # The loan API's public address, which since #5 is this service's own
+      # host: the Loan toolkit holds the same value and calls /bank on it. The
+      # bank's own screens do not use it — the `/` cards and the `/loans` board
+      # read the loan module in-process, as the signed-in person — and the
+      # control plane only checks it at boot. `sync: false` for the same reason
+      # as every other cross-service address here: read it off this service's
+      # own page.
       - key: LOAN_APP_PUBLIC_HOST
         sync: false
       # The bearer POST /admin/reset requires (#106), served by this service
-      # since #4, and the same value cg-loan-app and cg-idp hold, so `bun run
-      # reset` presents one value to all three. Held server-side only and never
+      # since #4, and by POST /bank/admin/reset since #5, and the same value
+      # cg-idp holds, so `bun run reset` presents one value to both services. Held server-side only and never
       # sent to the browser: the panel's Reset button posts to a route in this
       # service, which presents the bearer. Leave it blank and /admin/reset
       # answers 404, /health says `reset: "disabled"`, and the button is not
