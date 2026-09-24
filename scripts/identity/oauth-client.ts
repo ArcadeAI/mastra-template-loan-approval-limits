@@ -24,7 +24,7 @@
  * root, `IDP_DB_PATH` unset), with the app's `APP_PUBLIC_HOST` and
  * `BETTER_AUTH_SECRET` in the environment — `bun run` loads `.env.local`.
  */
-import { createAuth, JWKS_PATH } from "../../lib/identity/provider/auth.ts";
+import { createAuth, JWKS_PATH, signingKeysOpen, staleSigningKey } from "../../lib/identity/provider/auth.ts";
 import {
   ensureOAuthClients,
   type OAuthClientCredentials,
@@ -37,6 +37,15 @@ import { openPeople } from "../../lib/identity/provider/db.ts";
 
 const config = readConfig();
 const db = await openPeople(config.dbPath);
+// The provider's own boot check (#9). Minting against a database whose signing
+// key this secret cannot open would hand out clients for an identity provider
+// that will refuse to start, and `bun run setup-arcade`, which mints through
+// here, would register them in Arcade before anybody found out.
+if (!(await signingKeysOpen(db, config.secret))) {
+  db.close();
+  console.error(`[idp] ${staleSigningKey(config.dbPath)}`);
+  process.exit(1);
+}
 const auth = createAuth({ db, baseURL: config.baseURL, secret: config.secret });
 
 const json = process.argv.includes("--json");
