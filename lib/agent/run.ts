@@ -6,7 +6,7 @@
  *
  *     this browser's session  →  gateway token  →  MCPClient (static bearer)
  *       →  api.arcade.dev/mcp/cg-demo-us  →  /access, /pre  →  tools/loan
- *         →  apps/loan-app
+ *         →  the app's loan module, under /bank
  *
  * What this file is careful about is what it does *not* do to what comes back.
  *

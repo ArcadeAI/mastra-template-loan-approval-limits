@@ -54,6 +54,9 @@ async function bootApp(env: Record<string, string> = {}): Promise<App> {
       PORT: String(port),
       CG_NEXT_DIST_DIR: distDir,
       GOVERNANCE_DB_PATH: join(data, "governance.db"),
+      // The app holds the loan book too since #5; this one's, not a loans.db
+      // in the repo.
+      LOANS_DB_PATH: join(data, "loans.db"),
       HOOKS_PUBLIC_HOST: `127.0.0.1:${port}`,
       GOVERNANCE_STREAM: "hooks",
       NEXT_TELEMETRY_DISABLED: "1",

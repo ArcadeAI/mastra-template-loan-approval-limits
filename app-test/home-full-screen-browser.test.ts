@@ -218,16 +218,18 @@ async function measureHome(options: {
   governanceStream: string | null;
   hooksHost?: string;
   /**
-   * The bank's own API, HOST-form.
+   * The identity provider the app's loan module presents bearers to
+   * (`IDP_PUBLIC_HOST`), HOST-form. The loan book is in the app since #5, so
+   * this is the one address its answer depends on; until #5 the option was the
+   * loan API's own address.
    *
-   * Defaults to a port this process bound and released, so the read is refused
-   * by the kernel and the loan book comes back `unavailable`. It may **not**
-   * default to `LOAN_APP_PUBLIC_HOST`'s own `localhost:8082`: this worktree
-   * owns a block of ten ports and 8082 belongs to whichever sibling worktree
-   * happens to be running, so a page load here would read another reviewer's
-   * loan book.
+   * Defaults to a port this process bound and released, so the module cannot
+   * say who the bearer is and the loan book comes back `unavailable` — the
+   * state the default always produced. It may **not** default to the
+   * worktree's own `IDP_PUBLIC_HOST`: that is whatever `.env.local` says, and
+   * the page would then depend on what else happens to be running.
    */
-  loanAppHost?: string;
+  loanIdpHost?: string;
   /** Run once per page load, after the client tree has settled. */
   afterLoad?: (cdp: Cdp) => Promise<void>;
 }): Promise<Measured> {
@@ -261,7 +263,10 @@ async function measureHome(options: {
       IDP_CLIENT_ID: "web",
       IDP_CLIENT_SECRET: "not-used-by-this-test",
       APPROVALS_STORE_TOKEN: "store-token-for-agent-tests",
-      LOAN_APP_PUBLIC_HOST: options.loanAppHost ?? `localhost:${freePort()}`,
+      // A throwaway loan book: it may not default to `./loans.db`, which is
+      // the developer's own.
+      LOANS_DB_PATH: ":memory:",
+      IDP_PUBLIC_HOST: options.loanIdpHost ?? `localhost:${freePort()}`,
     };
     if (options.hooksHost !== undefined) env["HOOKS_PUBLIC_HOST"] = options.hooksHost;
     else delete env["HOOKS_PUBLIC_HOST"];
@@ -572,28 +577,28 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
  * agreed with itself in a test file and not in Chrome would be the shape of
  * every failure surface this repo has had to fix twice.
  *
- * The loan book is a stand-in only at the socket: the half that says
- * `apps/loan-app` really answers 401 to a bearer its IdP refuses is measured
- * against the real subprocess in `app-test/api-loans.test.ts`.
+ * Since #5 the loan book is the app's own module, and it is real here too: the
+ * stand-in is only the identity provider it asks, which refuses every bearer,
+ * so the module answers the 401 itself. The half that says the module really
+ * answers 401 to a bearer the real IdP refuses is measured in
+ * `app-test/api-loans.test.ts`. Until #5 the stand-in was the loan API.
  */
 test.skipIf(chromeResolution.path === null && !REQUIRED)(
   "with the loan book refusing this browser's bearer, the whole page says so once",
   async () => {
     if (chromeResolution.path === null) throw new Error(missingBrowserMessage(chromeResolution));
 
+    // The identity provider the loan module asks, refusing every bearer the
+    // way `apps/idp` refuses one it did not issue.
     const refusing = Bun.serve({
       port: 0,
-      fetch: () =>
-        new Response(JSON.stringify({ error: "invalid_token" }), {
-          status: 401,
-          headers: { "content-type": "application/json" },
-        }),
+      fetch: () => new Response("invalid_token", { status: 401 }),
     });
 
     try {
       const measured = await measureHome({
         governanceStream: null,
-        loanAppHost: `localhost:${refusing.port}`,
+        loanIdpHost: `localhost:${refusing.port}`,
       });
 
       // The chrome. Not "Signed in as" anywhere on the document — the line the

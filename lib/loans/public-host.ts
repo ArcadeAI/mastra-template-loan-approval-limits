@@ -16,7 +16,7 @@
  * and where the real value is read from.
  *
  * The check below is written out once per service rather than shared, because
- * `apps/loan-app` depends on nothing outside itself on purpose — it is the part
+ * the loan module (`apps/loan-app` until #5) depends on nothing outside itself on purpose — it is the part
  * a forker throws away, and a shared module would be a dependency edge it must
  * not have. The copies are kept byte-identical instead:
  * `app-test/public-host.test.ts` diffs the three marked regions, and all
@@ -120,7 +120,7 @@ export function publicHost(name: string, value: string | undefined, fallback: st
 /**
  * Run `read`, turning an unreachable `*_PUBLIC_HOST` into one line on stderr
  * and sysexits' EX_CONFIG — the environment is wrong, not the invocation. Same
- * exit status `apps/loan-app/scripts/dev-idp.ts` uses for the same class of
+ * exit status `scripts/dev-idp.ts` uses for the same class of
  * mistake. Anything else propagates untouched.
  */
 export function orExitConfig<T>(service: string, read: () => T): T {

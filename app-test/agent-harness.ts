@@ -6,11 +6,11 @@
  * - **`apps/hooks` is real.** A subprocess, seeded from its own fixture, with
  *   the real policy compiled and the real `/pre` answering. Every denial in this
  *   suite is the actual rule refusing the actual call.
- * - **`apps/loan-app` is real.** A subprocess owning a real `loans.db`, so "the
+ * - **The loan module is real.** `scripts/loans.ts`, a subprocess owning a real `loans.db`, so "the
  *   $95K prompt produces a denial, not an approval, in the loan database" is a
  *   claim about a row that either exists or does not.
  * - **The identity provider is the repo's own dev stub**, a subprocess of
- *   `apps/loan-app/scripts/dev-idp.ts`. It answers `/oauth2/userinfo` for
+ *   `scripts/dev-idp.ts`. It answers `/oauth2/userinfo` for
  *   `dev:<email>` tokens, which is how the loan API derives the actor from a
  *   bearer rather than from a parameter — the real code path, with a fixture
  *   issuer behind it.
@@ -47,9 +47,9 @@ export const APPROVALS_TOOLKIT = "Approvals";
 /**
  * What the dev IdP stub accepts as a bearer: `dev:<email>`.
  *
- * `apps/loan-app/scripts/dev-idp.ts` answers `/oauth2/userinfo` for these, so a
+ * `scripts/dev-idp.ts` answers `/oauth2/userinfo` for these, so a
  * token of this shape is how a test gets a bearer the loan book will derive an
- * actor from — the real code path in `apps/loan-app/src/actor.ts`, with a
+ * actor from — the real code path in `lib/loans/actor.ts`, with a
  * fixture issuer behind it. Named here rather than spelled at each call site
  * since #157, when the browser regression started needing one too.
  */
@@ -125,6 +125,15 @@ export interface AgentHarness {
    */
   governanceDbPath: string;
   /**
+   * The `loans.db` the harness's loan module owns. A Next app booted beside
+   * the harness points its own loan module at this file (#5), so the page
+   * reads the rows the gateway's tool calls wrote: in production those are one
+   * process, and here they are two processes on one SQLite file.
+   */
+  loansDbPath: string;
+  /** The dev IdP's HOST-form address, which the loan module validates bearers against. */
+  idpHost: string;
+  /**
    * Take the loan book away, for the one test that needs a tool to fail for a
    * reason no hook had anything to do with.
    *
@@ -175,7 +184,7 @@ export async function startAgentHarness(
   const idpPort = freePort();
   const idpHost = `localhost:${idpPort}`;
   const idp = spawn({
-    cmd: ["bun", join(REPO_ROOT, "apps", "loan-app", "scripts", "dev-idp.ts")],
+    cmd: ["bun", join(REPO_ROOT, "scripts", "dev-idp.ts")],
     cwd: REPO_ROOT,
     env: { ...process.env, IDP_PUBLIC_HOST: idpHost, NODE_ENV: "test" },
     stdout: "pipe",
@@ -205,7 +214,9 @@ export async function startAgentHarness(
   const hooksHost = `localhost:${hooksPort}`;
 
   const loanApp = spawn({
-    cmd: ["bun", join(REPO_ROOT, "apps", "loan-app", "src", "index.ts")],
+    // The app's loan module on a port of its own, under `/bank` as the app
+    // serves it (#5).
+    cmd: ["bun", join(REPO_ROOT, "scripts", "loans.ts")],
     cwd: REPO_ROOT,
     env: {
       ...process.env,
@@ -267,14 +278,16 @@ export async function startAgentHarness(
     hooksHost,
     loanAppHost,
     governanceDbPath: join(workspace, "governance.db"),
+    loansDbPath: join(workspace, "loans.db"),
+    idpHost,
     calls,
     lists,
     tokenFor: (email) => gateway.issueToken(email),
     async loan(loanId, asEmail) {
-      const response = await fetch(`http://${loanAppHost}/loans/${loanId}`, {
+      const response = await fetch(`http://${loanAppHost}/bank/loans/${loanId}`, {
         headers: { authorization: `Bearer ${DEV_IDP_TOKEN_PREFIX}${asEmail}` },
       });
-      if (!response.ok) throw new Error(`GET /loans/${loanId} -> ${response.status} ${await response.text()}`);
+      if (!response.ok) throw new Error(`GET /bank/loans/${loanId} -> ${response.status} ${await response.text()}`);
       return (await response.json()) as Record<string, unknown>;
     },
     async audit() {

@@ -270,7 +270,7 @@ export async function signinCallback(request: Request, config: IdentitySurface =
     return page(title, explanation + verbatim(`${userinfo.status} ${userinfo.body}`), 502, headers);
   }
 
-  // The bearer is kept, not dropped (#157). `apps/loan-app` derives the actor
+  // The bearer is kept, not dropped (#157). The loan module derives the actor
   // from it at `/oauth2/userinfo` — the same endpoint that just named this
   // person — so the bank's own screens read the loan book as them and not as a
   // service account. `refresh_token` is present only when `IDP_SCOPES` asked

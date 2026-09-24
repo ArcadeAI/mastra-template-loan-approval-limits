@@ -128,7 +128,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       # Bun for every toolkit, not just the one that needs it today.
-      # tools/loan's tests boot the real `apps/loan-app` as a subprocess, and
+      # tools/loan's tests boot the real loan module (`scripts/loans.ts`) as a subprocess, and
       # its conftest *skips* when bun is missing — so a step guarded on a
       # toolkit name would, the day that name changed, silently stop running
       # the tests instead of failing. Installing unconditionally costs seconds
@@ -150,7 +150,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [loan-app, web, idp]
+        # No loan-app image since #5: the loan module ships inside the web one.
+        service: [web, idp]
         include:
           # cg-idp refuses to boot under NODE_ENV=production without a
           # BETTER_AUTH_SECRET, on purpose: on Render the secret is generated

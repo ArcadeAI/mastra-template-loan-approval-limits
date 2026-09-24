@@ -7,9 +7,10 @@
  * poll over a real socket, and a real decision written to a real `loans.db` by
  * a different person on a different connection.
  *
- * So: `apps/idp` and `apps/loan-app` are real subprocesses, `next dev` serves
- * the actual pages, headless Chrome holds the sealed session a real sign-in
- * produced, and the approval is a `POST /loans/:id/approve` made with Charlie's
+ * So: `apps/idp` is a real subprocess, `next dev` serves the actual pages and
+ * the loan module inside them (since #5; it was `apps/loan-app`, a subprocess
+ * of its own), headless Chrome holds the sealed session a real sign-in
+ * produced, and the approval is a `POST /bank/loans/:id/approve` made with Charlie's
  * own IdP bearer — the same call the approval page makes. Nothing is mocked and
  * nothing is injected into the page.
  *
@@ -37,10 +38,8 @@ import { chunk, chunkName, joinChunks, openSealed, seal } from "../lib/identity/
 import { LOAN_POLL_INTERVAL_MS } from "../lib/loan-context/loans.ts";
 import { SESSION_COOKIE, type Session } from "../lib/identity/session.ts";
 import { Browser, PEOPLE, SESSION_SECRET, signInAs, startIdentityHarness, type IdentityHarness } from "./identity-harness.ts";
-import { readPort } from "./harness.ts";
 
 const WEB = join(import.meta.dir, "..");
-const REPO_ROOT = WEB;
 
 /** Alice's card beside the chat, and Charlie's decision on the control application. */
 const ON_THE_CARDS = "LN-2299";
@@ -67,7 +66,6 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
     if (chromeResolution.path === null) throw new Error(missingBrowserMessage(chromeResolution));
     const CHROME = chromeResolution.path;
     let identity: IdentityHarness | undefined;
-    let loanApp: Subprocess<"ignore", "pipe", "pipe"> | undefined;
     let next: Subprocess | undefined;
     let chrome: Subprocess | undefined;
     let cdp: Cdp | undefined;
@@ -78,25 +76,12 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       workspace = join(tmpdir(), `cg-loan-board-${crypto.randomUUID()}`);
       mkdirSync(workspace, { recursive: true });
 
-      loanApp = spawn({
-        cmd: ["bun", join(REPO_ROOT, "apps", "loan-app", "src", "index.ts")],
-        cwd: REPO_ROOT,
-        env: {
-          ...process.env,
-          PORT: "0",
-          LOANS_DB_PATH: join(workspace, "loans.db"),
-          IDP_PUBLIC_HOST: new URL(identity.idpUrl).host,
-          NODE_ENV: "test",
-        },
-        stdout: "pipe",
-        stderr: "pipe",
-      }) as Subprocess<"ignore", "pipe", "pipe">;
-      const { port: loanPort } = await readPort(loanApp);
-      const loanAppHost = `localhost:${loanPort}`;
-
       const webPort = freePort();
       const debugPort = freePort();
       const origin = `http://127.0.0.1:${webPort}`;
+      // The loan book is the app's own module since #5: Charlie's approvals
+      // below go to the app's `/bank/…`, the same route `tools/loan` calls.
+      const loanAppHost = `127.0.0.1:${webPort}`;
 
       next = spawn({
         // `--bun`: the app runs on Bun since #4, because the control plane it
@@ -115,7 +100,10 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
           IDP_ISSUER: identity.idpUrl,
           IDP_CLIENT_ID: identity.config.identity.idpClientId,
           IDP_CLIENT_SECRET: identity.config.identity.idpClientSecret,
-          LOAN_APP_PUBLIC_HOST: loanAppHost,
+          // The app's loan module: its own `loans.db` in this test's
+          // workspace, and bearers checked at the real IdP.
+          LOANS_DB_PATH: join(workspace, "loans.db"),
+          IDP_PUBLIC_HOST: new URL(identity.idpUrl).host,
           // So the decision line can name the person rather than the address.
           PERSONA_LOAN_OFFICER_EMAIL: PEOPLE.dana.email,
           PERSONA_CREDIT_ANALYST_EMAIL: PEOPLE.sam.email,
@@ -186,7 +174,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       await cdp.command("Network.setCookies", { cookies });
 
       // Charlie's bearer, from Charlie's own sign-in. The approval below is
-      // made as him and `apps/loan-app` derives the actor from this token.
+      // made as him and the loan module derives the actor from this token.
       const charlie = await sessionFor(identity, "riley");
       const charlieBearer = charlie.idp?.access_token;
       if (charlieBearer === undefined) throw new Error("Charlie's session carries no IdP token");
@@ -270,7 +258,6 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       cdp?.close();
       await stopProcess(chrome);
       await stopProcess(next);
-      await stopProcess(loanApp);
       await identity?.stop();
       if (profile !== undefined) rmSync(profile, { recursive: true, force: true });
       if (workspace !== undefined) rmSync(workspace, { recursive: true, force: true });
@@ -290,7 +277,7 @@ async function sessionFor(harness: IdentityHarness, persona: keyof typeof PEOPLE
 
 /** `POST /loans/:id/approve`, as the person whose bearer this is. */
 async function approve(host: string, loanId: string, amount: number, bearer: string): Promise<number> {
-  const response = await fetch(`http://${host}/loans/${loanId}/approve`, {
+  const response = await fetch(`http://${host}/bank/loans/${loanId}/approve`, {
     method: "POST",
     headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
     body: JSON.stringify({ amount }),

@@ -23,7 +23,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { assertPublicHost, publicHost, PublicHostError } from "../src/public-host.ts";
+import { assertPublicHost, publicHost, PublicHostError } from "../../lib/loans/public-host.ts";
 
 /** Values a consumer can actually reach, or is free to leave unset. */
 const ACCEPTED = [
@@ -108,7 +108,7 @@ test("a good value wins over the default, and is trimmed", () => {
 
 /** Spawn the real entry point with `IDP_PUBLIC_HOST` set to `host`. */
 function boot(host: string, port: number, dir: string): Subprocess {
-  return Bun.spawn(["bun", join(import.meta.dir, "..", "src", "index.ts")], {
+  return Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
     env: {
       ...process.env,
       PORT: String(port),
@@ -181,7 +181,7 @@ test.each(["cg-idp-or5b.onrender.com", "localhost:8082", "127.0.0.1:1234", "[::1
           throw new Error(`exited ${child.exitCode} instead of serving: ${stderr}`);
         }
         try {
-          if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) break;
+          if ((await fetch(`http://127.0.0.1:${port}/bank/health`)).ok) break;
         } catch {
           // Not listening yet.
         }

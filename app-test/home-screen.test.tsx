@@ -993,35 +993,68 @@ describe("the fork seam", () => {
   /**
    * The direction that changed on #157, stated as a rule rather than a habit.
    *
-   * `apps/web` may reach the loan book **only** over `apps/loan-app`'s HTTP API
-   * and only from the module that does it as the signed-in person. It may never
-   * open `loans.db`: a database read would bypass `apps/loan-app`'s actor
-   * derivation entirely, which is the one thing about this path that did not
-   * change — the read is attributable to a person or it does not happen
-   * (`DESIGN.md` → Business system).
+   * The bank's screens may reach the loan book **only** through the loan
+   * module's own request handling, and only from the module that does it as
+   * the signed-in person. They may never open `loans.db`: a database read would
+   * bypass the loan module's actor derivation entirely, which is the one thing
+   * about this path that did not change — the read is attributable to a person
+   * or it does not happen (`DESIGN.md` → Business system).
+   *
+   * Since #5 the loan module is part of this app (`lib/loans/`), so the app
+   * does open `loans.db` — there, and only there.
    */
   test("nothing this service serves opens the loan book's database", () => {
-    // Since #4 the app does open a database: the control plane is a module of
-    // it (`lib/control-plane/`) and owns governance.db. So the rule is stated
-    // as what it always meant: bun:sqlite only under the control plane, and
-    // nothing that opens it reads the variable that locates the loan book's
-    // file. (The control plane's reset names `loans.db` in its answer, to say
-    // it was not touched.) It was "no file opens
-    // bun:sqlite at all" while the control plane was its own service.
+    // Since #4 the app opens governance.db (the control plane,
+    // `lib/control-plane/`) and since #5 loans.db (the loan module,
+    // `lib/loans/`). So the rule is stated as what it always meant: bun:sqlite
+    // only under those two modules, and only the loan module reads the variable
+    // that locates the loan book's file. (The control plane's reset names
+    // `loans.db` in its answer, to say it was not touched.)
     const opening: string[] = [];
+    const locating: string[] = [];
     for (const directory of ["lib", "app", "components"]) {
       for (const path of walk(join(WEB, directory))) {
-        const source = readFileSync(path, "utf8");
-        if (!/from\s+"bun:sqlite"/.test(source)) continue;
-        opening.push(path.slice(WEB.length + 1));
-        expect({ path, loans: /LOANS_DB_PATH/.test(withoutComments(source)) }).toEqual({ path, loans: false });
+        const source = withoutComments(readFileSync(path, "utf8"));
+        const relative = path.slice(WEB.length + 1);
+        if (/from\s+"bun:sqlite"/.test(source)) opening.push(relative);
+        if (/LOANS_DB_PATH/.test(source)) locating.push(relative);
       }
     }
     expect(opening.length).toBeGreaterThan(0);
-    for (const path of opening) expect(path).toStartWith("lib/control-plane/");
+    for (const path of opening) {
+      expect({ path, owner: path.startsWith("lib/control-plane/") || path.startsWith("lib/loans/") }).toEqual({
+        path,
+        owner: true,
+      });
+    }
+    expect(opening.some((path) => path.startsWith("lib/loans/"))).toBe(true);
+    expect(locating.length).toBeGreaterThan(0);
+    for (const path of locating) expect(path).toStartWith("lib/loans/");
   });
 
-  test("one module knows the loan book's address, and it is the one that signs the read", () => {
+  /**
+   * And the reader goes through the module's front door, not round it: the
+   * request handler that derives the actor from the bearer, never the
+   * database functions that would skip it.
+   */
+  test("the loan-book read goes through the loan module's request handler, never its database code", () => {
+    const source = withoutComments(readFileSync(join(WEB, "lib/loan-context/read.ts"), "utf8"));
+    const imports = [...source.matchAll(/from\s+"([^"]+)"/g)].map((match) => match[1]);
+
+    expect(imports).toContain("../loans/instance.ts");
+    expect(imports.filter((path) => path?.startsWith("../loans/"))).toEqual([
+      "../loans/instance.ts",
+      "../loans/server.ts",
+    ]);
+    expect(source).toContain("import type { LoanModule }");
+  });
+
+  /**
+   * Since #5 no module here reads the loan book at an address: the board reads
+   * the loan module in-process, so `LOAN_APP_PUBLIC_HOST` is the address
+   * `tools/loan` is given, and the control plane's boot check below.
+   */
+  test("nothing this service serves reads the loan book over the network", () => {
     const reaching = ["lib", "app", "components"]
       .flatMap((directory) => walk(join(WEB, directory)))
       .filter((path) => withoutComments(readFileSync(path, "utf8")).includes("LOAN_APP_PUBLIC_HOST"))
@@ -1030,8 +1063,9 @@ describe("the fork seam", () => {
     // Since #4 the control plane's config is in this service too, and it
     // checks the address at boot the way `apps/hooks` did (refusing a bare
     // service name; `app-test/control-plane/public-host.test.ts` pins that).
-    // It never reads the loan book with it. It was the one entry until then.
-    expect(reaching.sort()).toEqual(["lib/control-plane/config.ts", "lib/loan-context/read.ts"]);
+    // It never reads the loan book with it. `lib/loan-context/read.ts` was on
+    // this list until #5, when it stopped reading the loan book over HTTP.
+    expect(reaching.sort()).toEqual(["lib/control-plane/config.ts"]);
   });
 
   /**

@@ -1,8 +1,9 @@
 # tools/loan
 
 The loan tools — `search_loans`, `get_loan`, `approve_loan`, `deny_loan` — as a
-Python `arcade-mcp` toolkit. Each tool is a stateless client of
-[`apps/loan-app`](../../apps/loan-app), the bank's system of record. Nothing here
+Python `arcade-mcp` toolkit. Each tool is a stateless client of the app's loan
+module ([`lib/loans/`](../../lib/loans)), the bank's system of record, over
+HTTP under `/bank` (#5; it was `apps/loan-app`, a service of its own). Nothing here
 holds state, and nothing here decides anything.
 
 The tool descriptions came across from the previous MCP surface verbatim. They
@@ -23,7 +24,9 @@ duties stay in `apps/hooks`.
 
 ## Configuration
 
-One value: `LOAN_APP_PUBLIC_HOST`, HOST-form like every address in this repo.
+One value: `LOAN_APP_PUBLIC_HOST`, HOST-form like every address in this repo:
+the app's host, since the loan API is part of the app. The tools add the
+`/bank` path themselves (`API_BASE_PATH`).
 It reaches the deployed toolkit as an Arcade secret, uploaded by `arcade deploy`
 from the repo's `.env`, because a secret is the one configuration channel a
 deployed toolkit has.
@@ -32,7 +35,7 @@ deployed toolkit has.
 
 ```sh
 uv sync --extra dev
-uv run --extra dev pytest        # boots the real apps/loan-app under Bun
+uv run --extra dev pytest        # boots the real loan module (scripts/loans.ts) under Bun
 uv run server.py http            # Streamable HTTP on 127.0.0.1:8000
 ```
 

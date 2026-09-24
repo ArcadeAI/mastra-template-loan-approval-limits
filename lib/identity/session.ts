@@ -41,9 +41,9 @@ export interface GatewayToken {
  * The token `apps/idp` issued to **this browser's own sign-in** (client C).
  *
  * Kept since #157, where it stopped being a credential with no use. The bank's
- * own screens — the `/` cards and the `/loans` board — read `apps/loan-app`
- * over HTTP as the signed-in person, and `apps/loan-app` derives the actor from
- * exactly this bearer at `/oauth2/userinfo`. Before #157 the sign-in leg spent
+ * own screens — the `/` cards and the `/loans` board — read the loan module
+ * (in-process since #5; `apps/loan-app` over HTTP before) as the signed-in
+ * person, and it derives the actor from exactly this bearer at `/oauth2/userinfo`. Before #157 the sign-in leg spent
  * it once for the email and dropped it, which is why `lib/identity/oidc.ts`
  * still describes reading userinfo as its one job: that is still the only thing
  * *sign-in* wants it for.

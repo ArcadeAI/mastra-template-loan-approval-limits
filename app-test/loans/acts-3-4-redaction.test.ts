@@ -10,13 +10,13 @@
  */
 import { describe, expect, it } from "bun:test";
 
-import fixture from "../src/fixtures/loans.json" with { type: "json" };
-import { aSubject, anOutputRule } from "../../../packages/policy-schema/src/fixtures.ts";
-import type { ToolCatalogue, ToolRef } from "../../../packages/governance-core/src/policy-engine.ts";
+import fixture from "../../lib/loans/fixtures/loans.json" with { type: "json" };
+import { aSubject, anOutputRule } from "../../packages/policy-schema/src/fixtures.ts";
+import type { ToolCatalogue, ToolRef } from "../../packages/governance-core/src/policy-engine.ts";
 import {
   compileOutputPolicy,
   redact,
-} from "../../../packages/governance-core/src/redaction-engine.ts";
+} from "../../packages/governance-core/src/redaction-engine.ts";
 
 const ACCOUNT = { id: "scan.account", regex: String.raw`\b\d{16}\b`, flags: "" } as const;
 const TAX_ID = { id: "scan.tax_id", regex: String.raw`\b\d{2}-\d{7}\b`, flags: "" } as const;
@@ -31,7 +31,7 @@ type SeedRecord = Record<string, unknown>;
 const seed = (() => {
   const records = (fixture as { loans?: unknown }).loans;
   if (!Array.isArray(records)) {
-    throw new Error("apps/loan-app/src/fixtures/loans.json has no loans array");
+    throw new Error("lib/loans/fixtures/loans.json has no loans array");
   }
 
   const record = records.find(
@@ -41,7 +41,7 @@ const seed = (() => {
       (candidate as SeedRecord).loan_id === "LN-2291",
   );
   if (record === undefined) {
-    throw new Error("LN-2291 is missing from apps/loan-app/src/fixtures/loans.json");
+    throw new Error("LN-2291 is missing from lib/loans/fixtures/loans.json");
   }
   return record;
 })();

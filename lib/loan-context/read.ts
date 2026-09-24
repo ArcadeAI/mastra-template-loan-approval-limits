@@ -1,5 +1,5 @@
 /**
- * The loan book, read from `apps/loan-app` over HTTP **as the person holding
+ * The loan book, read from the loan module in-process **as the person holding
  * this browser**.
  *
  * ## Why this is not a governed read any more
@@ -18,26 +18,39 @@
  * ## Who the read is made as
  *
  * The IdP access token from this browser's own sign-in, and nothing else. There
- * is no service credential here and there must never be one: `apps/loan-app`
- * derives the actor from the bearer at `/oauth2/userinfo` (`apps/loan-app/src/
+ * is no service credential here and there must never be one: the loan module
+ * derives the actor from the bearer at `/oauth2/userinfo` (`lib/loans/
  * actor.ts`, `DESIGN.md` rule 1), so a read made with a shared secret would be
  * a read nobody can be named for. No branch in this file takes an identity from
  * a query string, a body or a header — the same rule the chat route and the
  * verifier hold to. The session is unsealed by the route that owns the cookie
  * and passed in.
  *
+ * ## In-process, and still through the module's front door
+ *
+ * Since #5 the loan book is a module of this app (`lib/loans/`), and this file
+ * reads it without leaving the process: no loopback HTTP to `/bank/…`, no MCP,
+ * no gateway. It hands the module's own request handler a `Request` carrying
+ * the person's bearer, so the read goes through exactly the path `tools/loan`'s
+ * calls go through — the same route table, the same actor derivation, the same
+ * 401 for a bearer the provider refuses. What it skips is the socket, not the
+ * rule. It never opens `loans.db` and never imports the module's database
+ * code.
+ *
  * ## What it costs
  *
  * One `GET /loans` for the book, then one `GET /loans/:id` per application,
- * because `decided_by` and `decided_at` live on the detail route and
- * `apps/loan-app` is out of this slice's scope. Nine requests to a local SQLite
- * service per poll, against a fixture of eight loans. Stated rather than hidden:
- * if the book ever grows, this is the line that has to change.
+ * because `decided_by` and `decided_at` live on the detail route. Nine calls
+ * into the module per poll, against a fixture of eight loans, and one
+ * `/oauth2/userinfo` call per minute per person (the module remembers a read's
+ * answer; `lib/loans/actor.ts`). Stated rather than hidden: if the book ever
+ * grows, this is the line that has to change.
  */
 import { personaFor } from "../identity/roster.ts";
 import { refreshIdpToken, tokenExpiry } from "../identity/oidc.ts";
 import { withIdpToken, type IdpToken, type Session } from "../identity/session.ts";
-import { publicHost } from "../public-host.ts";
+import { loanModule } from "../loans/instance.ts";
+import type { LoanModule } from "../loans/server.ts";
 import type { LoanBookState, LoanCard } from "./loans.ts";
 
 /**
@@ -53,27 +66,20 @@ import type { LoanBookState, LoanCard } from "./loans.ts";
  */
 const RENEW_BEFORE_MS = 30_000;
 
-/** Hosts are HOST-form; the consumer adds the scheme, the same way `apps/loan-app` does. */
-export function loanAppBaseUrl(host: string): string {
-  const local = host.startsWith("localhost") || host.startsWith("127.0.0.1");
-  return `${local ? "http" : "https"}://${host}`;
-}
-
 /**
- * `LOAN_APP_PUBLIC_HOST`, refused if it is not an address anything can reach.
- *
- * Read through `publicHost` like every other cross-service address in this
- * repo: Render's `fromService` emits a bare service name, a human typing one by
- * hand produces the same thing, and the failure is a DNS error that reads as
- * "the loan book is down" (#59).
+ * The origin on the `Request`s handed to the module. Never dialled: nothing
+ * here calls `fetch`, and the module reads only the path and the query off
+ * the URL.
  */
-export function loanAppHost(env: Record<string, string | undefined> = process.env): string {
-  return publicHost("LOAN_APP_PUBLIC_HOST", env.LOAN_APP_PUBLIC_HOST, "localhost:8082");
-}
+const IN_PROCESS = "http://loan-module.in-process";
 
 export interface ReadLoanBookOptions {
-  /** HOST-form. Defaults to `LOAN_APP_PUBLIC_HOST`. */
-  host?: string;
+  /**
+   * The loan module to read. Defaults to this process's (`lib/loans/instance.ts`),
+   * which is the only one the app ever has; a test hands in one over its own
+   * `loans.db` and its own identity provider.
+   */
+  loans?: Pick<LoanModule, "fetch">;
   /** Where the personas live, for renewing a bearer. Defaults to the environment. */
   idp?: { issuer: string; clientId: string; clientSecret: string };
   /**
@@ -91,7 +97,7 @@ export interface ReadLoanBookOptions {
   onRequest?: (request: { path: string; authorization: string | null }) => void;
 }
 
-/** What `apps/loan-app` answers `GET /loans` with, as far as this reads it. */
+/** What the loan module answers `GET /loans` with, as far as this reads it. */
 interface LoanSummary {
   loan_id?: unknown;
 }
@@ -140,14 +146,14 @@ export async function readLoanBook(
     };
   }
 
-  let base: string;
+  let loans: Pick<LoanModule, "fetch">;
   try {
-    base = loanAppBaseUrl(options.host ?? loanAppHost());
+    loans = options.loans ?? loanModule();
   } catch (cause) {
     return { status: "unavailable", message: cause instanceof Error ? cause.message : String(cause) };
   }
 
-  const list = await ask(base, "/loans", held, options);
+  const list = await ask(loans, "/loans", held, options);
   if (list.outcome === "unauthorized") return expiredFor(session.email);
   if (list.outcome === "failed") return { status: "unavailable", message: list.message };
 
@@ -160,10 +166,10 @@ export async function readLoanBook(
   }
 
   const details = await Promise.all(
-    ids.map((id) => ask(base, `/loans/${encodeURIComponent(id)}`, held, options)),
+    ids.map((id) => ask(loans, `/loans/${encodeURIComponent(id)}`, held, options)),
   );
 
-  const loans: LoanCard[] = [];
+  const cards: LoanCard[] = [];
   for (const detail of details) {
     if (detail.outcome === "unauthorized") return expiredFor(session.email);
     // A single missing application is not an outage: the book may have been
@@ -174,10 +180,10 @@ export async function readLoanBook(
       return { status: "unavailable", message: detail.message };
     }
     const card = projectLoan(detail.body);
-    if (card !== null) loans.push(card);
+    if (card !== null) cards.push(card);
   }
 
-  return { status: "loaded", actor: session.email, loans };
+  return { status: "loaded", actor: session.email, loans: cards };
 }
 
 function expiredFor(email: string): LoanBookState {
@@ -203,7 +209,7 @@ type Asked =
   | { outcome: "failed"; status: number; message: string };
 
 async function ask(
-  base: string,
+  loans: Pick<LoanModule, "fetch">,
   path: string,
   token: IdpToken,
   options: ReadLoanBookOptions,
@@ -212,16 +218,15 @@ async function ask(
   options.onRequest?.({ path, authorization });
   let response: Response;
   try {
-    response = await fetch(`${base}${path}`, {
-      headers: { authorization, accept: "application/json" },
-      cache: "no-store",
-    });
+    response = await loans.fetch(
+      new Request(`${IN_PROCESS}${path}`, { headers: { authorization, accept: "application/json" } }),
+    );
   } catch (cause) {
     return {
       outcome: "failed",
       status: 0,
       message:
-        `The loan book at ${base} could not be reached: ` +
+        `The loan book could not answer ${path}: ` +
         `${cause instanceof Error ? cause.message : String(cause)}.`,
     };
   }
@@ -362,7 +367,7 @@ export function projectLoan(body: unknown): LoanCard | null {
  * The last decision in the append-only history, which is the one the loan's
  * current status came from.
  *
- * `loan_decisions` is append-only by design (`apps/loan-app/src/db.ts`), so
+ * `loan_decisions` is append-only by design (`lib/loans/db.ts`), so
  * approving twice leaves two rows; the card names the decision that stands.
  */
 function latestDecision(value: unknown): { decided_by: string | null; decided_at: string | null } | null {

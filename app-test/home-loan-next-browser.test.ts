@@ -202,10 +202,12 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
         IDP_CLIENT_SECRET: "not-used-by-local-next-browser",
         APPROVALS_STORE_TOKEN: "store-token-for-agent-tests",
         // Since #157 the loan cards read the bank's own API rather than the
-        // gateway, so this page needs the loan book's address. It is the
-        // harness's real `apps/loan-app`, which validates the bearer below
-        // against the harness's real dev IdP.
-        LOAN_APP_PUBLIC_HOST: harness.loanAppHost,
+        // gateway, and since #5 that API is the app's own loan module, read
+        // in-process. It opens the harness's `loans.db` — the file the
+        // gateway's tool calls write through the harness's loan module — and
+        // validates the bearer below against the harness's real dev IdP.
+        LOANS_DB_PATH: harness.loansDbPath,
+        IDP_PUBLIC_HOST: harness.idpHost,
       };
 
       next = Bun.spawn({
@@ -263,7 +265,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
         // The IdP bearer the loan cards are read with (#157). The harness's
         // identity provider is the repo's dev stub, which answers
         // `/oauth2/userinfo` for `dev:<email>` — the real code path in
-        // `apps/loan-app/src/actor.ts`, with a fixture issuer behind it.
+        // `lib/loans/actor.ts`, with a fixture issuer behind it.
         idp: {
           access_token: `${DEV_IDP_TOKEN_PREFIX}${DANA}`,
           expires_at: Date.now() + 3_600_000,

@@ -1,19 +1,25 @@
 /**
- * `bun run dev:idp-stub` has to bind the identity provider's port, not this
- * service's own.
+ * `bun run dev:idp-stub` has to bind the identity provider's port, not the
+ * app's own.
  *
- * The stub lives under `apps/loan-app/scripts/` and the root script runs it
- * with `--cwd apps/loan-app`, so Bun loads `apps/loan-app/.env.local` into it.
- * Until #56 it took `PORT` from that file — the loan API's port. In a worktree
+ * Until #5 the stub lived under `apps/loan-app/scripts/` and the root script
+ * ran it with `--cwd apps/loan-app`, so Bun loaded `apps/loan-app/.env.local`
+ * into it. Since #5 it is `scripts/dev-idp.ts`, run from the root, so Bun
+ * loads the root `.env.local`, whose `PORT` is the app's — the same trap with
+ * a different owner. Until #56 it took `PORT` from that file — the loan API's
+ * port. In a worktree
  * owning 4410-4419 both processes wanted 4412, and `IDP_PUBLIC_HOST` pointed
  * at 4413 where nothing was listening. Sibling of `app-test/dev-port.test.ts`
  * (#50): same family of silent misbinding, different cause — that one was a
  * shell expanding `${PORT:-3000}` before anything read the file, this one read
  * the right file for the wrong service.
  *
- * The first test therefore runs the *packaged* scripts, verbatim, from both
- * manifests, in a throwaway tree whose `.env.local` carries a `PORT` and an
+ * The first test therefore runs the *packaged* script, verbatim, from the root
+ * manifest, in a throwaway tree whose `.env.local` carries a `PORT` and an
  * `IDP_PUBLIC_HOST` that disagree. Only one of them can be the one it binds.
+ * Before #5 there were two manifests in that chain, the root's and
+ * `apps/loan-app`'s; the service's is gone, and so is the one expectation that
+ * read a script out of it.
  */
 import { afterAll, expect, test } from "bun:test";
 import type { Subprocess } from "bun";
@@ -21,11 +27,10 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { resolveStubPort } from "../scripts/dev-idp.ts";
+import { resolveStubPort } from "../../scripts/dev-idp.ts";
 
-const LOAN_ROOT = join(import.meta.dir, "..");
-const REPO_ROOT = join(LOAN_ROOT, "..", "..");
-const STUB = join(LOAN_ROOT, "scripts", "dev-idp.ts");
+const REPO_ROOT = join(import.meta.dir, "..", "..");
+const STUB = join(REPO_ROOT, "scripts", "dev-idp.ts");
 
 interface Manifest {
   scripts?: Record<string, string>;
@@ -51,17 +56,31 @@ function freePort(): number {
 }
 
 /**
+ * What the stub is started with: enough of the caller's environment to run
+ * `bun`, and nothing the fixture decides.
+ *
  * `bun test` sets `NODE_ENV=test`, and under it Bun skips `.env.local`
- * entirely — a real dev server's environment is the one without it. `PORT` is
- * dropped too: the whole question is which of two values in the file the stub
- * picks, so neither may reach it from the caller. Measured on #50.
+ * entirely — a real dev server's environment is the one without it, so
+ * `NODE_ENV` is not passed. And the whole question is which of the fixture
+ * `.env.local`'s two values the stub picks, so neither `PORT` nor
+ * `IDP_PUBLIC_HOST` may reach it from the caller: Bun lets a variable already
+ * in the environment win over the file. Measured on #50.
+ *
+ * An allowlist, not a list of exclusions, since round 1 of #5's review: the
+ * first cut dropped `PORT` and `NODE_ENV` only, and a shell that had exported
+ * the worktree's own `.env.local` (`set -a; . ./.env.local`) handed the stub
+ * `IDP_PUBLIC_HOST=localhost:4443`, so it bound that and the test timed out on
+ * the fixture's port. Every `*_PUBLIC_HOST`, `CG_PORT_*` or anything else a
+ * future fixture writes is excluded the same way, by not being on this list.
  */
+const PASSED_THROUGH = ["PATH", "HOME", "TMPDIR", "USER", "LOGNAME", "SHELL", "LANG", "TERM"] as const;
+
 function devEnv(extra: Record<string, string> = {}): Record<string, string> {
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && key !== "PORT" && key !== "NODE_ENV",
-    ),
-  ) as Record<string, string>;
+  const inherited: Record<string, string> = {};
+  for (const key of PASSED_THROUGH) {
+    const value = process.env[key];
+    if (value !== undefined) inherited[key] = value;
+  }
   return { ...inherited, ...extra };
 }
 
@@ -79,18 +98,14 @@ test("the packaged dev:idp-stub script binds IDP_PUBLIC_HOST's port, not PORT", 
   expect(idpPort).not.toBe(loanPort);
 
   const root = await manifestAt(REPO_ROOT);
-  const loanApp = await manifestAt(LOAN_ROOT);
   const stubScript = root.scripts?.["dev:idp-stub"];
-  const devIdp = loanApp.scripts?.["dev:idp"];
   expect(stubScript).toBeString();
-  expect(devIdp).toBeString();
 
-  // Both manifests, reproduced with the real script strings, so the test
-  // exercises the whole chain: the root script's `--cwd`, which decides which
-  // `.env.local` Bun loads, and the service script it delegates to.
+  // The root manifest, reproduced with the real script string, so the test
+  // exercises the whole chain: where the script runs from decides which
+  // `.env.local` Bun loads.
   project = mkdtempSync(join(tmpdir(), "cg-dev-idp-port-"));
-  const service = join(project, "apps", "loan-app");
-  mkdirSync(service, { recursive: true });
+  mkdirSync(join(project, "scripts"), { recursive: true });
   writeFileSync(
     join(project, "package.json"),
     `${JSON.stringify(
@@ -99,25 +114,12 @@ test("the packaged dev:idp-stub script binds IDP_PUBLIC_HOST's port, not PORT", 
       2,
     )}\n`,
   );
-  writeFileSync(
-    join(service, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "cg-dev-idp-port-service",
-        private: true,
-        type: "module",
-        scripts: { "dev:idp": devIdp },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  cpSync(join(LOAN_ROOT, "scripts"), join(service, "scripts"), { recursive: true });
+  cpSync(STUB, join(project, "scripts", "dev-idp.ts"));
 
   // The only two ports in the fixture, and they disagree on purpose: `PORT` is
-  // the loan API's, the way `scripts/orca-setup.sh` writes it.
+  // the app's, the way `scripts/orca-setup.sh` writes the root `.env.local`.
   writeFileSync(
-    join(service, ".env.local"),
+    join(project, ".env.local"),
     `PORT=${loanPort}\nIDP_PUBLIC_HOST=localhost:${idpPort}\n`,
   );
 
@@ -159,8 +161,8 @@ test("the packaged dev:idp-stub script binds IDP_PUBLIC_HOST's port, not PORT", 
 
   expect(body).toEqual({ status: "ok", service: "dev-idp" });
 
-  // And the other half of the bug: the loan API's port is still free, so
-  // `dev:loan-app` can have it.
+  // And the other half of the bug: the app's port is still free, so `bun run
+  // dev` can have it.
   await expect(fetch(`http://127.0.0.1:${loanPort}/health`)).rejects.toThrow();
 }, 60_000);
 

@@ -117,11 +117,13 @@ STUDIO=$((BASE + 5))
 shared() {
   cat <<ENVEOF
 # Host-form, matching .env.example: consumers add the scheme. The control
-# plane is part of the app since #4, so HOOKS_PUBLIC_HOST is the app's port.
-# CG_PORT_HOOKS stays claimed in the block and nothing binds it.
+# plane is part of the app since #4, so HOOKS_PUBLIC_HOST is the app's port,
+# and the loan API since #5 (under /bank), so LOAN_APP_PUBLIC_HOST is too.
+# CG_PORT_HOOKS and CG_PORT_LOAN_APP stay claimed in the block and nothing
+# binds them.
 WEB_PUBLIC_HOST=localhost:$WEB
 HOOKS_PUBLIC_HOST=localhost:$WEB
-LOAN_APP_PUBLIC_HOST=localhost:$LOAN
+LOAN_APP_PUBLIC_HOST=localhost:$WEB
 IDP_PUBLIC_HOST=localhost:$IDP
 IDP_PUBLIC_URL=http://localhost:$IDP
 ENVEOF
@@ -138,7 +140,6 @@ write_service_env() {  # $1 = app dir, $2 = its port
   } > "$dir/.env.local"
 }
 
-write_service_env loan-app "$LOAN"
 write_service_env idp "$IDP"
 
 # The root file documents the block, gives root-level `bun test` the

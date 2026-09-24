@@ -57,17 +57,32 @@ function readJson(path: string): Manifest {
 /**
  * Every workspace manifest in the repo, keyed by directory — and the root
  * one, which is the web app's since #3 moved it out of `apps/web`.
+ *
+ * Read off the root manifest's `workspaces` list since #5, which moved the
+ * governed app out of `apps/` and into the app's own tree as a module. Until
+ * then this listed `apps/` and `packages/` by hand, and a governed workspace
+ * anywhere else would have dropped out of the sweep without a sound. Each entry is a
+ * directory or `<dir>/*`; any other pattern throws rather than matching
+ * nothing. A `<dir>/*` entry still takes every directory with a manifest, not
+ * only those Bun installed, so `apps/idp` is found the same way it always was.
  */
 function workspaces(): Array<{ dir: string; manifest: Manifest }> {
+  const root = readJson(join(REPO_ROOT, "package.json")) as Manifest & { workspaces?: string[] };
+  const dirs = (root.workspaces ?? []).flatMap((pattern) => {
+    if (pattern.endsWith("/*")) {
+      const group = join(REPO_ROOT, pattern.slice(0, -2));
+      return readdirSync(group)
+        .map((entry) => join(group, entry))
+        .filter((dir) => statSync(dir).isDirectory());
+    }
+    if (pattern.includes("*")) throw new Error(`workspaces(): unsupported pattern ${pattern}`);
+    return [join(REPO_ROOT, pattern)];
+  });
   return [
-    { dir: REPO_ROOT, manifest: readJson(join(REPO_ROOT, "package.json")) },
-    ...["apps", "packages"].flatMap((group) =>
-      readdirSync(join(REPO_ROOT, group))
-        .map((entry) => join(REPO_ROOT, group, entry))
-        .filter((dir) => statSync(dir).isDirectory())
-        .filter((dir) => existsSync(join(dir, "package.json")))
-        .map((dir) => ({ dir, manifest: readJson(join(dir, "package.json")) })),
-    ),
+    { dir: REPO_ROOT, manifest: root },
+    ...dirs
+      .filter((dir) => existsSync(join(dir, "package.json")))
+      .map((dir) => ({ dir, manifest: readJson(join(dir, "package.json")) })),
   ];
 }
 

@@ -4,15 +4,16 @@
   "type": "module",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "lib/loans"
   ],
   "scripts": {
     "dev": "bun scripts/next.ts dev",
     "dev:web": "bun run dev",
     "studio": "mastra dev",
-    "dev:loan-app": "bun run --cwd apps/loan-app dev",
     "dev:idp": "bun run --cwd apps/idp dev",
-    "dev:idp-stub": "bun run --cwd apps/loan-app dev:idp",
+    "dev:idp-stub": "bun scripts/dev-idp.ts",
+    "loans": "bun scripts/loans.ts",
     "arcade-stand-in": "bun scripts/arcade-stand-in.ts",
     "gateway-stand-in": "bun scripts/gateway-stand-in.ts",
     "build": "bun --bun next build && bun run --filter '*' build",
@@ -23,11 +24,12 @@
   },
   "//": [
     "The root manifest is the app's since #3: the Next.js app that was apps/web lives at the repo root, and the workspaces are the services still to fold plus packages/*. `--filter '*'` in `build` and `typecheck` matches the workspaces and never the root, so neither recurses. There is no `test` script: at the root `bun test` runs every group in the repo, and a script scoped to one of them would read as the whole suite. The app's group is `bun test ./app-test/`.",
-    "The app runs on Bun, not Node, since #4: `build` is `bun --bun next build`, and `dev` and `start` pass `--bun` in `scripts/next.ts`. The control plane in `lib/control-plane/` opens `governance.db` with `bun:sqlite`, which Node cannot load, and `next`'s bin is `#!/usr/bin/env node`, which plain `bun run` honours. Measured on #4: under Node the build fails collecting page data and the route answers 500.",
+    "The app runs on Bun, not Node, since #4: `build` is `bun --bun next build`, and `dev` and `start` pass `--bun` in `scripts/next.ts`. The control plane in `lib/control-plane/` opens `governance.db` with `bun:sqlite`, and since #5 the loan module in `lib/loans/` opens `loans.db` the same way; Node cannot load it, and `next`'s bin is `#!/usr/bin/env node`, which plain `bun run` honours. Measured on #4: under Node the build fails collecting page data and the route answers 500.",
     "`dev` and `start` go through `scripts/next.ts` so that PORT comes from the root `.env.local`, the way it does for the three Bun services from theirs. `next dev --port ${PORT:-3000}` did not: the shell expanded it before anything read the file, and the service bound 3000 in a worktree that owns 4410. See #50 and the comment at the top of that script; `app-test/dev-port.test.ts` fails if the shell-expanded form comes back. `dev:web` is the name the app ran under before #3, kept as an alias.",
     "zod is pinned to one exact 4.x version, repo-wide, by the override below. The old 3.x pin (#28) guarded an Arcade TypeScript SDK this repo never depended on, and by #187 it blocked @mastra/mcp 2, whose MCP SDK requires zod ^4.2. One version everywhere is the point: two zods in one process disagree about instanceof.",
     "apps/idp is a workspace member since #187: with the override at zod 4, Better Auth installs from the root like everything else, so a fresh clone needs one `bun install` and there is one lockfile. It is still the enterprise IdP stand-in a forker deletes, so it depends on nothing in the template and nothing depends on it — apps/idp/test/knows-people-not-loans.test.ts enforces both halves.",
-    "dev:idp-stub keeps `--cwd apps/loan-app` because that is where the stub lives, but it binds IDP_PUBLIC_HOST's port, not the PORT in that directory's .env.local — which is the loan API's. See #56 and the comment at the top of apps/loan-app/scripts/dev-idp.ts; apps/loan-app/test/dev-idp-port.test.ts fails if it goes back to PORT.",
+    "dev:idp-stub is the laptop-only identity stand-in, at scripts/dev-idp.ts since #5 folded apps/loan-app (it lived in apps/loan-app/scripts before). It binds IDP_PUBLIC_HOST's port, not PORT — the root .env.local's PORT is the app's. See #56 and the comment at the top of scripts/dev-idp.ts; app-test/loans/dev-idp-port.test.ts fails if it goes back to PORT.",
+    "lib/loans is a workspace member for its manifest's `cg.governed` flag, which `packages/policy-schema`'s sweep reads to exempt it; `bun run loans` puts the module on a port of its own (scripts/loans.ts), for tests and for anyone who wants the loan API without Next.",
     "`studio` is `mastra dev`: it bundles `src/mastra/index.ts` and serves Mastra Studio under Node, on `STUDIO_PORT` rather than on `PORT`, which is the app's and which `mastra dev` would otherwise read from the root `.env.local`. Studio runs the chat route's agent and authorizes against the gateway itself, at `/arcade/authorize` on its own server (#8). In an Orca worktree `scripts/orca-setup.sh` sets `STUDIO_PORT` from the worktree's block; unset, Studio takes Mastra's own default, 4111, deliberately (`lib/agent/studio.ts::MASTRA_DEFAULT_PORT`). `app-test/studio-dev-server.test.ts` boots it on a port the OS hands out."
   ],
   "//ws": "`ws` is a transitive runtime dependency, declared here on purpose. `@mastra/core` opens it at module scope (`import WebSocket from \"ws\"`), and Bun's isolated install links only a package's *declared* dependencies — so without this line `ws` exists only under `node_modules/.bun/@mastra+core@…/node_modules/ws` and is unreachable from the app. In the Alpine builder webpack left it as a bare `require(\"ws\")` external, Next's file tracing could not resolve that specifier from the emitted route, and the standalone image shipped without it: `POST /api/chat` answered `Cannot find module 'ws'` on Render while `next start` on a full node_modules was fine. Declaring it is the whole fix — the specifier now resolves from this package, so tracing carries it. Measured in #92; `scripts/verify-standalone.ts` is what proves it, against the Docker image rather than `next start`.",

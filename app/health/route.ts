@@ -45,10 +45,20 @@
  * itself (row counts, the migration report, stream clients, the contract
  * version) is under `control_plane`, with its own roll-up in
  * `control_plane.status`, which is what the panel's strip reads.
+ *
+ * **Since #5 it is the loan book's `/health` too**, because the loan module is
+ * part of this app (`lib/loans/`). `loans` is `{ status: "ok", count }`, or
+ * `{ status: "failed", count: null, error }` when `loans.db` did not open, and
+ * a failed loan book is `degraded`. Never a bare count: `cg-loan-app` answered
+ * `loans: <n>`, and `0` read the same whether the book was empty or the
+ * database never opened. The module's own answer, with the count as a number,
+ * is still at `/bank/health`. `reset` covers `POST /bank/admin/reset` too: the
+ * same `RESET_TOKEN` decides it.
  */
 import { deploymentReadiness, readIdentitySurface } from "../../lib/config.ts";
 import { bootedControlPlane, controlPlaneFailure } from "../../lib/control-plane/instance.ts";
 import { panelStreamHealth } from "../../lib/governance/stream-url.ts";
+import { loanBookHealth } from "../../lib/loans/instance.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +68,8 @@ export function GET() {
   // them — see the note above about it having three answers.
   const { status: deployment, ...capabilities } = deploymentReadiness(readIdentitySurface());
   const panel_stream = panelStreamHealth(process.env);
+  // Read in-process: this process's `loans.db` (#5).
+  const loans = loanBookHealth();
 
   // The control plane's own report (#4). Read in-process: it is this process's
   // policy cache and this process's `governance.db`.
@@ -75,11 +87,14 @@ export function GET() {
   // when every capability is configured, the panel is watching something, and
   // the control plane is `healthy` (a compiled policy that matches the shipped
   // fixture) — and still HTTP 200, so Render brings the instance up and a
-  // human can read the fields that say which one. #86, #88 and #4 each added a
-  // term to this expression; a deployment that satisfies some and not all is
-  // `degraded`.
+  // human can read the fields that say which one. #86, #88, #4 and #5 each
+  // added a term to this expression; a deployment that satisfies some and not
+  // all is `degraded`.
   const status =
-    deployment === "ok" && panel_stream !== "unconfigured" && controlPlaneStatus === "healthy"
+    deployment === "ok" &&
+    panel_stream !== "unconfigured" &&
+    controlPlaneStatus === "healthy" &&
+    loans.status === "ok"
       ? "ok"
       : "degraded";
 
@@ -98,6 +113,7 @@ export function GET() {
     policy,
     fixture_drift,
     injection_detection,
+    loans,
     reset,
     warnings,
     control_plane: { status: controlPlaneStatus, ...controlPlane },

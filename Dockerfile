@@ -3,8 +3,9 @@
 # lockfile to link `packages/*`, and since #3 the root manifest is this app's.
 #
 # Built with Bun (for workspace linking) and served on Bun too since #4: the
-# control plane is a module of the app and opens governance.db with
-# `bun:sqlite`, which Node cannot load. Until #4 the runner was node:22-alpine.
+# control plane (#4) and the loan module (#5) are modules of the app and open
+# governance.db and loans.db with `bun:sqlite`, which Node cannot load. Until
+# #4 the runner was node:22-alpine.
 
 FROM oven/bun:1.3.14-alpine AS builder
 WORKDIR /app
@@ -13,14 +14,16 @@ COPY package.json bun.lock tsconfig.base.json ./
 # --frozen-lockfile resolves the whole workspace, so every member's manifest
 # has to be present even though only the root app gets built here.
 COPY apps/idp/package.json ./apps/idp/
-COPY apps/loan-app/package.json ./apps/loan-app/
+# The loan module is a workspace member for its manifest's `cg.governed` flag
+# (#5); its source arrives with `lib` below.
+COPY lib/loans/package.json ./lib/loans/
 COPY packages ./packages
 
 RUN bun install --frozen-lockfile
 
 # The app's own tree, and nothing else at the root: `scripts/`, `test/` and
 # `app-test/` have no business in the image, and `apps/*` are other services.
-COPY next.config.ts tsconfig.json tsconfig.build.json ./
+COPY next.config.ts instrumentation.ts tsconfig.json tsconfig.build.json ./
 COPY app ./app
 COPY components ./components
 COPY lib ./lib

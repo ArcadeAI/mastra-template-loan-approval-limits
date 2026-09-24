@@ -1,31 +1,33 @@
 /**
  * A stand-in identity provider for local development. NOT the real one.
  *
- * `apps/loan-app` validates every bearer token by asking the issuer's
+ * The loan module (`lib/loans/`) validates every bearer token by asking the issuer's
  * `/oauth2/userinfo` who it belongs to. The real issuer is `apps/idp` (#36);
  * until it is running locally, this serves that one endpoint so the API can be
  * driven by hand:
  *
  *     bun run dev:idp-stub                  # binds the port in IDP_PUBLIC_HOST
- *     curl -H 'Authorization: Bearer dev:alice@example.test' "$LOAN_APP_PUBLIC_HOST/loans"
+ *     curl -H 'Authorization: Bearer dev:alice@example.test' "$LOAN_APP_PUBLIC_HOST/bank/loans"
  *
  * A token is `dev:<email>`; the email after the prefix is who you are. That
  * is the whole protocol, so this must never run anywhere but a laptop. It
- * lives under `scripts/`, outside the `src/` the boundary test scans, and
- * outside the Docker image.
+ * lives under the repo's `scripts/`, outside the `lib/loans/` the boundary test
+ * scans, and outside the Docker image. It lived in `apps/loan-app/scripts/`
+ * until #5 folded that service into the app.
  */
 
-/** What `apps/loan-app/src/index.ts` falls back to when `IDP_PUBLIC_HOST` is unset. */
+/** What `lib/loans/instance.ts` falls back to when `IDP_PUBLIC_HOST` is unset. */
 const DEFAULT_IDP_HOST = "localhost:8083";
 
 /**
  * The port comes from `IDP_PUBLIC_HOST` — the address the loan API is pointed
  * at for userinfo — and deliberately not from `PORT`.
  *
- * `PORT` here belongs to the loan API. This script lives under
- * `apps/loan-app/scripts/`, and `dev:idp-stub` runs it with `--cwd
- * apps/loan-app`, so Bun loads `apps/loan-app/.env.local` into it: the right
- * file for the wrong service. Until #56 it read `PORT` out of that file and
+ * `PORT` here belongs to somebody else. Since #5 this script runs from the
+ * root, so Bun loads the root `.env.local`, whose `PORT` is the app's. Before
+ * #5 it lived under `apps/loan-app/scripts/` and `dev:idp-stub` ran it with
+ * `--cwd apps/loan-app`, so Bun loaded `apps/loan-app/.env.local` into it: the
+ * right file for the wrong service, and the `PORT` in it was the loan API's. Until #56 it read `PORT` out of that file and
  * bound the loan API's port — measured in a worktree owning 4410-4419, both
  * processes wanted 4412, whichever started second lost, and nothing was
  * listening on 4413 where `IDP_PUBLIC_HOST` pointed. It failed silently: the

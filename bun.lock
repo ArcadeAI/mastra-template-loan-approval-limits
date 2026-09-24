@@ -41,15 +41,11 @@
         "typescript": "^6.0.3",
       },
     },
-    "apps/loan-app": {
-      "name": "@cg/loan-app",
+    "lib/loans": {
+      "name": "@cg/loans",
       "version": "0.0.0",
       "dependencies": {
         "zod": "4.6.5",
-      },
-      "devDependencies": {
-        "@types/bun": "^1.4.2",
-        "typescript": "^6.0.3",
       },
     },
     "packages/governance-core": {
@@ -178,7 +174,7 @@
 
     "@cg/governance-core": ["@cg/governance-core@workspace:packages/governance-core"],
 
-    "@cg/loan-app": ["@cg/loan-app@workspace:apps/loan-app"],
+    "@cg/loans": ["@cg/loans@workspace:lib/loans"],
 
     "@cg/policy-schema": ["@cg/policy-schema@workspace:packages/policy-schema"],
 

@@ -20,7 +20,7 @@
  * {@link LoanCard}).
  *
  * One rule survives the reversal intact: **the read is attributable to a person
- * or it does not happen.** `read.ts` calls `apps/loan-app` with the IdP bearer
+ * or it does not happen.** `read.ts` calls the loan module with the IdP bearer
  * from this browser's own sign-in and there is no service credential anywhere
  * on the path.
  *
@@ -60,7 +60,7 @@ export const LOANS_ROUTE = "/api/loans";
 /**
  * One application, as the bank's own screens are allowed to see it.
  *
- * An **allow-list**, not a filter. `apps/loan-app` returns
+ * An **allow-list**, not a filter. The loan module (`lib/loans/`) returns
  * `bank_account_number`, `tax_id` and `underwriter_notes` on its detail route —
  * a loan origination system holds them and ours does too — and the projection
  * in `read.ts` builds this object field by field rather than deleting three
@@ -81,7 +81,7 @@ export interface LoanCard {
   annual_revenue: number;
   years_in_business: number;
   /**
-   * Who recorded the most recent decision, as `apps/loan-app` derived it from
+   * Who recorded the most recent decision, as the loan module derived it from
    * that caller's own token. `null` when nothing has been decided, and also on
    * the seeded decisions that predate the system and name nobody.
    */

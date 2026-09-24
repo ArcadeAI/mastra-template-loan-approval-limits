@@ -1,5 +1,5 @@
 /**
- * One loan, read from `apps/loan-app`'s own seed file.
+ * One loan, read from the loan module's own seed file (`lib/loans/`, since #5).
  *
  * The rule this exists to enforce is the driver's, on #16: *prove the pattern
  * against the fixture, not against a hand-typed string.* Act 4's injected note
@@ -12,7 +12,7 @@
  * governance boundary runs the other way (`apps/loan-app` must not know about
  * governance, which `knows-nothing-about-governance.test.ts` enforces).
  */
-import loans from "../../apps/loan-app/src/fixtures/loans.json" with { type: "json" };
+import loans from "../../lib/loans/fixtures/loans.json" with { type: "json" };
 
 export interface LoanFixture extends Record<string, unknown> {
   loan_id: string;
@@ -33,7 +33,7 @@ export function loanFixtures(): LoanFixture[] {
 export function loanFixture(loanId: string): LoanFixture {
   const loan = loanFixtures().find((candidate) => candidate.loan_id === loanId);
   if (loan === undefined) {
-    throw new Error(`apps/loan-app's fixture has no ${loanId}`);
+    throw new Error(`the loan module's fixture has no ${loanId}`);
   }
   return loan;
 }

@@ -6,8 +6,8 @@
  * It used to answer two questions on one gateway session — *what may this
  * persona see* (#15's tool list, act 1) and *what do the two applications under
  * review say* (#22's loan files, moved here by #109). The second question is no
- * longer the gateway's: since #157 the bank's own screens read `apps/loan-app`
- * directly as the signed-in person and poll it, so loading `/` makes **one**
+ * longer the gateway's: since #157 the bank's own screens read the loan book
+ * directly as the signed-in person (in-process since #5) and poll it, so loading `/` makes **one**
  * `tools/list` and **zero** governed tool calls. Every MCP call in the demo now
  * starts in the chat, which is what makes the panel legible: a card on it is
  * something the agent did.

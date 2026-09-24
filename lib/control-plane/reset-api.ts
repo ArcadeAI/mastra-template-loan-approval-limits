@@ -182,7 +182,7 @@ export async function handleReset(
     // Named on every response, in both modes, because the alternative is a
     // presenter who ran "demo" and believes the loan book is back to seed.
     not_reset: {
-      "loans.db": "owned by apps/loan-app; reset with that service's own endpoint",
+      "loans.db": "owned by the loan module; reset with POST /bank/admin/reset",
       "idp.db": "never reset from here — it holds the OAuth client Arcade is registered against",
     },
   });

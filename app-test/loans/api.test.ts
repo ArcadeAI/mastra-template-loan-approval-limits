@@ -1,7 +1,7 @@
 /**
- * The HTTP surface, exercised over the wire against the service booted the
- * way Render boots it — `bun src/index.ts`, env only — not by calling handlers
- * in-process.
+ * The HTTP surface, exercised over the wire against the loan module on a
+ * socket of its own — `bun scripts/loans.ts`, env only, laid out under `/bank`
+ * exactly as the app serves it (#5) — not by calling handlers in-process.
  *
  * Tokens are validated against a stand-in identity provider that this file
  * runs itself: it serves `/oauth2/userinfo` and knows two tokens. The real one
@@ -14,7 +14,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { LoanRecord, LoanSummary } from "../src/db.ts";
+import type { LoanRecord, LoanSummary } from "../../lib/loans/db.ts";
 
 /**
  * `Response.json()` is `Promise<unknown>`, so every read off a body below has
@@ -104,9 +104,10 @@ beforeAll(async () => {
   });
 
   const port = freePort();
-  baseUrl = `http://127.0.0.1:${port}`;
+  // The runner lays the module out the way the app does, under /bank (#5).
+  baseUrl = `http://127.0.0.1:${port}/bank`;
 
-  child = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "index.ts")], {
+  child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
     env: {
       ...process.env,
       PORT: String(port),
@@ -193,6 +194,30 @@ describe("identity", () => {
       await fetch(`${baseUrl}/loans/LN-2292`, as("tok-dana"))
     ).json()) as LoanRecord;
     expect(loan.decisions).toHaveLength(0);
+  });
+});
+
+/**
+ * Added on #5, for its criterion 4 as the driver amended it: a body naming an
+ * actor is refused (above), and an actor named anywhere else in the request —
+ * the query string, a header — is not refused but ignored, and the decision is
+ * recorded as the bearer's owner.
+ */
+describe("an actor named outside the body is ignored, and the token's owner is recorded", () => {
+  test("?actor=, ?decided_by= and X-Actor all name Charlie; Alice's token is what is recorded", async () => {
+    const response = await fetch(
+      `${baseUrl}/loans/LN-2295/approve?actor=${encodeURIComponent(RILEY)}&decided_by=${encodeURIComponent(RILEY)}`,
+      as("tok-dana", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-actor": RILEY },
+        body: JSON.stringify({ amount: 4_200 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const loan = (await response.json()) as LoanRecord;
+    expect(loan.decisions.at(-1)).toMatchObject({ amount: 4_200, decided_by: DANA });
+    expect(loan.decisions.map((d) => d.decided_by)).not.toContain(RILEY);
   });
 });
 

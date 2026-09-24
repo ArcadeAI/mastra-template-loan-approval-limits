@@ -168,7 +168,7 @@ export interface ChatProps {
    * The bank has stopped accepting this browser's sign-in (#176).
    *
    * `true` when the loan book read comes back `expired` — a real 401 from
-   * `apps/loan-app` on this person's own IdP bearer, which `BankPane` holds
+   * the loan module on this person's own IdP bearer, which `BankPane` holds
    * because three surfaces have to agree about it.
    *
    * It changes one sentence and nothing else. The chat still runs, the composer

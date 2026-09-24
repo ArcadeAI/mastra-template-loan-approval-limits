@@ -1,8 +1,9 @@
-"""Boots the real `apps/loan-app` and a stand-in identity provider.
+"""Boots the real loan module and a stand-in identity provider.
 
 The four tools are stateless clients, so the only honest test drives them
-through the real API: `bun apps/loan-app/src/index.ts`, booted the way Render
-boots it, with a fresh `loans.db` in a temp directory. Tokens are validated
+through the real API: `bun scripts/loans.ts`, the app's loan module on a port
+of its own and laid out under `/bank` exactly as the app serves it (#5), with a
+fresh `loans.db` in a temp directory. Tokens are validated
 against a tiny fake that serves `/oauth2/userinfo` for two known bearer
 tokens — the one endpoint of `apps/idp` (#36) the API ever calls.
 """
@@ -25,7 +26,7 @@ from arcade_core.schema import ToolAuthorizationContext, ToolContext, ToolSecret
 from loan import LOAN_APP_HOST_SECRET
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-LOAN_APP_ENTRYPOINT = REPO_ROOT / "apps" / "loan-app" / "src" / "index.ts"
+LOAN_APP_ENTRYPOINT = REPO_ROOT / "scripts" / "loans.ts"
 
 DANA = "alice@example.test"
 RILEY = "charlie@example.test"
@@ -68,7 +69,7 @@ def idp_port() -> int:
 def loan_app_host(idp_port: int) -> str:
     bun = shutil.which("bun")
     if bun is None:
-        pytest.skip("bun is not installed; the toolkit tests drive the real apps/loan-app")
+        pytest.skip("bun is not installed; the toolkit tests drive the real loan module")
 
     port = _free_port()
     tmp = Path(tempfile.mkdtemp(prefix="cg-loan-toolkit-"))
@@ -89,7 +90,7 @@ def loan_app_host(idp_port: int) -> str:
     deadline = time.time() + 20
     while True:
         try:
-            with urllib.request.urlopen(f"http://{host}/health", timeout=1) as r:
+            with urllib.request.urlopen(f"http://{host}/bank/health", timeout=1) as r:
                 if r.status == 200:
                     break
         except Exception:
