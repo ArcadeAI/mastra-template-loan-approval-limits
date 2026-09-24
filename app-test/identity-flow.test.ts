@@ -35,8 +35,10 @@ import {
   type IdentityHarness,
 } from "./identity-harness.ts";
 import { bootTestControlPlane } from "./control-plane-instance.ts";
+import { openTestLoanBook } from "./loan-module-instance.ts";
 
 bootTestControlPlane();
+openTestLoanBook();
 
 /** Put `process.env` back exactly as it was, including keys that were unset. */
 function restoreEnv(previous: NodeJS.ProcessEnv, keys: string[]) {
@@ -612,10 +614,12 @@ describe("/health", () => {
       });
       const { GET } = await import("../app/health/route.ts");
       // Since #4 the body also carries the control plane's fields; they are
-      // pinned in `app-test/health-control-plane.test.ts`. What this test is
-      // about is unchanged, and still exact.
-      const { policy, fixture_drift, injection_detection, warnings, control_plane, ...web } =
+      // pinned in `app-test/health-control-plane.test.ts`. Since #5 it carries
+      // the loan book's, pinned in `app-test/loans/health.test.ts`. What this
+      // test is about is unchanged, and still exact.
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, ...web } =
         (await GET().json()) as Record<string, unknown>;
+      expect(loans).toMatchObject({ status: "ok" });
       expect(web).toEqual({
         status: "ok",
         service: "web",
@@ -745,9 +749,11 @@ describe("a SESSION_SECRET that is set but too weak", () => {
       // health check is not 200, and an instance that never comes up is an
       // instance whose /health nobody can read.
       expect(answer.status).toBe(200);
-      // The control plane's fields are pinned elsewhere since #4; see above.
-      const { policy, fixture_drift, injection_detection, warnings, control_plane, ...web } =
+      // The control plane's fields are pinned elsewhere since #4, and the loan
+      // book's since #5; see above.
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, ...web } =
         (await answer.json()) as Record<string, unknown>;
+      expect(loans).toMatchObject({ status: "ok" });
       expect({ policy, fixture_drift, injection_detection, warnings, control_plane }).toMatchObject({
         control_plane: { status: "healthy" },
       });
