@@ -352,7 +352,7 @@ ids are on the card behind a disclosure. Three limits, all deliberate:
 A `tools/list` is a different shape from a fan-out. Arcade answers one listing with
 **four** `/access` calls, each writing a row per governed tool plus, when it reached
 past the catalogue, one summary row — about ten rows for one listing
-(`apps/hooks/src/access-audit.ts`, #107). Drawn a card each they arrive faster than
+(`lib/control-plane/access-audit.ts`, #107). Drawn a card each they arrive faster than
 anyone can narrate, and the one fact worth taking from them is singular: *this is what
 that person can see.*
 
@@ -524,7 +524,7 @@ unpredictable length in the middle of an act. `fetch` over a `ReadableStream` gi
 back, and makes the whole path testable against a real server instead of a stub.
 
 `lib/governance/subscribe.ts` is the only file that knows the wire contract, and
-`apps/hooks/src/events.ts` is the only file that writes it — #54 implemented that shape
+`lib/control-plane/events.ts` is the only file that writes it — #54 implemented that shape
 rather than negotiating a new one, so the two halves have never had to be reconciled.
 
 ### The strip above the lanes, and the Reset control (#106)
@@ -1392,7 +1392,7 @@ of ten. The ports below are examples; substitute yours.
 the four `/approvals` endpoints.
 
 ```sh
-PORT=4401 GOVERNANCE_DB_PATH=/tmp/cg/governance.db bun apps/hooks/src/index.ts
+PORT=4401 GOVERNANCE_DB_PATH=/tmp/cg/governance.db bun lib/control-plane/index.ts
 ```
 
 **Terminal 2 — the Arcade stand-in.** Prints the port it bound. It is a

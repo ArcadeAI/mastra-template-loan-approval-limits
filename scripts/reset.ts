@@ -82,7 +82,7 @@
  * human copies off the Render dashboard once. Scheme is added here: `http` for
  * loopback, `https` for everything else.
  */
-import { assertPublicHost, PublicHostError } from "../apps/hooks/src/public-host.ts";
+import { assertPublicHost, PublicHostError } from "../lib/control-plane/public-host.ts";
 
 /** sysexits: the environment is wrong, not the invocation. */
 const EX_CONFIG = 78;
@@ -98,6 +98,11 @@ interface ServiceSpec {
   /** The environment variable holding its address, per target. */
   hostVar: Record<Target, string>;
   body?: unknown;
+  /**
+   * Its reset endpoint. `/admin/reset` for the services; `/hooks/admin/reset`
+   * for the control plane since #4, which the app mounts under `/hooks`.
+   */
+  resetPath?: string;
 }
 
 /**
@@ -126,6 +131,7 @@ const BETWEEN_TAKES: ServiceSpec[] = [
     render: "cg-hooks",
     hostVar: { local: "HOOKS_PUBLIC_HOST", render: "RENDER_HOOKS_PUBLIC_HOST" },
     body: { mode: "demo" },
+    resetPath: "/hooks/admin/reset",
   },
   {
     label: "loan-app",
@@ -216,7 +222,8 @@ function requireToken(env: Record<string, string | undefined>): string {
   throw new ResetConfigError(
     "RESET_TOKEN is unset. It is the bearer all three services require, it has no development " +
       "default, and without it each of them answers 404 on /admin/reset. Generate one with " +
-      "`openssl rand -hex 32`, set it on cg-hooks, cg-idp, cg-loan-app and cg-web, and put the " +
+      "`openssl rand -hex 32`, set it on cg-web (which holds the control plane since #4), cg-idp " +
+      "and cg-loan-app, and put the " +
       "same value in .env.local here.",
   );
 }
@@ -283,7 +290,7 @@ async function resetOne(
 
   let response: Response;
   try {
-    response = await options.fetch(`${origin}/admin/reset`, {
+    response = await options.fetch(`${origin}${spec.resetPath ?? "/admin/reset"}`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       ...(spec.body === undefined ? {} : { body: JSON.stringify(spec.body) }),

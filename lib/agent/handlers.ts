@@ -133,7 +133,7 @@ export interface ChatOptions {
    * store configured. The suite supplies it because its store runs on an
    * OS-assigned port.
    */
-  store?: { hooksHost: string; approvalsStoreToken: string };
+  store?: { controlPlaneHost: string; approvalsStoreToken: string };
   /** Only for tests, which need to see what the gateway advertised. */
   onToolSurface?: (surface: { advertised: string[]; governed: string[]; dropped: string[] }) => void;
 }
@@ -559,9 +559,8 @@ async function resolveResume(
   const store = options.store ?? readWebConfig();
   const lookup = await fetchApproval(resume.request_id, {
     ...config,
-    hooksHost: store.hooksHost,
+    controlPlaneHost: store.controlPlaneHost,
     approvalsStoreToken: store.approvalsStoreToken,
-    approvalsToolkit: config.agent.approvalsToolkit,
   }).catch((cause: unknown) => ({
     found: false as const,
     reason: `The approvals store could not be reached: ${String(cause)}`,

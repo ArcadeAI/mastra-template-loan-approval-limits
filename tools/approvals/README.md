@@ -112,18 +112,21 @@ Nowhere in this toolkit. A deployed `arcade deploy` worker is an ephemeral
 container, and — the reason that actually settles it — the approval page in #19
 runs in `apps/web` and has to read the record the tool wrote. So the request is
 persisted where `DESIGN.md` says approvals live: `governance.db`, owned by
-`apps/hooks`, reached over HTTP the same way Arcade reaches the hooks.
+the control plane, reached over HTTP the same way Arcade reaches the hooks.
 
-Storage-A was ratified on #18, and **`apps/hooks` serves these four endpoints
-as of #19**. What landed in this slice is the client and the contract below,
+Storage-A was ratified on #18, and the control plane serves these four
+endpoints as of #19 — **since #4 from the app, under `/api/approvals`**, on the
+host in `HOOKS_PUBLIC_HOST` (the app's own). They were `/approvals/…` while the
+control plane was the `apps/hooks` service; in the app `/approvals/{id}` is the
+approval page the Slack link opens, so the store moved under one prefix. What landed in this slice is the client and the contract below,
 implemented by a stand-in server in `tests/conftest.py` and driven over real
 HTTP by `tests/test_store_contract.py`; the service side has its own
-counterpart, `apps/hooks/test/approvals-endpoints.test.ts`, driving the same
+counterpart, `app-test/control-plane/approvals-endpoints.test.ts`, driving the same
 contract against the real thing.
 
 ## The approvals store contract
 
-Four endpoints on `apps/hooks`. Written out here rather than left in a Python
+Four endpoints on the app's control plane (`lib/control-plane/approvals-api.ts`). Written out here rather than left in a Python
 docstring, because whoever builds #19 works in TypeScript and should not have
 to read Python to build against it.
 
@@ -135,8 +138,8 @@ on, or read one they were never sent.
 
 ### The record
 
-One shape, returned by every endpoint that returns a request. `POST /approvals`,
-`GET /approvals/{id}` and `POST /approvals/{id}/decision` return the *same*
+One shape, returned by every endpoint that returns a request. `POST /api/approvals`,
+`GET /api/approvals/{id}` and `POST /api/approvals/{id}/decision` return the *same*
 fields — a page that can render the read is a page that can render the write.
 
 | field | type | notes |
@@ -167,7 +170,7 @@ be worse than one that rendered nothing.
 `rule` lives on the record rather than beside it, so the read and the write
 cannot answer the question differently.
 
-### `GET /approvals/roster`
+### `GET /api/approvals/roster`
 
 Every subject the control plane knows about. Routing needs the whole roster,
 because who was *not* asked is as load-bearing as who was.
@@ -178,7 +181,7 @@ because who was *not* asked is as load-bearing as who was.
                       "attributes": {} } ] }
 ```
 
-### `POST /approvals`
+### `POST /api/approvals`
 
 ```json
 <- { "requester_id": "alice@…", "action": "approve_loan",
@@ -198,7 +201,7 @@ about before anyone had approved it.
 `ToolMatcher` needs the catalogue, which the control plane has and this toolkit
 deliberately does not.
 
-### `GET /approvals/{id}`
+### `GET /api/approvals/{id}`
 
 ```json
 -> 200 { "request": <the record above> }
@@ -215,7 +218,7 @@ sent, so anyone who has the link can reach this. Whether the person looking may
 *decide* is settled at click time by a `/pre` decision on `Approvals.Decide` —
 #19's job, and the beat the demo exists to show.
 
-### `POST /approvals/{id}/decision`
+### `POST /api/approvals/{id}/decision`
 
 ```json
 <- { "decision": "approved" | "denied", "note": string | null,

@@ -2,8 +2,9 @@
 # Build context is the repo root — Bun workspaces need the root manifest and
 # lockfile to link `packages/*`, and since #3 the root manifest is this app's.
 #
-# Built with Bun (for workspace linking) and served on Node, because that is
-# what Next.js's standalone server targets.
+# Built with Bun (for workspace linking) and served on Bun too since #4: the
+# control plane is a module of the app and opens governance.db with
+# `bun:sqlite`, which Node cannot load. Until #4 the runner was node:22-alpine.
 
 FROM oven/bun:1.3.14-alpine AS builder
 WORKDIR /app
@@ -11,7 +12,6 @@ WORKDIR /app
 COPY package.json bun.lock tsconfig.base.json ./
 # --frozen-lockfile resolves the whole workspace, so every member's manifest
 # has to be present even though only the root app gets built here.
-COPY apps/hooks/package.json ./apps/hooks/
 COPY apps/idp/package.json ./apps/idp/
 COPY apps/loan-app/package.json ./apps/loan-app/
 COPY packages ./packages
@@ -27,9 +27,9 @@ COPY lib ./lib
 COPY public ./public
 
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN bun run next build
+RUN bun --bun run next build
 
-FROM node:22-alpine AS runner
+FROM oven/bun:1.3.14-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -48,4 +48,4 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 8080
-CMD ["node", "server.js"]
+CMD ["bun", "server.js"]

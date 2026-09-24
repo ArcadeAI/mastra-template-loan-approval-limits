@@ -358,7 +358,7 @@ bus.publish([{ seq, event }]);                                 // never throws
 ```
 
 Everything downstream of this — the socket, the `text/event-stream` frames, replaying the log
-for a `Last-Event-ID` — is `apps/hooks/src/events.ts`, because HTTP does not belong in this
+for a `Last-Event-ID` — is `lib/control-plane/events.ts`, because HTTP does not belong in this
 package. What lives here is only the part a forker keeps.
 
 `PublishedEvent` pairs a `GovernanceEvent` with its position in the log it was read out of.

@@ -141,7 +141,7 @@ describe("the hydrated live panel", () => {
       await act(async () => {
         root.render(
           <ControlPlanePanel
-            stream={{ mode: "hooks", url: `http://${harness.hooksHost}/events`, host: harness.hooksHost }}
+            stream={{ mode: "hooks", url: `http://${harness.hooksHost}/hooks/events`, host: harness.hooksHost }}
           />,
         );
       });
@@ -187,7 +187,7 @@ describe("the hydrated live panel", () => {
       await act(async () => {
         root.render(
           <ControlPlanePanel
-            stream={{ mode: "hooks", url: `http://${harness.hooksHost}/events`, host: harness.hooksHost }}
+            stream={{ mode: "hooks", url: `http://${harness.hooksHost}/hooks/events`, host: harness.hooksHost }}
           />,
         );
       });

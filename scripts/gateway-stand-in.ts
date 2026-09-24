@@ -315,7 +315,7 @@ function createApprovalsStore(options: {
         return { ok: false, error: `${String(inputs.amount)} is not an amount that can be routed for approval.` };
       }
 
-      const rosterResponse = await request("GET", "/approvals/roster").catch(
+      const rosterResponse = await request("GET", "/api/approvals/roster").catch(
         (cause: unknown) => cause as Error,
       );
       if (rosterResponse instanceof Error || !rosterResponse.ok) {
@@ -337,7 +337,7 @@ function createApprovalsStore(options: {
         };
       }
 
-      const created = await request("POST", "/approvals", {
+      const created = await request("POST", "/api/approvals", {
         requester_id: actor,
         action,
         resource_id: resourceId,
@@ -387,7 +387,7 @@ function createApprovalsStore(options: {
       const id = String(inputs.request_id ?? "");
       const decision = String(inputs.decision ?? "");
       const note = inputs.note === undefined || inputs.note === null ? null : String(inputs.note);
-      const response = await request("POST", `/approvals/${encodeURIComponent(id)}/decision`, {
+      const response = await request("POST", `/api/approvals/${encodeURIComponent(id)}/decision`, {
         decision,
         note,
         // From the resolved bearer, never from an argument: the deployed tool
@@ -657,7 +657,7 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
       ]),
     );
 
-    const access = await fetch(`${hooks}/access`, {
+    const access = await fetch(`${hooks}/hooks/access`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${options.hookSigningSecret}` },
       body: JSON.stringify({ user_id: actor, toolkits }),
@@ -870,7 +870,7 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
       // a stand-in that minted two would break the panel's join.
       const executionId = `tc_${crypto.randomUUID().slice(0, 8)}`;
 
-      const pre = await fetch(`${hooks}/pre`, {
+      const pre = await fetch(`${hooks}/hooks/pre`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${options.hookSigningSecret}` },
         body: JSON.stringify({
@@ -979,7 +979,7 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
       // that the identifiers never enter the model's context, and a stand-in
       // that called `/post` and then forwarded the original payload anyway
       // would be the control that does nothing.
-      const post = await fetch(`${hooks}/post`, {
+      const post = await fetch(`${hooks}/hooks/post`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${options.hookSigningSecret}` },
         body: JSON.stringify({
@@ -1149,7 +1149,7 @@ if (import.meta.main) {
   }
 
   const gatewayId = env.ARCADE_GATEWAY_ID?.trim() || "cg-demo-us";
-  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:8081";
+  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:3000";
   // Both toolkits always — the agent has to be able to see
   // `Approvals_RequestApproval`, because the pre-hook's remediation sentence
   // names it (#89). The store token is what decides whether they *run*.
@@ -1185,9 +1185,9 @@ if (import.meta.main) {
   );
   console.log(`[gateway-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${standIn.port}`);
   console.log(
-    `[gateway-stand-in] every tools/call asks ${hooksHost}/pre first and runs nothing when the answer ` +
-      `is not OK, then asks ${hooksHost}/post and forwards its override.output when there is one; ` +
-      `every tools/list asks ${hooksHost}/access first and omits what comes back denied.`,
+    `[gateway-stand-in] every tools/call asks ${hooksHost}/hooks/pre first and runs nothing when the answer ` +
+      `is not OK, then asks ${hooksHost}/hooks/post and forwards its override.output when there is one; ` +
+      `every tools/list asks ${hooksHost}/hooks/access first and omits what comes back denied.`,
   );
   console.log(
     storeToken === ""

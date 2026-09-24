@@ -67,7 +67,21 @@ export function count(value: number | string | undefined): string {
 export function timestamp(value: string | null | undefined): string {
   if (value === null || value === undefined || value.trim() === "") return "—";
   const at = new Date(value);
-  return Number.isNaN(at.getTime()) ? value : instant.format(at);
+  if (Number.isNaN(at.getTime())) return value;
+  // Assembled from the parts rather than `instant.format(at)`, because the
+  // literal between the date and the time is the engine's to choose: V8 (the
+  // browser, Node) writes `Sep 18, 2026, 2:02 PM UTC` and JavaScriptCore (Bun,
+  // which renders the first paint since #4) writes `Sep 18, 2026 at 2:02 PM
+  // UTC`. Two strings for one instant is a hydration mismatch, and React
+  // re-renders the whole board from scratch to recover. The fields agree
+  // across engines; only the joins differ, so the joins are written here.
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((each) => each.type === type)?.value ?? "";
+  const parts = instant.formatToParts(at);
+  return (
+    `${part("month")} ${part("day")}, ${part("year")}, ` +
+    `${part("hour")}:${part("minute")} ${part("dayPeriod")} ${part("timeZoneName")}`
+  );
 }
 
 /** Whatever is there, or an em dash. Never an empty cell — a blank reads as a bug. */

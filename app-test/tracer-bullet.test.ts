@@ -358,7 +358,7 @@ describe("the control: the same beat on a loan act 4 has not poisoned", () => {
   // If both fail, the agent is broken. If only the $95K one fails, act 4's
   // fixture is reaching the model again — check that `/post` is being called
   // and that `pattern.injected-instruction` still matches the seeded note
-  // (`apps/hooks/test/post-redaction.test.ts`), rather than touching anything
+  // (`app-test/control-plane/post-redaction.test.ts`), rather than touching anything
   // here. Both were 5 of 5 when #16 landed.
   let result: Turned;
 

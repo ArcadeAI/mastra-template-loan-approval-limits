@@ -138,7 +138,8 @@ function startHooksStandIn(): HooksStandIn {
     port: 0,
     fetch(request) {
       const url = new URL(request.url);
-      if (url.pathname !== "/events") return new Response(null, { status: 404 });
+      // Under `/hooks` since #4, as the app serves it.
+      if (url.pathname !== "/hooks/events") return new Response(null, { status: 404 });
       // The page is on a different port, so both consumers' `cache-control`
       // header makes this a preflighted cross-origin request. Answer it, and do
       // not count it: an `OPTIONS` is the browser asking permission, not a
@@ -244,6 +245,9 @@ async function measureHome(options: {
       ...(process.env as Record<string, string>),
       NODE_ENV: "development",
       PORT: String(webPort),
+      // The app mounts the control plane since #4; a throwaway one, not
+      // a governance.db in the repo.
+      GOVERNANCE_DB_PATH: ":memory:",
       PUBLIC_URL: origin,
       ARCADE_API_URL: harness.gateway.url,
       ARCADE_API_KEY: "arcade-key-for-full-screen-browser",
@@ -261,11 +265,16 @@ async function measureHome(options: {
     };
     if (options.hooksHost !== undefined) env["HOOKS_PUBLIC_HOST"] = options.hooksHost;
     else delete env["HOOKS_PUBLIC_HOST"];
+    // Server-side reads of the control plane go here since #4.
+    if (options.hooksHost !== undefined) env["CONTROL_PLANE_HOST"] = options.hooksHost;
+    else delete env["CONTROL_PLANE_HOST"];
     if (options.governanceStream === null) delete env["GOVERNANCE_STREAM"];
     else env["GOVERNANCE_STREAM"] = options.governanceStream;
 
     next = Bun.spawn({
-      cmd: ["bun", "run", "next", "dev", "--port", String(webPort)],
+      // `--bun`: the app runs on Bun since #4, because the control plane it
+      // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+      cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
       cwd: WEB,
       env,
       stdout: "pipe",

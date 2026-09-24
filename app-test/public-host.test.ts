@@ -13,7 +13,7 @@
  * DevTools console, where nobody running the demo is looking.
  *
  * The table below is shared, verbatim, with
- * `apps/loan-app/test/public-host.test.ts` and `apps/hooks/test/public-host.test.ts`
+ * `apps/loan-app/test/public-host.test.ts` and `app-test/control-plane/public-host.test.ts`
  * — the three copies of the check are written out rather than imported, so each
  * one is pinned by its own suite.
  */
@@ -106,7 +106,8 @@ test("readWebConfig refuses a bare service name, and passes a hostname through",
   expect(readWebConfig({ HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com" }).hooksHost).toBe(
     "cg-hooks.onrender.com",
   );
-  expect(readWebConfig({}).hooksHost).toBe("localhost:8081");
+  // The app's own host since #4, when the control plane folded into it.
+  expect(readWebConfig({}).hooksHost).toBe("localhost:3000");
 });
 
 /**
@@ -129,7 +130,7 @@ test("the panel's stream source refuses a bare service name in either mode", () 
     GOVERNANCE_STREAM: "hooks",
     HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com",
   });
-  expect(live).toHaveProperty("url", "https://cg-hooks.onrender.com/events");
+  expect(live).toHaveProperty("url", "https://cg-hooks.onrender.com/hooks/events");
   expect(resolvePanelStream({}).mode).toBe("fixture");
 });
 
@@ -166,6 +167,6 @@ test("the three copies of the check are byte-identical", () => {
 
   const web = region("lib", "public-host.ts");
 
-  expect(region("apps", "hooks", "src", "public-host.ts")).toBe(web);
+  expect(region("lib", "control-plane", "public-host.ts")).toBe(web);
   expect(region("apps", "loan-app", "src", "public-host.ts")).toBe(web);
 });

@@ -113,7 +113,8 @@ export function createArcadeStandIn(options: ArcadeStandInOptions) {
       }
 
       // 1. The pre-execution hook, exactly as the engine calls it.
-      const pre = await fetch(`${base}/pre`, {
+      // Under `/hooks` since #4, as the app and scripts/control-plane.ts serve it.
+      const pre = await fetch(`${base}/hooks/pre`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -133,7 +134,7 @@ export function createArcadeStandIn(options: ArcadeStandInOptions) {
       if (pre.status === 401) {
         return failed(
           `the control plane refused the stand-in's hook bearer. Set ` +
-            `ARCADE_HOOK_SIGNING_SECRET to the same value apps/hooks has, or unset it on both.`,
+            `ARCADE_HOOK_SIGNING_SECRET to the same value the app's control plane has, or unset it on both.`,
         );
       }
       const verdict = (await pre.json()) as { code?: string; error_message?: string };
@@ -153,7 +154,7 @@ export function createArcadeStandIn(options: ArcadeStandInOptions) {
       }
 
       const recorded = await fetch(
-        `${base}/approvals/${encodeURIComponent(String(input.request_id))}/decision`,
+        `${base}/api/approvals/${encodeURIComponent(String(input.request_id))}/decision`,
         {
           method: "POST",
           headers: {
@@ -195,7 +196,7 @@ if (import.meta.main) {
     process.exit(1);
   }
 
-  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:8081";
+  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:3000";
   const hookSigningSecret = env.ARCADE_HOOK_SIGNING_SECRET?.trim() || DEV_HOOK_SECRET;
   const approvalsStoreToken = env.APPROVALS_STORE_TOKEN?.trim() || DEV_STORE_TOKEN;
 
@@ -210,18 +211,23 @@ if (import.meta.main) {
 
   // Said plainly, on every boot, because a fixture that looks like the product
   // is how a demo ends up being given as evidence of the product.
+  //
+  // One write, not four (#4). A harness reads the port off the first line and
+  // asserts on the rest of the banner (`app-test/arcade-stand-in.test.ts`);
+  // four `console.log`s can reach its pipe in separate chunks, and CI once read
+  // the first line alone and failed on the missing control-plane host.
+  const usingDevSecret =
+    env.ARCADE_HOOK_SIGNING_SECRET?.trim() === undefined || env.ARCADE_HOOK_SIGNING_SECRET.trim() === "";
   console.log(
-    `[arcade-stand-in] listening on :${server.port} — this is a STAND-IN for Arcade, for ` +
-      `local demos only. It is not the product and it is not in the deployed image.`,
-  );
-  console.log(
-    `[arcade-stand-in] control plane: ${hooksHost} — every execution asks its /pre first and ` +
-      `runs nothing when the answer is not OK.`,
-  );
-  if (env.ARCADE_HOOK_SIGNING_SECRET?.trim() === undefined || env.ARCADE_HOOK_SIGNING_SECRET.trim() === "") {
-    console.log("[arcade-stand-in] using the development hook secret; apps/hooks does too.");
-  }
-  console.log(
-    `[arcade-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${server.port}`,
+    [
+      `[arcade-stand-in] listening on :${server.port} — this is a STAND-IN for Arcade, for ` +
+        `local demos only. It is not the product and it is not in the deployed image.`,
+      `[arcade-stand-in] control plane: ${hooksHost} — every execution asks its /pre first and ` +
+        `runs nothing when the answer is not OK.`,
+      ...(usingDevSecret
+        ? ["[arcade-stand-in] using the development hook secret; the app's control plane does too."]
+        : []),
+      `[arcade-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${server.port}`,
+    ].join("\n"),
   );
 }

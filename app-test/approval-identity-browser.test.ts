@@ -84,12 +84,17 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       const origin = `http://127.0.0.1:${webPort}`;
 
       next = spawn({
-        cmd: ["bun", "run", "next", "dev", "--port", String(webPort)],
+        // `--bun`: the app runs on Bun since #4, because the control plane it
+        // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+        cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
         cwd: WEB,
         env: {
           ...process.env,
           NODE_ENV: "development",
           PORT: String(webPort),
+          // The app mounts the control plane since #4; a throwaway one, not
+          // a governance.db in the repo.
+          GOVERNANCE_DB_PATH: ":memory:",
           PUBLIC_URL: origin,
           // The key the sealed sessions below are sealed under. A mismatch here
           // is indistinguishable from "not signed in", which is exactly the
@@ -99,6 +104,9 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
           IDP_CLIENT_ID: identity.config.identity.idpClientId,
           IDP_CLIENT_SECRET: identity.config.identity.idpClientSecret,
           HOOKS_PUBLIC_HOST: control.hooksHost,
+          // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+          // defaults to the app's own listener; this test's control plane is elsewhere.
+          CONTROL_PLANE_HOST: control.hooksHost,
           APPROVALS_STORE_TOKEN: control.config.approvalsStoreToken,
           ARCADE_API_URL: control.config.arcadeApiUrl,
           ARCADE_API_KEY: control.config.arcadeApiKey,
@@ -300,7 +308,7 @@ async function audit(
   hooksHost: string,
   filters: Record<string, string>,
 ): Promise<Array<Record<string, unknown>>> {
-  const response = await fetch(`http://${hooksHost}/audit?${new URLSearchParams(filters)}`, {
+  const response = await fetch(`http://${hooksHost}/hooks/audit?${new URLSearchParams(filters)}`, {
     headers: { authorization: `Bearer ${HOOK_SECRET}` },
   });
   if (!response.ok) throw new Error(`audit: ${response.status} ${await response.text()}`);

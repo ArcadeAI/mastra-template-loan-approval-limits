@@ -89,6 +89,7 @@ export async function startHarness(): Promise<Harness> {
 
   const config: WebConfig = {
     hooksHost: hooks.host,
+    controlPlaneHost: hooks.host,
     approvalsStoreToken: STORE_TOKEN,
     arcadeApiUrl: `http://localhost:${arcade.port}`,
     arcadeApiKey: "arcade-key-for-web-tests",
@@ -117,13 +118,13 @@ export async function startHarness(): Promise<Harness> {
     hooksHost: hooks.host,
     preCalls,
     async escalate(overrides = {}) {
-      const response = await store("POST", "/approvals", { ...ESCALATION, ...overrides });
+      const response = await store("POST", "/api/approvals", { ...ESCALATION, ...overrides });
       if (response.status !== 201) throw new Error(`escalate: ${response.status} ${await response.text()}`);
       return ((await response.json()) as { request: Record<string, unknown> }).request;
     },
     async audit(filters = {}) {
       const query = new URLSearchParams(filters).toString();
-      const response = await fetch(`http://${hooks.host}/audit${query ? `?${query}` : ""}`, {
+      const response = await fetch(`http://${hooks.host}/hooks/audit${query ? `?${query}` : ""}`, {
         // Arcade's bearer, not the store's — these are the hooks' own rows.
         headers: { authorization: `Bearer ${HOOK_SECRET}` },
       });
@@ -131,7 +132,7 @@ export async function startHarness(): Promise<Harness> {
       return ((await response.json()) as { rows: Array<Record<string, unknown>> }).rows;
     },
     async read(id) {
-      const response = await store("GET", `/approvals/${id}`);
+      const response = await store("GET", `/api/approvals/${id}`);
       if (response.status === 404) return null;
       return ((await response.json()) as { request: Record<string, unknown> }).request;
     },
@@ -175,7 +176,7 @@ export async function startHooks(
   env: Record<string, string> = {},
 ): Promise<Hooks> {
   const child = spawn({
-    cmd: ["bun", join(REPO_ROOT, "apps", "hooks", "src", "index.ts")],
+    cmd: ["bun", join(REPO_ROOT, "scripts", "control-plane.ts")],
     cwd: REPO_ROOT,
     env: {
       ...process.env,

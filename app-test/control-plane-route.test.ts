@@ -33,13 +33,13 @@ const DANA = "alice@bank.example";
 let dir: string;
 let dbPath: string;
 let hooks: Hooks;
-let config: { hooksHost: string };
+let config: { controlPlaneHost: string };
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "cg-web-106-"));
   dbPath = join(dir, "governance.db");
   hooks = await startHooks({ GOVERNANCE_DB_PATH: dbPath, RESET_TOKEN });
-  config = { hooksHost: hooks.host };
+  config = { controlPlaneHost: hooks.host };
 });
 
 afterAll(async () => {
@@ -112,13 +112,13 @@ describe("reading the control plane", () => {
   test("a control plane that cannot be reached is an answer, not an exception", async () => {
     const report = await readControlPlane(
       // A port nothing is listening on: reserved by binding :0 and released.
-      { hooksHost: `localhost:${deadPort()}` },
+      { controlPlaneHost: `localhost:${deadPort()}` },
       { token: RESET_TOKEN, timeoutMs: 1000 },
     );
 
     expect(report.reachable).toBe(false);
     if (report.reachable) throw new Error("unreachable");
-    expect(report.problem).toMatch(/did not answer GET \/health/);
+    expect(report.problem).toMatch(/did not answer GET \/hooks\/health/);
     // And it still knows whether the button should be drawn.
     expect(report.reset).toBe("enabled");
   });
@@ -132,7 +132,7 @@ describe("reading the control plane", () => {
     const bare = await startHooks({ GOVERNANCE_DB_PATH: ":memory:" });
     try {
       const report = reachable(
-        await readControlPlane({ hooksHost: bare.host }, { token: RESET_TOKEN }),
+        await readControlPlane({ controlPlaneHost: bare.host }, { token: RESET_TOKEN }),
       );
       expect(report.reset).toBe("upstream-disabled");
     } finally {
@@ -193,7 +193,7 @@ describe("running a reset through it", () => {
       globalThis.fetch = real;
     }
 
-    expect(new Set(asked)).toEqual(new Set([config.hooksHost]));
+    expect(new Set(asked)).toEqual(new Set([config.controlPlaneHost]));
   });
 
   test("a wrong token is refused by cg-hooks, and the sentence says so", async () => {
@@ -205,7 +205,7 @@ describe("running a reset through it", () => {
   test("cg-hooks without the endpoint is named as the misconfiguration it is", async () => {
     const bare = await startHooks({ GOVERNANCE_DB_PATH: ":memory:" });
     try {
-      const outcome = await runReset({ hooksHost: bare.host }, "policy", RESET_TOKEN);
+      const outcome = await runReset({ controlPlaneHost: bare.host }, "policy", RESET_TOKEN);
       expect(outcome.ok).toBe(false);
       expect(outcome.detail).toMatch(/RESET_TOKEN is unset on cg-hooks/);
     } finally {
@@ -216,7 +216,7 @@ describe("running a reset through it", () => {
 });
 
 async function auditRows(): Promise<number> {
-  const body = (await (await fetch(`http://${hooks.host}/health`)).json()) as {
+  const body = (await (await fetch(`http://${hooks.host}/hooks/health`)).json()) as {
     audit_rows: number;
   };
   return body.audit_rows;

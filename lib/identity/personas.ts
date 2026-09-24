@@ -20,7 +20,7 @@
  * because `apps/web` does not depend on `apps/hooks` in the package graph and
  * should not start to — the same argument, and the same remedy, as
  * `DEV_STORE_TOKEN` in `lib/config.ts`: `app-test/persona-roster.test.ts` reads
- * `apps/hooks/src/fixtures/governance.json` and fails if the two ever disagree.
+ * `lib/control-plane/fixtures/governance.json` and fails if the two ever disagree.
  *
  * What that test cannot catch is a clearance a presenter raises live on stage,
  * which `DESIGN.md` explicitly allows (Policy source: *editable live on

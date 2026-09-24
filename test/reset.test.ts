@@ -117,7 +117,9 @@ async function boot(name: string, entry: string, env: Record<string, string>): P
   const deadline = Date.now() + 30_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      // The control plane answers under /hooks since #4, as the app mounts it.
+      const health = entry.includes("control-plane") ? "/hooks/health" : "/health";
+      if ((await fetch(`${baseUrl}${health}`)).ok) break;
     } catch {
       // Not listening yet.
     }
@@ -176,7 +178,7 @@ const runHardReset = (overrides: Record<string, string> = {}, args: string[] = [
 const json = async <T>(url: string, init?: RequestInit): Promise<T> =>
   (await (await fetch(url, init)).json()) as T;
 
-const hooksHealth = () => json<HooksHealth>(`${hooks.baseUrl}/health`);
+const hooksHealth = () => json<HooksHealth>(`${hooks.baseUrl}/hooks/health`);
 const idpHealth = () => json<IdpHealth>(`${idp.baseUrl}/health`);
 const loanHealth = () => json<LoanHealth>(`${loanApp.baseUrl}/health`);
 const loan = (id: string) =>
@@ -186,7 +188,7 @@ const loan = (id: string) =>
 
 /** One `/pre` call, which is the cheapest honest way to put a row in the audit log. */
 async function governedCall(executionId: string): Promise<Response> {
-  return fetch(`${hooks.baseUrl}/pre`, {
+  return fetch(`${hooks.baseUrl}/hooks/pre`, {
     method: "POST",
     headers: { authorization: `Bearer ${HOOK_SECRET}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -240,7 +242,7 @@ beforeAll(async () => {
       BETTER_AUTH_SECRET: "root-reset-test-secret-".padEnd(48, "x"),
       IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
     }),
-    boot("hooks", "apps/hooks/src/index.ts", {
+    boot("hooks", "scripts/control-plane.ts", {
       RESET_TOKEN,
       ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
       GOVERNANCE_DB_PATH: join(tmpdir(), `cg-reset-hooks-${crypto.randomUUID()}`, "governance.db"),

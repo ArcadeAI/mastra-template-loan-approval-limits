@@ -34,6 +34,9 @@ import {
   startIdentityHarness,
   type IdentityHarness,
 } from "./identity-harness.ts";
+import { bootTestControlPlane } from "./control-plane-instance.ts";
+
+bootTestControlPlane();
 
 /** Put `process.env` back exactly as it was, including keys that were unset. */
 function restoreEnv(previous: NodeJS.ProcessEnv, keys: string[]) {
@@ -608,7 +611,12 @@ describe("/health", () => {
         GOVERNANCE_STREAM: "fixture",
       });
       const { GET } = await import("../app/health/route.ts");
-      expect(await GET().json()).toEqual({
+      // Since #4 the body also carries the control plane's fields; they are
+      // pinned in `app-test/health-control-plane.test.ts`. What this test is
+      // about is unchanged, and still exact.
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, ...web } =
+        (await GET().json()) as Record<string, unknown>;
+      expect(web).toEqual({
         status: "ok",
         service: "web",
         signin: "configured",
@@ -617,6 +625,10 @@ describe("/health", () => {
         agent: "configured",
         panel_stream: "fixture",
         reset: "disabled",
+      });
+      expect({ policy, fixture_drift, injection_detection, warnings, control_plane }).toMatchObject({
+        fixture_drift: null,
+        control_plane: { status: "healthy" },
       });
     } finally {
       for (const key of ["IDP_ISSUER", "IDP_CLIENT_ID", "IDP_CLIENT_SECRET", "SESSION_SECRET", "PUBLIC_URL", "ARCADE_GATEWAY_ID", "ARCADE_API_KEY", "ANTHROPIC_API_KEY", "GOVERNANCE_STREAM"]) {
@@ -733,7 +745,13 @@ describe("a SESSION_SECRET that is set but too weak", () => {
       // health check is not 200, and an instance that never comes up is an
       // instance whose /health nobody can read.
       expect(answer.status).toBe(200);
-      expect(await answer.json()).toEqual({
+      // The control plane's fields are pinned elsewhere since #4; see above.
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, ...web } =
+        (await answer.json()) as Record<string, unknown>;
+      expect({ policy, fixture_drift, injection_detection, warnings, control_plane }).toMatchObject({
+        control_plane: { status: "healthy" },
+      });
+      expect(web).toEqual({
         status: "degraded",
         service: "web",
         signin: "missing",

@@ -24,6 +24,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import PanelPage from "../app/panel/page.tsx";
 import { GET as health } from "../app/health/route.ts";
 import { resolvePanelStream } from "../lib/governance/stream-url.ts";
+import { bootTestControlPlane } from "./control-plane-instance.ts";
+
+bootTestControlPlane();
 
 /**
  * The variables that decide the panel's stream, and the only ones these tests

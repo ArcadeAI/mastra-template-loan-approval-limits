@@ -9,7 +9,7 @@
  *   `execution_id` — it does not cross the gateway. The one thing that crosses
  *   verbatim is the `error_message` `apps/hooks` writes, so the audit row's id
  *   rides at the end of it in brackets, and this module reads it back out.
- *   Written by `withCorrelation()` in `apps/hooks/src/correlation.ts`; the
+ *   Written by `withCorrelation()` in `lib/control-plane/correlation.ts`; the
  *   regex below is that contract's other half and
  *   `app-test/correlation.test.ts` proves the two agree.
  * - **Allows** carry `execution_id` on the hook's own payload, which reaches

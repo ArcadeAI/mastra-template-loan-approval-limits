@@ -63,6 +63,7 @@ beforeAll(async () => {
   banner = boot.banner;
   config = {
     hooksHost: hooks.host,
+    controlPlaneHost: hooks.host,
     approvalsStoreToken: STORE_TOKEN,
     arcadeApiUrl: `http://localhost:${boot.port}`,
     // Any non-empty value: the stand-in ignores it, and an empty one would
@@ -94,7 +95,7 @@ const store = (method: string, path: string, body?: unknown) =>
 let request: ApprovalRecord;
 
 beforeEach(async () => {
-  const response = await store("POST", "/approvals", {
+  const response = await store("POST", "/api/approvals", {
     requester_id: DANA,
     action: "approve_loan",
     resource_id: "LN-2291",
@@ -109,7 +110,7 @@ beforeEach(async () => {
 });
 
 const read = async () =>
-  ((await (await store("GET", `/approvals/${request.id}`)).json()) as {
+  ((await (await store("GET", `/api/approvals/${request.id}`)).json()) as {
     request: ApprovalRecord;
   }).request;
 

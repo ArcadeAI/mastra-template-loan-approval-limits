@@ -99,6 +99,9 @@ async function withBrowser(
       ...(process.env as Record<string, string>),
       NODE_ENV: "development",
       PORT: String(webPort),
+      // The app mounts the control plane since #4; a throwaway one, not
+      // a governance.db in the repo.
+      GOVERNANCE_DB_PATH: ":memory:",
       PUBLIC_URL: origin,
       // A port this process bound and released: the loan read is refused by the
       // kernel and the book comes back unavailable. It may not default to
@@ -113,7 +116,9 @@ async function withBrowser(
     }
 
     next = Bun.spawn({
-      cmd: ["bun", "run", "next", "dev", "--port", String(webPort)],
+      // `--bun`: the app runs on Bun since #4, because the control plane it
+      // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+      cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
       cwd: WEB,
       env: environment,
       stdout: "pipe",

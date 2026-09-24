@@ -61,7 +61,7 @@ export function AccessListingCard({
   const newest = row.event;
   // A listing is not one outcome, so the card takes the louder of the two it
   // contains — the same direction `accessAuditRows` takes when its summary row
-  // stands for a mix (`apps/hooks/src/access-audit.ts`). A listing that hid
+  // stands for a mix (`lib/control-plane/access-audit.ts`). A listing that hid
   // something must not read green from across a room.
   const tint = facts.hidden.length > 0 || facts.summary?.decision === "deny" ? "deny" : "allow";
 

@@ -121,7 +121,9 @@ async function boot(
   const deadline = Date.now() + 30_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      // The control plane answers under /hooks since #4, as the app mounts it.
+      const health = entry.includes("control-plane") ? "/hooks/health" : "/health";
+      if ((await fetch(`${baseUrl}${health}`)).ok) break;
     } catch {
       // Not listening yet.
     }
@@ -307,7 +309,7 @@ beforeAll(async () => {
   }));
 
   [hooks, loanApp] = await Promise.all([
-    boot("hooks", "apps/hooks/src/index.ts", {
+    boot("hooks", "scripts/control-plane.ts", {
       RESET_TOKEN,
       ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
       GOVERNANCE_DB_PATH: join(tmpdir(), `cg-grants-hooks-${crypto.randomUUID()}`, "governance.db"),
@@ -354,7 +356,7 @@ describe("a reset between takes leaves every persona's grant alive", () => {
     expect((await runResetCommand()).code).toBe(0);
 
     expect(await loanStatus()).toBe("pending");
-    const health = (await (await fetch(`${hooks.baseUrl}/health`)).json()) as {
+    const health = (await (await fetch(`${hooks.baseUrl}/hooks/health`)).json()) as {
       audit_rows: number;
       counts: Record<string, number>;
     };
@@ -395,7 +397,7 @@ describe("the panel's Reset button leaves the IdP alone too", () => {
     // here rather than imported because that module is Next-side code, and
     // until #3 the root tsconfig had no DOM lib for it; `app-test/control-plane-route.test.ts`
     // holds the other half, that neither mode has any address but cg-hooks.
-    const pressed = await fetch(`${hooks.baseUrl}/admin/reset`, {
+    const pressed = await fetch(`${hooks.baseUrl}/hooks/admin/reset`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${RESET_TOKEN}` },
       body: JSON.stringify({ mode: "demo" }),
@@ -403,7 +405,7 @@ describe("the panel's Reset button leaves the IdP alone too", () => {
     expect(pressed.status).toBe(200);
 
     // It really did reset the control plane...
-    const health = (await (await fetch(`${hooks.baseUrl}/health`)).json()) as { audit_rows: number };
+    const health = (await (await fetch(`${hooks.baseUrl}/hooks/health`)).json()) as { audit_rows: number };
     expect(health.audit_rows).toBe(0);
     // ...and left identity entirely alone: same people, same live grant.
     expect(((await (await fetch(`${idp.baseUrl}/health`)).json()) as { people: number }).people).toBe(

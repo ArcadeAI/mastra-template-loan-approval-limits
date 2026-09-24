@@ -1001,12 +1001,24 @@ describe("the fork seam", () => {
    * (`DESIGN.md` → Business system).
    */
   test("nothing this service serves opens the loan book's database", () => {
+    // Since #4 the app does open a database: the control plane is a module of
+    // it (`lib/control-plane/`) and owns governance.db. So the rule is stated
+    // as what it always meant: bun:sqlite only under the control plane, and
+    // nothing that opens it reads the variable that locates the loan book's
+    // file. (The control plane's reset names `loans.db` in its answer, to say
+    // it was not touched.) It was "no file opens
+    // bun:sqlite at all" while the control plane was its own service.
+    const opening: string[] = [];
     for (const directory of ["lib", "app", "components"]) {
       for (const path of walk(join(WEB, directory))) {
         const source = readFileSync(path, "utf8");
-        expect({ path, opens: /from\s+"bun:sqlite"/.test(source) }).toEqual({ path, opens: false });
+        if (!/from\s+"bun:sqlite"/.test(source)) continue;
+        opening.push(path.slice(WEB.length + 1));
+        expect({ path, loans: /LOANS_DB_PATH/.test(withoutComments(source)) }).toEqual({ path, loans: false });
       }
     }
+    expect(opening.length).toBeGreaterThan(0);
+    for (const path of opening) expect(path).toStartWith("lib/control-plane/");
   });
 
   test("one module knows the loan book's address, and it is the one that signs the read", () => {
@@ -1015,7 +1027,11 @@ describe("the fork seam", () => {
       .filter((path) => withoutComments(readFileSync(path, "utf8")).includes("LOAN_APP_PUBLIC_HOST"))
       .map((path) => path.slice(WEB.length + 1));
 
-    expect(reaching).toEqual(["lib/loan-context/read.ts"]);
+    // Since #4 the control plane's config is in this service too, and it
+    // checks the address at boot the way `apps/hooks` did (refusing a bare
+    // service name; `app-test/control-plane/public-host.test.ts` pins that).
+    // It never reads the loan book with it. It was the one entry until then.
+    expect(reaching.sort()).toEqual(["lib/control-plane/config.ts", "lib/loan-context/read.ts"]);
   });
 
   /**

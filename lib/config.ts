@@ -106,8 +106,22 @@ export interface AgentConfig {
 }
 
 export interface WebConfig {
-  /** `apps/hooks`, which owns `governance.db` and the approvals store. */
+  /**
+   * The control plane's public address: `HOOKS_PUBLIC_HOST`, the host the
+   * deployed approvals toolkit and the panel's browser reach it at. The app
+   * itself since #4 (`lib/control-plane/`). Validated here; this server never
+   * reads the control plane through it (see `controlPlaneHost`).
+   */
   hooksHost: string;
+  /**
+   * Where **this server** reads the control plane: the panel's status strip,
+   * the Reset button, the approval page and the resume path. Since #4 that is
+   * the app's own local listener, `localhost:$PORT`, so a server-side read
+   * never leaves the machine through the public tunnel `HOOKS_PUBLIC_HOST`
+   * names. `CONTROL_PLANE_HOST` overrides it, which the test harnesses do when
+   * they point the app at `scripts/control-plane.ts` on a port of its own.
+   */
+  controlPlaneHost: string;
   /** The shared bearer the `/approvals` endpoints require. */
   approvalsStoreToken: string;
   /** Arcade's API root. Overridden in tests by a stand-in. */
@@ -124,7 +138,7 @@ export interface WebConfig {
 /**
  * The value `apps/hooks` falls back to when `APPROVALS_STORE_TOKEN` is unset
  * and it is not running in production — see `DEV_STORE_TOKEN` in
- * `apps/hooks/src/config.ts`.
+ * `lib/control-plane/config.ts`.
  *
  * Duplicated rather than imported because `apps/web` does not depend on
  * `apps/hooks` in the package graph and should not start to. The cost of a
@@ -198,7 +212,7 @@ export function readIdentitySurface(
 
 export function readWebConfig(env: Record<string, string | undefined> = process.env): WebConfig {
   const storeToken = env.APPROVALS_STORE_TOKEN?.trim();
-  // Same guard, same wording, as `apps/hooks/src/config.ts`. Round 3 of #52's
+  // Same guard, same wording, as `lib/control-plane/config.ts`. Round 3 of #52's
   // review caught it missing here: the control plane refused to boot without a
   // real token while the service that *presents* it fell back to a value
   // published in this file, so a production `apps/web` would have gone on
@@ -215,7 +229,15 @@ export function readWebConfig(env: Record<string, string | undefined> = process.
     // Refuses a bare service name outright — `public-host.ts` has the measured
     // story. The panel reads this in a server component and hands it to the
     // browser, so a host nothing can resolve fails in a visitor's DevTools.
-    hooksHost: publicHost("HOOKS_PUBLIC_HOST", env.HOOKS_PUBLIC_HOST, "localhost:8081"),
+    // The app's own address since #4: the control plane is a module of this
+    // app, so its default is the app's default, `WEB_PUBLIC_HOST`'s in
+    // `.env.example`. It was `localhost:8081`, where `apps/hooks` listened.
+    hooksHost: publicHost("HOOKS_PUBLIC_HOST", env.HOOKS_PUBLIC_HOST, "localhost:3000"),
+    controlPlaneHost: publicHost(
+      "CONTROL_PLANE_HOST",
+      env.CONTROL_PLANE_HOST,
+      `localhost:${env.PORT?.trim() || "3000"}`,
+    ),
     approvalsStoreToken: storeToken || DEV_STORE_TOKEN,
     approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT?.trim() || "Approvals",
     ...readIdentitySurface(env),

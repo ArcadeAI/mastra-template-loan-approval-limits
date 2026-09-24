@@ -23,8 +23,16 @@
  * and Render's injected `PORT` both keep working — because that is Bun's own
  * precedence, not something re-implemented here.
  *
+ * **The Next server runs on Bun, not Node, since #4.** `next`'s bin starts
+ * `#!/usr/bin/env node`, and `bun run next` honours that shebang, so until #4
+ * the app ran on Node. The control plane is a module of the app now and opens
+ * `governance.db` with `bun:sqlite` (DESIGN.md → Database), which Node cannot
+ * load: measured on #4, a route importing it answered 500 "Cannot find module
+ * 'bun:sqlite'" under `bun run next dev` and 200 under `bun --bun run next
+ * dev`. `--bun` is what makes Bun run the bin itself.
+ *
  * Production does not run this. The root `Dockerfile` serves the standalone
- * build with `node server.js`, which reads `process.env.PORT` itself.
+ * build with `bun server.js`, which reads `process.env.PORT` itself.
  */
 const args = process.argv.slice(2);
 
@@ -35,8 +43,8 @@ if (args.length === 0) {
 
 // `bun run next` rather than the bin path: it resolves `node_modules/.bin`
 // wherever the workspace install put it, and hands the binary this process's
-// environment — the point of the exercise.
-const child = Bun.spawn(["bun", "run", "next", ...args], {
+// environment — the point of the exercise. `--bun` runs it on Bun; see above.
+const child = Bun.spawn(["bun", "--bun", "run", "next", ...args], {
   cwd: new URL("..", import.meta.url).pathname,
   env: process.env,
   stdio: ["inherit", "inherit", "inherit"],

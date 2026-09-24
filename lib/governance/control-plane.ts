@@ -89,6 +89,13 @@ export type ControlPlaneReport = ControlPlaneStatus | ControlPlaneUnreachable;
 /** The subset of `cg-hooks`' `/health` this service reads. */
 interface HooksHealth {
   status?: unknown;
+  /**
+   * The control plane's own roll-up, when `/health` is the app's (#4): there
+   * the top-level `status` is the whole app's (`ok`/`degraded`) and this is
+   * the `healthy`/`degraded` `cg-hooks` used to answer with. Absent from the
+   * standalone runner's `/health`, whose top-level `status` is that one.
+   */
+  control_plane?: { status?: unknown };
   reset?: unknown;
   warnings?: unknown;
   policy?: { status?: unknown; revision?: unknown; error?: unknown };
@@ -119,16 +126,16 @@ export function resetToken(env: Record<string, string | undefined> = process.env
  * socket timeout.
  */
 export async function readControlPlane(
-  config: Pick<WebConfig, "hooksHost">,
+  config: Pick<WebConfig, "controlPlaneHost">,
   options: { token?: string; timeoutMs?: number } = {},
 ): Promise<ControlPlaneReport> {
-  const host = config.hooksHost;
+  const host = config.controlPlaneHost;
   const token = options.token ?? "";
   const available: ResetAvailability = token === "" ? "no-token" : "enabled";
 
   let response: Response;
   try {
-    response = await fetch(`${baseUrl(host)}/health`, {
+    response = await fetch(`${baseUrl(host)}/hooks/health`, {
       signal: AbortSignal.timeout(options.timeoutMs ?? 3000),
       // A health read must never be answered from a cache; the whole question
       // is what is true right now.
@@ -140,7 +147,7 @@ export async function readControlPlane(
       host,
       reset: available,
       problem:
-        `${host} did not answer GET /health (${String(cause)}). The panel is showing decisions ` +
+        `${host} did not answer GET /hooks/health (${String(cause)}). The panel is showing decisions ` +
         `from a control plane it cannot currently ask about itself — an empty lane right now ` +
         `means nothing.`,
     };
@@ -151,7 +158,7 @@ export async function readControlPlane(
       reachable: false,
       host,
       reset: available,
-      problem: `${host} answered GET /health with HTTP ${response.status}.`,
+      problem: `${host} answered GET /hooks/health with HTTP ${response.status}.`,
     };
   }
 
@@ -163,7 +170,7 @@ export async function readControlPlane(
       reachable: false,
       host,
       reset: available,
-      problem: `${host} answered GET /health with something that is not JSON (${String(cause)}).`,
+      problem: `${host} answered GET /hooks/health with something that is not JSON (${String(cause)}).`,
     };
   }
 
@@ -171,7 +178,7 @@ export async function readControlPlane(
   return {
     reachable: true,
     host,
-    status: body.status === "healthy" ? "healthy" : "degraded",
+    status: (body.control_plane?.status ?? body.status) === "healthy" ? "healthy" : "degraded",
     policy: {
       status: typeof body.policy?.status === "string" ? body.policy.status : "unknown",
       revision: typeof body.policy?.revision === "number" ? body.policy.revision : null,
@@ -208,13 +215,13 @@ export interface ResetOutcome {
 
 /** Posts the reset with this service's bearer. Never throws. */
 export async function runReset(
-  config: Pick<WebConfig, "hooksHost">,
+  config: Pick<WebConfig, "controlPlaneHost">,
   mode: ResetMode,
   token: string,
   timeoutMs = 10_000,
 ): Promise<ResetOutcome> {
   try {
-    const response = await fetch(`${baseUrl(config.hooksHost)}/admin/reset`, {
+    const response = await fetch(`${baseUrl(config.controlPlaneHost)}/hooks/admin/reset`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify({ mode }),
@@ -227,9 +234,9 @@ export async function runReset(
         mode,
         detail:
           response.status === 404
-            ? `${config.hooksHost} has no /admin/reset: RESET_TOKEN is unset on cg-hooks, so the ` +
+            ? `${config.controlPlaneHost} has no /hooks/admin/reset: RESET_TOKEN is unset on cg-hooks, so the ` +
               `endpoint does not exist there. Set the same value on both services.`
-            : `${config.hooksHost} refused the reset with HTTP ${response.status}: ${text}`,
+            : `${config.controlPlaneHost} refused the reset with HTTP ${response.status}: ${text}`,
       };
     }
     const body = (await response.json()) as { revision?: unknown };
@@ -243,6 +250,6 @@ export async function runReset(
           : `Policy reset from the fixture${revision === null ? "" : ` at revision ${revision}`}. Grants, approval requests and the audit log were left alone.`,
     };
   } catch (cause) {
-    return { ok: false, mode, detail: `${config.hooksHost} could not be reached: ${String(cause)}` };
+    return { ok: false, mode, detail: `${config.controlPlaneHost} could not be reached: ${String(cause)}` };
   }
 }
