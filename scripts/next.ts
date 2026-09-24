@@ -41,6 +41,26 @@ if (args.length === 0) {
   process.exit(64);
 }
 
+// A port always reaches Next through the environment (#9). Unset, Next's own
+// default is 3000 too, but it then moves to 3001 when 3000 is taken, with a
+// warning: the tunnel pointed at 3000 would serve somebody else, and the URL
+// printed below would be wrong. Named explicitly, a taken port is an error.
+if (!process.env.PORT?.trim()) process.env.PORT = "3000";
+
+// The URL to open, before Next's own banner (#9). With APP_PUBLIC_HOST set it
+// is the tunnel, never localhost: the sessions and the verifier live there.
+// Advisory, so a launcher copied away from `lib/` (app-test/dev-port.test.ts
+// runs it in a throwaway project) still starts Next, and says why it printed
+// no URL.
+if (args[0] === "dev" || args[0] === "start") {
+  try {
+    const { openInstructions } = await import("../lib/origin.ts");
+    console.log(`${openInstructions(process.env, process.env.PORT)}\n`);
+  } catch (error) {
+    console.error(`[next.ts] could not work out the URL to open: ${(error as Error).message}`);
+  }
+}
+
 // `bun run next` rather than the bin path: it resolves `node_modules/.bin`
 // wherever the workspace install put it, and hands the binary this process's
 // environment — the point of the exercise. `--bun` runs it on Bun; see above.
