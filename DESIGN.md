@@ -101,6 +101,10 @@ the app, with `src/mastra/` and the Next.js routes at the root, so Mastra's Quic
 (`mastra dev`) is a separate Node process, so the shared agent never imports a module that
 opens `bun:sqlite`.
 
+**TypeScript stays on 6** (decided 2026-09-24, #8): `mastra dev` bundles through
+`typescript-paths`, which needs TypeScript's JS API, and TS 7 doesn't export it. This
+reverses the TypeScript half of #2 (0b). A test boots `mastra dev` so a bump is caught.
+
 **The control plane is mounted under `/hooks`** (decided 2026-09-23, #4). Arcade's hook
 extension base URL is `<APP_PUBLIC_HOST>/hooks`, so Arcade calls `/hooks/access`,
 `/hooks/pre`, `/hooks/post` and `/hooks/health`, and the last answers Arcade's
