@@ -25,19 +25,21 @@ import PanelPage from "../app/panel/page.tsx";
 import { GET as health } from "../app/health/route.ts";
 import { resolvePanelStream } from "../lib/governance/stream-url.ts";
 import { bootTestControlPlane } from "./control-plane-instance.ts";
+import { openTestIdentity } from "./identity-instance.ts";
 import { openTestLoanBook } from "./loan-module-instance.ts";
 
 bootTestControlPlane();
+await openTestIdentity();
 openTestLoanBook();
 
 /**
  * The variables that decide the panel's stream, and the only ones these tests
- * touch. Named explicitly because the root `.env.local` sets `HOOKS_PUBLIC_HOST`
+ * touch. Named explicitly because the root `.env.local` sets `APP_PUBLIC_HOST`
  * for a local run, so a case that means "unset" has to say so.
  */
 const STREAM_KEYS = [
   "GOVERNANCE_STREAM",
-  "HOOKS_PUBLIC_HOST",
+  "APP_PUBLIC_HOST",
   "NODE_ENV",
   "RENDER",
   // Identity and the agent, because `/health`'s `status` folds five fields
@@ -47,11 +49,9 @@ const STREAM_KEYS = [
   // it may well be set in the ambient environment of whoever runs the suite
   // (see `app-test/model.ts`), so a case that means "configured" has to say so
   // rather than inherit it.
-  "IDP_ISSUER",
   "IDP_CLIENT_ID",
   "IDP_CLIENT_SECRET",
   "SESSION_SECRET",
-  "PUBLIC_URL",
   "ARCADE_GATEWAY_ID",
   "ARCADE_API_KEY",
   "ANTHROPIC_API_KEY",
@@ -92,7 +92,7 @@ async function panel(wanted: Env, params: Record<string, string> = {}): Promise<
 
 async function healthBody(wanted: Env): Promise<Record<string, unknown>> {
   setEnv(wanted);
-  return (await health().json()) as Record<string, unknown>;
+  return (await (await health()).json()) as Record<string, unknown>;
 }
 
 /** Tags stripped, whitespace collapsed — what a person actually reads. */
@@ -114,11 +114,9 @@ const HOOKS_HOST = "cg-hooks.onrender.com";
  * panel's doing and nothing else's. `openssl rand -hex 32`, written out.
  */
 const IDENTITY = {
-  IDP_ISSUER: "https://cg-idp-or5b.onrender.com",
   IDP_CLIENT_ID: "client-c",
   IDP_CLIENT_SECRET: "client-c-secret",
   SESSION_SECRET: "3f9a1c7e5b2d84069a1fe73c05b8d42e6c917ab3fd50e28c47196baf3d0c5e81",
-  PUBLIC_URL: "https://cg-web-sa31.onrender.com",
   ARCADE_GATEWAY_ID: "cg-demo-us",
   ARCADE_API_KEY: "arcade-key",
   // The agent capability (#14), which `/health` counts alongside the three
@@ -130,10 +128,10 @@ const IDENTITY = {
 
 describe("a deployed panel that was never told which stream to watch", () => {
   // The measured state of https://cg-web-sa31.onrender.com/panel on
-  // 2026-09-11: `render.yaml` declared HOOKS_PUBLIC_HOST and never declared
+  // 2026-09-11: `render.yaml` declared APP_PUBLIC_HOST and never declared
   // GOVERNANCE_STREAM, so the page served `mode: "fixture"` over a live
   // control plane and said nothing about it.
-  const deployed = { ...DEPLOYED, HOOKS_PUBLIC_HOST: HOOKS_HOST } as const;
+  const deployed = { ...DEPLOYED, APP_PUBLIC_HOST: HOOKS_HOST } as const;
 
   test("the page is an error state that names the variable", async () => {
     const markup = await panel(deployed);
@@ -196,12 +194,12 @@ describe("a deployed panel that was never told which stream to watch", () => {
   test("asking for hooks without a host names the host variable instead", async () => {
     const asked = { ...DEPLOYED, GOVERNANCE_STREAM: "hooks" } as const;
 
-    expect(text(await panel(asked))).toContain("HOOKS_PUBLIC_HOST is not set");
+    expect(text(await panel(asked))).toContain("APP_PUBLIC_HOST is not set");
     expect((await healthBody(asked)).panel_stream).toBe("unconfigured");
   });
 
   test("a GOVERNANCE_STREAM this service does not understand is refused by name", async () => {
-    const typo = { ...DEPLOYED, GOVERNANCE_STREAM: "hook", HOOKS_PUBLIC_HOST: HOOKS_HOST } as const;
+    const typo = { ...DEPLOYED, GOVERNANCE_STREAM: "hook", APP_PUBLIC_HOST: HOOKS_HOST } as const;
 
     expect(text(await panel(typo))).toContain("GOVERNANCE_STREAM=hook");
     expect((await healthBody(typo)).panel_stream).toBe("unconfigured");
@@ -219,7 +217,7 @@ describe("fixture mode, asked for on purpose", () => {
   });
 
   test("?fixture=1 does the same for one request, on a deployment set to hooks", async () => {
-    const live = { ...DEPLOYED, GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: HOOKS_HOST } as const;
+    const live = { ...DEPLOYED, GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: HOOKS_HOST } as const;
     const markup = await panel(live, { fixture: "1" });
 
     expect(markup).toContain("FIXTURE REPLAY");
@@ -243,7 +241,7 @@ describe("fixture mode, asked for on purpose", () => {
 });
 
 describe("live mode", () => {
-  const live = { ...DEPLOYED, GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: HOOKS_HOST } as const;
+  const live = { ...DEPLOYED, GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: HOOKS_HOST } as const;
 
   test("the badge says LIVE and names the host on screen", async () => {
     const markup = await panel(live);
@@ -266,7 +264,7 @@ describe("live mode", () => {
   });
 
   test("a local hook server is live too, and the badge names it", async () => {
-    const markup = await panel({ GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: "localhost:4411" });
+    const markup = await panel({ GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: "localhost:4411" });
 
     expect(text(markup)).toContain("LIVE · localhost:4411");
   });
@@ -297,11 +295,11 @@ describe("what render.yaml gives cg-web", () => {
     expect(entry("GOVERNANCE_STREAM")).toEqual({ key: "GOVERNANCE_STREAM", value: "hooks" });
   });
 
-  test("HOOKS_PUBLIC_HOST stays sync: false, because it cannot be derived", () => {
+  test("APP_PUBLIC_HOST stays sync: false, because it cannot be derived", () => {
     // onrender.com subdomains are global and Render suffixes a name that is
     // taken (#59: cg-web is cg-web-sa31). A value here would address somebody
     // else's deployment.
-    expect(entry("HOOKS_PUBLIC_HOST")).toEqual({ key: "HOOKS_PUBLIC_HOST", sync: false });
+    expect(entry("APP_PUBLIC_HOST")).toEqual({ key: "APP_PUBLIC_HOST", sync: false });
   });
 
   test("and the pair is what the page reads as live", () => {
@@ -310,7 +308,7 @@ describe("what render.yaml gives cg-web", () => {
     const stream = resolvePanelStream({
       NODE_ENV: "production",
       GOVERNANCE_STREAM: entry("GOVERNANCE_STREAM")?.["value"] as string,
-      HOOKS_PUBLIC_HOST: HOOKS_HOST,
+      APP_PUBLIC_HOST: HOOKS_HOST,
     });
 
     expect(stream.mode).toBe("hooks");

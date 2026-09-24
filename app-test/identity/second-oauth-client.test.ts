@@ -24,9 +24,9 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { loadPeople } from "../src/db.ts";
+import { loadPeople } from "../../lib/identity/provider/db.ts";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const SECRET = "test-secret-".padEnd(48, "x");
 const ARCADE_URI = "http://127.0.0.1:9/arcade-callback";
 const USER_SOURCE_URI = "http://127.0.0.1:9/user-source-callback";
@@ -106,14 +106,14 @@ class Service {
       ...inherited,
       PORT: String(port),
       IDP_DB_PATH: this.dbPath,
-      IDP_PUBLIC_URL: this.baseUrl,
+      APP_PUBLIC_HOST: new URL(this.baseUrl).host,
       IDP_OAUTH_REDIRECT_URIS: ARCADE_URI,
       BETTER_AUTH_SECRET: SECRET,
       ...this.extra,
     };
 
     mkdirSync(dirname(this.dbPath), { recursive: true });
-    this.child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+    this.child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
       env: this.env,
       stdout: "pipe",
       stderr: "pipe",
@@ -122,7 +122,7 @@ class Service {
     const deadline = Date.now() + 20_000;
     for (;;) {
       try {
-        if ((await fetch(`${this.baseUrl}/health`)).ok) return;
+        if ((await fetch(`${this.baseUrl}/identity/health`)).ok) return;
       } catch {
         // Not listening yet.
       }
@@ -146,12 +146,12 @@ class Service {
   }
 
   async health(): Promise<Health> {
-    return (await (await fetch(`${this.baseUrl}/health`)).json()) as Health;
+    return (await (await fetch(`${this.baseUrl}/identity/health`)).json()) as Health;
   }
 
   /** `oauth-client --json …`, with the exit status asserted rather than assumed. */
   async oauthClient(...args: string[]): Promise<{ code: number; json: Record<string, unknown>; err: string }> {
-    const run = Bun.spawn(["bun", join(ROOT, "scripts", "oauth-client.ts"), "--json", ...args], {
+    const run = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", ...args], {
       env: this.env,
       stdout: "pipe",
       stderr: "pipe",
@@ -376,7 +376,7 @@ describe("with IDP_OAUTH_CLIENTS naming a second client", () => {
   test("--rotate without --client refuses rather than guess which registration it costs", async () => {
     const before = two.storedSecrets();
 
-    const run = Bun.spawn(["bun", join(ROOT, "scripts", "oauth-client.ts"), "--json", "--rotate"], {
+    const run = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"], {
       env: two.env,
       stdout: "pipe",
       stderr: "pipe",
@@ -432,7 +432,7 @@ describe("with IDP_OAUTH_CLIENTS unset", () => {
     const pairBefore = two.storedSecrets();
 
     for (const service of [one, two]) {
-      const run = Bun.spawn(["bun", join(ROOT, "scripts", "reset.ts")], {
+      const run = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "reset.ts")], {
         env: service.env,
         stdout: "pipe",
         stderr: "pipe",

@@ -29,37 +29,34 @@
  */
 import { spawn, type Subprocess } from "bun";
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { appIdentityEnv } from "./app-identity.ts";
 import { freePort, stopProcess, waitForHttp } from "./cdp.ts";
-import {
-  Browser,
-  SESSION_SECRET,
-  signInAs,
-  startIdentityHarness,
-  type IdentityHarness,
-} from "./identity-harness.ts";
+import { Browser, SESSION_SECRET, signInAs } from "./identity-harness.ts";
 import { RILEY, startHarness, type Harness } from "./harness.ts";
 
 const WEB = join(import.meta.dir, "..");
 
-let identity: IdentityHarness;
+/** The booted app, which is its own identity provider since #6. */
+let identity: { webUrl: string; idpUrl: string };
 let control: Harness;
+const scratch = join(tmpdir(), `cg-approval-signed-out-${crypto.randomUUID()}`);
 let next: Subprocess | undefined;
 let origin: string;
 
 beforeAll(async () => {
-  // Reserved before the IdP starts, because `apps/idp` has to be told to accept
-  // this origin's callback: Better Auth checks the redirect URI against the
-  // registered list, and pointing the sign-in at a server that does not serve
-  // the page under test would be testing around that rather than through it.
+  // Reserved before anything starts, because the app's identity provider has
+  // to be told to accept this origin's callback and to name it as its issuer:
+  // Better Auth checks the redirect URI against the registered list.
   const webPort = freePort();
   origin = `http://localhost:${webPort}`;
+  identity = { webUrl: origin, idpUrl: origin };
 
-  [identity, control] = await Promise.all([
-    startIdentityHarness({ extraWebRedirectUris: [`${origin}/api/auth/callback`] }),
-    startHarness(),
-  ]);
+  const [appIdentity, harness] = await Promise.all([appIdentityEnv(origin, scratch), startHarness()]);
+  control = harness;
 
   next = spawn({
     // `--bun`: the app runs on Bun since #4, because the control plane it
@@ -76,12 +73,10 @@ beforeAll(async () => {
       // The app holds the loan book since #5; a throwaway one, not a
       // loans.db in the repo.
       LOANS_DB_PATH: ":memory:",
-      PUBLIC_URL: origin,
       SESSION_SECRET,
-      IDP_ISSUER: identity.idpUrl,
-      IDP_CLIENT_ID: identity.config.identity.idpClientId,
-      IDP_CLIENT_SECRET: identity.config.identity.idpClientSecret,
-      HOOKS_PUBLIC_HOST: control.hooksHost,
+      // The app is its own identity provider since #6: its own throwaway
+      // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
+      ...appIdentity.env,
       // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
       // defaults to the app's own listener; this test's control plane is elsewhere.
       CONTROL_PLANE_HOST: control.hooksHost,
@@ -102,7 +97,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await stopProcess(next);
   await control?.stop();
-  await identity?.stop();
+  rmSync(scratch, { recursive: true, force: true });
 });
 
 const read = async (browser: Browser, path: string) => (await browser.fetch(`${origin}${path}`)).text();

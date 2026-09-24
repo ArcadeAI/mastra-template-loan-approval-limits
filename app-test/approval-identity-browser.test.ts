@@ -44,15 +44,8 @@ import { browserRequired, missingBrowserMessage, resolveChrome } from "./chrome.
 import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHttp } from "./cdp.ts";
 import { chunk, chunkName, joinChunks, openSealed, seal } from "../lib/identity/seal.ts";
 import { SESSION_COOKIE, type Session } from "../lib/identity/session.ts";
-import {
-  Browser,
-  PEOPLE,
-  SESSION_SECRET,
-  signInAs,
-  startIdentityHarness,
-  type IdentityHarness,
-  type PersonaKey,
-} from "./identity-harness.ts";
+import { appIdentityEnv } from "./app-identity.ts";
+import { Browser, PEOPLE, SESSION_SECRET, signInAs, type PersonaKey } from "./identity-harness.ts";
 import { DANA, HOOK_SECRET, RILEY, startHarness, type Harness } from "./harness.ts";
 
 const WEB = join(import.meta.dir, "..");
@@ -67,21 +60,21 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
     if (chromeResolution.path === null) throw new Error(missingBrowserMessage(chromeResolution));
     const CHROME = chromeResolution.path;
 
-    let identity: IdentityHarness | undefined;
     let control: Harness | undefined;
+    const scratch = mkdtempSync(join(tmpdir(), "cg-approval-identity-app-"));
     let next: Subprocess | undefined;
     let chrome: Subprocess | undefined;
     let cdp: Cdp | undefined;
     let profile: string | undefined;
 
     try {
-      // The real IdP, and the real control plane with a stand-in Arcade that
-      // works by *calling the real pre-hook*.
-      [identity, control] = await Promise.all([startIdentityHarness(), startHarness()]);
-
+      // The real control plane with a stand-in Arcade that works by *calling
+      // the real pre-hook*, and the app as its own real identity provider (#6).
       const webPort = freePort();
       const debugPort = freePort();
       const origin = `http://127.0.0.1:${webPort}`;
+      const [appIdentity, harness] = await Promise.all([appIdentityEnv(origin, scratch), startHarness()]);
+      control = harness;
 
       next = spawn({
         // `--bun`: the app runs on Bun since #4, because the control plane it
@@ -98,15 +91,13 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
           // The app holds the loan book since #5; a throwaway one, not a
           // loans.db in the repo.
           LOANS_DB_PATH: ":memory:",
-          PUBLIC_URL: origin,
           // The key the sealed sessions below are sealed under. A mismatch here
           // is indistinguishable from "not signed in", which is exactly the
           // state this test is trying to tell apart from a real identity.
           SESSION_SECRET,
-          IDP_ISSUER: identity.idpUrl,
-          IDP_CLIENT_ID: identity.config.identity.idpClientId,
-          IDP_CLIENT_SECRET: identity.config.identity.idpClientSecret,
-          HOOKS_PUBLIC_HOST: control.hooksHost,
+          // The app is its own identity provider since #6: its own throwaway
+          // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
+          ...appIdentity.env,
           // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
           // defaults to the app's own listener; this test's control plane is elsewhere.
           CONTROL_PLANE_HOST: control.hooksHost,
@@ -173,7 +164,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       // ---- Alice, signed in as Alice, opens her own link ------------------
       // Her own Chrome profile, holding the cookie her own password produced.
       // Nothing on the page and nothing in this test tells it who she is.
-      await useSession(cdp, await sessionFor(identity, "dana"));
+      await useSession(cdp, await sessionFor({ webUrl: origin }, "dana"));
       await cdp.command("Page.navigate", { url: link });
       await waitForButtons(cdp);
 
@@ -211,7 +202,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       // A refusal that fires on everybody is not a control. This is the half
       // that says the rule discriminates rather than blocks.
       control.preCalls.length = 0;
-      await useSession(cdp, await sessionFor(identity, "riley"));
+      await useSession(cdp, await sessionFor({ webUrl: origin }, "riley"));
       await cdp.command("Page.navigate", { url: link });
       await waitForButtons(cdp);
 
@@ -224,12 +215,67 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       expect(recorded).not.toContain("CHECK_FAILED");
       expect(await control.read(id)).toMatchObject({ status: "approved", decided_by: RILEY });
       expect(control.preCalls).toEqual([{ user_id: RILEY, tool: "Approvals.Decide" }]);
+
+      // ---- A browser whose session is gone by the time it presses ---------
+      // #6, criterion 4: the decider comes from the sealed session and from
+      // nothing else, so no input to the decide action can name one. A
+      // browser that loaded the buttons signed in and lost its session before
+      // pressing is the one way to reach the action with no session at all.
+      // It gets the carried refusal — a fault, not a denial — and nothing is
+      // sent to `/pre`.
+      //
+      // The refusal is read off the wire, as the action's own answer: Next
+      // re-renders the page after an action, and without a session that
+      // render is the signed-out view, which has no controls to show an
+      // outcome in. What the browser is left looking at is asserted too.
+      const orphaned = await control.escalate();
+      const orphanedId = String(orphaned.id);
+      control.preCalls.length = 0;
+      await useSession(cdp, await sessionFor({ webUrl: origin }, "riley"));
+      await cdp.command("Page.navigate", { url: `${origin}/approvals/${orphanedId}` });
+      await waitForButtons(cdp);
+      await cdp.command("Network.clearBrowserCookies");
+
+      const actionCalls: string[] = [];
+      const answered = new Set<string>();
+      // Registered before the press; a listener added after it would miss it.
+      // Whichever way the form went — the client's `Next-Action` fetch, or the
+      // plain form post React's progressive enhancement falls back to — it is
+      // a POST to this page, and its answer carries the action's result.
+      cdp.on("Network.requestWillBeSent", (params) => {
+        const request = params.request as { method: string; url: string };
+        if (request.method === "POST" && request.url.endsWith(`/approvals/${orphanedId}`)) {
+          actionCalls.push(String(params.requestId));
+        }
+      });
+      cdp.on("Network.loadingFinished", (params) => answered.add(String(params.requestId)));
+
+      await pressApprove(cdp);
+      await waitFor("the decide action's answer", async () => actionCalls.some((id) => answered.has(id)), 60_000);
+      const bodies = await Promise.all(
+        actionCalls.map(
+          async (requestId) =>
+            (await cdp!.command<{ body: string }>("Network.getResponseBody", { requestId })).body,
+        ),
+      );
+      const answer = bodies.join("\n");
+
+      expect(answer).toContain("This browser is not signed in, so there is nobody to make this decision as.");
+      expect(answer).toContain("nothing was sent to the control plane");
+      expect(answer).not.toContain("CHECK_FAILED");
+      await waitFor(
+        "the signed-out view",
+        async () => (await evaluate<string>(cdp!, `document.body.innerText`)).includes("Sign in to decide"),
+        30_000,
+      );
+      expect(await control.read(orphanedId)).toMatchObject({ status: "pending", decided_by: null });
+      expect(control.preCalls).toEqual([]);
     } finally {
       cdp?.close();
       await stopProcess(chrome);
       await stopProcess(next);
       await control?.stop();
-      await identity?.stop();
+      rmSync(scratch, { recursive: true, force: true });
       if (profile !== undefined) rmSync(profile, { recursive: true, force: true });
     }
   },
@@ -240,8 +286,11 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
 // The rig
 // ---------------------------------------------------------------------------
 
-/** A real sign-in, unsealed back into the `Session` a browser would be carrying. */
-async function sessionFor(harness: IdentityHarness, persona: PersonaKey): Promise<Session> {
+/**
+ * A real sign-in, unsealed back into the `Session` a browser would be carrying.
+ * Against the booted app itself since #6: it is its own identity provider.
+ */
+async function sessionFor(harness: { webUrl: string }, persona: PersonaKey): Promise<Session> {
   const browser = new Browser();
   await signInAs(browser, harness, persona, { stopAt: "/api/arcade/start" });
   const session = await openSealed<Session>(joinChunks(SESSION_COOKIE, browser.cookies), SESSION_SECRET);

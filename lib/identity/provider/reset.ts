@@ -25,7 +25,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { Auth } from "./auth.ts";
-import { ensureOAuthClients } from "./client.ts";
+import { ARCADE_PROVIDER_ID, ensureOAuthClients } from "./client.ts";
 import type { OAuthClientSpec } from "./config.ts";
 import { countPeople, resetPeople } from "./db.ts";
 
@@ -48,7 +48,7 @@ export class OAuthClientRotatedError extends Error {
     super(
       `OAuth client${rotations.length > 1 ? "s" : ""} ROTATED during reset: ` +
         rotations.map((each) => `"${each.key}" ${each.was} -> ${each.now}`).join(", ") +
-        ". The Arcade cg-idp provider registration is now stale and must be re-registered; " +
+        `. The Arcade ${ARCADE_PROVIDER_ID} provider registration is now stale and must be re-registered; ` +
         "authorization will fail before any hook runs, so nothing on the panel will say why.",
     );
     this.name = "OAuthClientRotatedError";

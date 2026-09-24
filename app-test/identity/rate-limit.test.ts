@@ -24,9 +24,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { authOptions, RATE_LIMIT, SIGN_IN_PATH } from "../src/auth.ts";
+import { authOptions, RATE_LIMIT, SIGN_IN_PATH } from "../../lib/identity/provider/auth.ts";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const dir = mkdtempSync(join(tmpdir(), "cg-idp-rate-limit-"));
 
 /** One entry of a plugin's `rateLimit` array, as the limiter reads it. */
@@ -92,7 +92,7 @@ beforeAll(async () => {
   const port = freePort();
   baseUrl = `http://127.0.0.1:${port}`;
 
-  child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
     env: {
       ...(Object.fromEntries(
         Object.entries(process.env).filter(([, value]) => value !== undefined),
@@ -102,7 +102,7 @@ beforeAll(async () => {
       NODE_ENV: "production",
       PORT: String(port),
       IDP_DB_PATH: join(dir, "idp.db"),
-      IDP_PUBLIC_URL: baseUrl,
+      APP_PUBLIC_HOST: new URL(baseUrl).host,
       IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
       // Made here, held in this child's environment, never written anywhere
       // and gone when the run ends — the database it signs for is a temporary
@@ -116,7 +116,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
     } catch {
       // Not listening yet.
     }

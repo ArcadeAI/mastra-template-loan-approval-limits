@@ -35,10 +35,12 @@ import {
   type IdentityHarness,
 } from "./identity-harness.ts";
 import { bootTestControlPlane } from "./control-plane-instance.ts";
+import { openTestIdentity } from "./identity-instance.ts";
 import { openTestLoanBook } from "./loan-module-instance.ts";
 
 bootTestControlPlane();
 openTestLoanBook();
+await openTestIdentity();
 
 /** Put `process.env` back exactly as it was, including keys that were unset. */
 function restoreEnv(previous: NodeJS.ProcessEnv, keys: string[]) {
@@ -163,7 +165,6 @@ describe("signing in as a person", () => {
     // Decoding without the key fails: not obfuscated, encrypted.
     const wrongKey = readWebConfig({
       SESSION_SECRET: "a-completely-different-session-secret-xyz",
-      PUBLIC_URL: harness.webUrl,
     });
     expect(
       await readSession(
@@ -576,11 +577,10 @@ describe("/health", () => {
 
     // Each capability fails on its own variables rather than as one flag.
     const signinOnly = readWebConfig({
-      IDP_ISSUER: harness.idpUrl,
+      APP_PUBLIC_HOST: new URL(harness.webUrl).host,
       IDP_CLIENT_ID: "c",
       IDP_CLIENT_SECRET: "s",
       SESSION_SECRET: GOOD_SECRET,
-      PUBLIC_URL: harness.webUrl,
     });
     expect(deploymentReadiness(signinOnly)).toEqual({
       // One of four configured is still `degraded`: a deployment that can sign
@@ -598,11 +598,10 @@ describe("/health", () => {
     const previous = { ...process.env };
     try {
       Object.assign(process.env, {
-        IDP_ISSUER: harness.idpUrl,
+        APP_PUBLIC_HOST: new URL(harness.webUrl).host,
         IDP_CLIENT_ID: "c",
         IDP_CLIENT_SECRET: "s",
         SESSION_SECRET: GOOD_SECRET,
-        PUBLIC_URL: harness.webUrl,
         ARCADE_GATEWAY_ID: "cg-demo-us",
         ARCADE_API_KEY: "k",
         // The two capabilities that arrived after #82, both pinned rather
@@ -617,9 +616,11 @@ describe("/health", () => {
       // pinned in `app-test/health-control-plane.test.ts`. Since #5 it carries
       // the loan book's, pinned in `app-test/loans/health.test.ts`. What this
       // test is about is unchanged, and still exact.
-      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, ...web } =
-        (await GET().json()) as Record<string, unknown>;
+      // Since #6 it carries the identity provider's too, the `identity` field.
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, identity, ...web } =
+        (await (await GET()).json()) as Record<string, unknown>;
       expect(loans).toMatchObject({ status: "ok" });
+      expect(identity).toMatchObject({ status: "ok", people: 4 });
       expect(web).toEqual({
         status: "ok",
         service: "web",
@@ -635,7 +636,7 @@ describe("/health", () => {
         control_plane: { status: "healthy" },
       });
     } finally {
-      for (const key of ["IDP_ISSUER", "IDP_CLIENT_ID", "IDP_CLIENT_SECRET", "SESSION_SECRET", "PUBLIC_URL", "ARCADE_GATEWAY_ID", "ARCADE_API_KEY", "ANTHROPIC_API_KEY", "GOVERNANCE_STREAM"]) {
+      for (const key of ["APP_PUBLIC_HOST", "IDP_CLIENT_ID", "IDP_CLIENT_SECRET", "SESSION_SECRET", "ARCADE_GATEWAY_ID", "ARCADE_API_KEY", "ANTHROPIC_API_KEY", "GOVERNANCE_STREAM"]) {
         if (previous[key] === undefined) delete process.env[key];
         else process.env[key] = previous[key];
       }
@@ -657,10 +658,9 @@ describe("a SESSION_SECRET that is set but too weak", () => {
    * tests are that measurement, inverted.
    */
   const FILLED = {
-    IDP_ISSUER: "https://cg-idp-or5b.onrender.com",
+    APP_PUBLIC_HOST: "cg-web-sa31.onrender.com",
     IDP_CLIENT_ID: "client-c",
     IDP_CLIENT_SECRET: "client-c-secret",
-    PUBLIC_URL: "https://cg-web-sa31.onrender.com",
     ARCADE_GATEWAY_ID: "cg-demo-us",
     ARCADE_API_KEY: "arcade-key",
   };
@@ -744,16 +744,17 @@ describe("a SESSION_SECRET that is set but too weak", () => {
         GOVERNANCE_STREAM: "fixture",
       });
       const { GET } = await import("../app/health/route.ts");
-      const answer = GET();
+      const answer = await GET();
       // 200 on the wire, `degraded` in the body: Render abandons a deploy whose
       // health check is not 200, and an instance that never comes up is an
       // instance whose /health nobody can read.
       expect(answer.status).toBe(200);
-      // The control plane's fields are pinned elsewhere since #4, and the loan
-      // book's since #5; see above.
-      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, ...web } =
+      // The control plane's fields are pinned elsewhere since #4, the loan
+      // book's since #5 and the identity provider's since #6; see above.
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, identity, ...web } =
         (await answer.json()) as Record<string, unknown>;
       expect(loans).toMatchObject({ status: "ok" });
+      expect(identity).toMatchObject({ status: "ok" });
       expect({ policy, fixture_drift, injection_detection, warnings, control_plane }).toMatchObject({
         control_plane: { status: "healthy" },
       });
@@ -827,7 +828,9 @@ describe("an unconfigured deployment", () => {
 
     const signinAnswer = await signin(new Request("https://cg-web-sa31.onrender.com/api/auth/signin"), bare);
     expect(signinAnswer.status).toBe(503);
-    expect(await signinAnswer.text()).toContain("IDP_ISSUER");
+    // `APP_PUBLIC_HOST` since #6, which replaced `IDP_ISSUER`: the issuer is
+    // the app's own origin now.
+    expect(await signinAnswer.text()).toContain("APP_PUBLIC_HOST");
 
     const verifyAnswer = await verify(
       new Request("https://cg-web-sa31.onrender.com/api/arcade/verify?flow_id=x"),
@@ -851,11 +854,10 @@ describe("an unconfigured deployment", () => {
     try {
       Object.assign(process.env, {
         NODE_ENV: "production",
-        IDP_ISSUER: harness.idpUrl,
+        APP_PUBLIC_HOST: new URL(harness.webUrl).host,
         IDP_CLIENT_ID: "c",
         IDP_CLIENT_SECRET: "s",
         SESSION_SECRET: GOOD_SECRET,
-        PUBLIC_URL: harness.webUrl,
       });
       delete process.env.APPROVALS_STORE_TOKEN;
 
@@ -864,7 +866,7 @@ describe("an unconfigured deployment", () => {
       expect(answer.status).toBe(303);
       expect(answer.headers.get("location")).toContain(`${harness.idpUrl}/oauth2/authorize`);
     } finally {
-      for (const key of ["NODE_ENV", "IDP_ISSUER", "IDP_CLIENT_ID", "IDP_CLIENT_SECRET", "SESSION_SECRET", "PUBLIC_URL", "APPROVALS_STORE_TOKEN"]) {
+      for (const key of ["NODE_ENV", "APP_PUBLIC_HOST", "IDP_CLIENT_ID", "IDP_CLIENT_SECRET", "SESSION_SECRET", "APPROVALS_STORE_TOKEN"]) {
         if (previous[key] === undefined) delete process.env[key];
         else process.env[key] = previous[key];
       }

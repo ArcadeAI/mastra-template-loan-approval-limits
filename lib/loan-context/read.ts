@@ -46,6 +46,7 @@
  * answer; `lib/loans/actor.ts`). Stated rather than hidden: if the book ever
  * grows, this is the line that has to change.
  */
+import { appOrigin } from "../config.ts";
 import { personaFor } from "../identity/roster.ts";
 import { refreshIdpToken, tokenExpiry } from "../identity/oidc.ts";
 import { withIdpToken, type IdpToken, type Session } from "../identity/session.ts";
@@ -293,7 +294,9 @@ async function usableToken(session: Session, options: ReadLoanBookOptions): Prom
   if (held.refresh_token === undefined) return held;
 
   const idp = options.idp ?? {
-    issuer: (process.env.IDP_ISSUER ?? "").trim().replace(/\/+$/, ""),
+    // The app's own origin since #6; the refresh itself is in-process
+    // (`refreshIdpToken` → `lib/identity/link.ts`), never over the tunnel.
+    issuer: appOrigin(process.env),
     clientId: (process.env.IDP_CLIENT_ID ?? "").trim(),
     clientSecret: (process.env.IDP_CLIENT_SECRET ?? "").trim(),
   };

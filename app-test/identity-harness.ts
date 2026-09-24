@@ -1,19 +1,24 @@
 /**
  * What the identity suite runs against.
  *
- * Three processes, and the line between "real" and "stand-in" is drawn exactly
- * once, at the network edge:
+ * One origin, as the app has since #6, and the line between "real" and
+ * "stand-in" is drawn exactly once, at the network edge:
  *
- * - **`apps/idp` is real.** Booted as a subprocess the way Render boots it,
- *   with its own client C (`IDP_OAUTH_CLIENTS=web`) whose redirect URI is this
- *   harness's own callback. Every sign-in in this suite is a real
- *   authorization-code + PKCE flow against Better Auth, with a real password
- *   typed into a real login form. `prompt=login` is measured against it rather
- *   than assumed — the issue asked for that specifically.
- * - **`apps/web`'s handlers are real, behind a real server.** `Bun.serve` on
+ * - **The identity provider is real, and in this process.** Opened the way the
+ *   app opens it (`openIdentityProvider`), with its own client C
+ *   (`IDP_OAUTH_CLIENTS=web`) whose redirect URI is this harness's own
+ *   callback, and served on the web server's port under the paths the app
+ *   routes to it. Every sign-in in this suite is a real authorization-code +
+ *   PKCE flow against Better Auth, with a real password typed into a real
+ *   login form. `prompt=login` is measured against it rather than assumed —
+ *   the issue asked for that specifically. Until #6 this was `apps/idp` in a
+ *   subprocess on a port of its own.
+ * - **The web UI's handlers are real, behind a real server.** `Bun.serve` on
  *   `:0`, routing to the same `lib/identity/handlers.ts` functions `app/api/**`
- *   calls. Nothing is mocked: the suite drives them with a cookie jar over HTTP
- *   and asserts on the `Set-Cookie` headers a browser would actually get.
+ *   calls, and reaching the provider in-process as they do in the app
+ *   (`lib/identity/link.ts`). Nothing is mocked: the suite drives them with a
+ *   cookie jar over HTTP and asserts on the `Set-Cookie` headers a browser
+ *   would actually get.
  * - **Arcade Cloud is a stand-in, and only Arcade Cloud.** It speaks the MCP
  *   authorization discovery Arcade speaks (401 → protected-resource metadata →
  *   authorization-server metadata → dynamic registration → authorize → token),
@@ -41,11 +46,14 @@ import {
   verify,
 } from "../lib/identity/handlers.ts";
 import { forgetGatewayClients } from "../lib/identity/gateway.ts";
+import { linkIdentity } from "../lib/identity/link.ts";
+import { readConfig as readIdpConfig } from "../lib/identity/provider/config.ts";
+import { isIdentityPath, openIdentityProvider } from "../lib/identity/provider/server.ts";
 import { nonce, pkce } from "../lib/identity/oidc.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
-/** The four demo people, as `apps/idp/src/fixtures/people.json` seeds them. */
+/** The four demo people, as `lib/identity/provider/fixtures/people.json` seeds them. */
 export const PEOPLE = {
   dana: { email: "alice@bank.example", password: "megaforce-demo-2026" },
   sam: { email: "bob@bank.example", password: "megaforce-demo-2026" },
@@ -812,14 +820,14 @@ export interface IdentityHarness {
   idpUrl: string;
   arcade: ArcadeStandIn;
   config: WebConfig;
-  /** Everything `apps/idp` printed, for assertions about what it was asked. */
+  /** Every `[idp]` line the identity provider printed, for assertions about what it was asked. */
   idpLog(): Promise<string>;
   stop(): Promise<void>;
 }
 
 export interface IdentityHarnessOptions {
   /**
-   * Extra callback URLs `apps/idp` will accept for client C.
+   * Extra callback URLs the identity provider will accept for client C.
    *
    * For a suite that serves the *pages* from its own `next dev` on its own
    * port rather than from this harness's handler server. Better Auth checks
@@ -842,17 +850,17 @@ export async function startIdentityHarness(
 
   const arcade = startArcadeStandIn();
 
-  // The web server needs the IdP's issuer and the IdP needs the web server's
-  // callback URL, so one of them has to be known before the other is up. The
-  // port is taken from the OS first and the server bound to it after the IdP is
-  // configured — the same trick, and the same reason, as binding `:0`.
+  // One origin since #6: the identity provider is part of the app, so it
+  // answers on the web server's own port, under the paths the app routes to
+  // it (`IDENTITY_PATHS`), and its issuer is the app's origin. The port is
+  // taken from the OS first and the server bound to it after the provider is
+  // configured, because the provider's issuer and client C's redirect URI
+  // both name it — the same trick, and the same reason, as binding `:0`.
   const webPort = freePort();
   const webUrl = `http://localhost:${webPort}`;
+  const idpUrl = webUrl;
 
-  const idpPort = freePort();
-  const idpUrl = `http://localhost:${idpPort}`;
   const dbPath = join(tmpdir(), `cg-web-identity-${crypto.randomUUID()}`, "idp.db");
-  const logPath = join(dirname(dbPath), "idp.log");
   mkdirSync(dirname(dbPath), { recursive: true });
 
   // A developer's own PERSONA_* and IDP_* values are deliberately not passed
@@ -865,12 +873,12 @@ export async function startIdentityHarness(
 
   const idpEnv: Record<string, string> = {
     ...inherited,
-    PORT: String(idpPort),
+    PORT: String(webPort),
+    APP_PUBLIC_HOST: `localhost:${webPort}`,
     IDP_DB_PATH: dbPath,
-    IDP_PUBLIC_URL: idpUrl,
     BETTER_AUTH_SECRET: "identity-suite-idp-secret".padEnd(48, "x"),
-    // Client A stays the Arcade registration; client C is `apps/web`'s own —
-    // DESIGN.md's "one OAuth client per relying party", settled on #75/#79.
+    // Client A stays the Arcade registration; client C is the web sign-in's
+    // own — DESIGN.md's "one OAuth client per relying party", settled on #75/#79.
     IDP_OAUTH_CLIENTS: "web",
     IDP_OAUTH_REDIRECT_URIS_WEB: [
       `${webUrl}/api/auth/callback`,
@@ -880,31 +888,31 @@ export async function startIdentityHarness(
     NODE_ENV: "test",
   };
 
-  const idp = spawn(["bun", join(REPO_ROOT, "apps", "idp", "src", "index.ts")], {
-    env: idpEnv,
-    stdout: Bun.file(logPath),
-    stderr: "pipe",
-  });
+  // The provider runs in this process, as it does in the app, so everything it
+  // prints comes out of this process's console. The lines it prints are kept
+  // for `idpLog()` — the text `apps/idp`'s log file held until #6 — and still
+  // printed.
+  const idpLines: string[] = [];
+  const consoleLog = console.log;
+  const consoleError = console.error;
+  const keep =
+    (write: (...args: unknown[]) => void) =>
+    (...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.startsWith("[idp]")) idpLines.push(line);
+      write(...args);
+    };
+  console.log = keep(consoleLog);
+  console.error = keep(consoleError);
 
-  const deadline = Date.now() + 30_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${idpUrl}/health`)).ok) break;
-    } catch {
-      /* not listening yet */
-    }
-    if (Date.now() > deadline) {
-      idp.kill();
-      throw new Error(`apps/idp did not come up:\n${await new Response(idp.stderr as ReadableStream).text()}`);
-    }
-    await Bun.sleep(50);
-  }
+  const provider = await openIdentityProvider(readIdpConfig(idpEnv));
 
   // The secret is stored hashed and cannot be printed twice (#70), so the
   // operational path a human takes on a fresh deploy is the one taken here:
-  // rotate once, under the same client id, to obtain a readable one.
+  // rotate once, under the same client id, to obtain a readable one. The
+  // script opens the same `idp.db`, as it would beside the running app.
   const rotate = spawn(
-    ["bun", join(REPO_ROOT, "apps", "idp", "scripts", "oauth-client.ts"), "--json", "--client", "web", "--rotate"],
+    ["bun", join(REPO_ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--client", "web", "--rotate"],
     { env: idpEnv, stdout: "pipe", stderr: "pipe" },
   );
   const [rotateOut, rotateErr, rotateCode] = await Promise.all([
@@ -918,6 +926,10 @@ export async function startIdentityHarness(
   };
   const clientC = credentials.clients.find((each) => each.key === "web");
   if (!clientC?.client_secret) throw new Error(`no readable secret for client C in:\n${rotateOut}`);
+
+  // What the app's instance does when it opens: the web sign-in's server-side
+  // calls reach this provider in-process, never over the network.
+  linkIdentity({ fetch: provider.fetch, failure: () => null });
 
   // The same real local IdP client is used as the provider leg in the focused
   // hop-2 regression. The callback is a route on the Arcade stand-in, so the
@@ -936,11 +948,10 @@ export async function startIdentityHarness(
     ARCADE_API_KEY: ARCADE_API_KEY,
     ARCADE_CLOUD_URL: arcade.url,
     ARCADE_GATEWAY_ID: GATEWAY_ID,
-    IDP_ISSUER: idpUrl,
+    APP_PUBLIC_HOST: `localhost:${webPort}`,
     IDP_CLIENT_ID: clientC.client_id,
     IDP_CLIENT_SECRET: clientC.client_secret,
     SESSION_SECRET,
-    PUBLIC_URL: webUrl,
     // Not used by any route this suite drives — nothing here runs the agent.
     // Present because `deploymentReadiness` counts the agent as the fourth
     // capability since #14, and the assertion below is about what a *fully*
@@ -954,6 +965,8 @@ export async function startIdentityHarness(
     idleTimeout: 30,
     fetch(request) {
       const { pathname } = new URL(request.url);
+      // The identity provider's paths, on the app's own port (#6).
+      if (isIdentityPath(pathname)) return provider.fetch(request);
       if (pathname === "/api/auth/signin") return signin(request, config);
       if (pathname === "/api/auth/callback") return signinCallback(request, config);
       if (pathname === "/api/auth/signout" && request.method === "POST") return signout(request, config);
@@ -972,12 +985,14 @@ export async function startIdentityHarness(
     idpUrl,
     arcade,
     config,
-    idpLog: () => Bun.file(logPath).text(),
+    idpLog: async () => idpLines.join("\n"),
     async stop() {
       web.stop(true);
       arcade.stop();
-      idp.kill();
-      await idp.exited;
+      linkIdentity(undefined);
+      provider.close();
+      console.log = consoleLog;
+      console.error = consoleError;
       rmSync(dirname(dbPath), { recursive: true, force: true });
     },
   };
@@ -1026,7 +1041,8 @@ export async function prepareProviderCode(
  */
 export async function signInAs(
   browser: Browser,
-  harness: IdentityHarness,
+  /** Where sign-in starts: this harness, or since #6 a booted app that is its own identity provider. */
+  harness: Pick<IdentityHarness, "webUrl">,
   persona: PersonaKey,
   options: { from?: string; stopAt?: string } = {},
 ): Promise<{ url: string; response: Response; html: string }> {

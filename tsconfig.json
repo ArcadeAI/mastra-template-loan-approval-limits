@@ -4,9 +4,11 @@
   // covers the two directories that belong to the repo rather than to the app:
   // `scripts/reset.ts` (#23) and the end-to-end tests in `test/` that drive it.
   //
-  // Every workspace under `apps/` and `packages/` has its own tsconfig, and the
-  // root `typecheck` reaches them with `--filter '*'`, so they are excluded
-  // here. `docs/` and `tools/` were never in the root's scope.
+  // Every workspace under `packages/` has its own tsconfig, and the root
+  // `typecheck` reaches them with `--filter '*'`, so they are excluded here.
+  // `apps/` is empty since #6 folded the last service in, and stays excluded
+  // so a forker's own `apps/<service>` is not swept in by accident. `docs/`
+  // and `tools/` were never in the root's scope.
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "jsx": "preserve",

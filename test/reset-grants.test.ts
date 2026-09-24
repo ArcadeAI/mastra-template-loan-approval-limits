@@ -15,7 +15,8 @@
  *
  * ## What this file does not claim
  *
- * Only `apps/idp` and `apps/loan-app` are in the loop here. Whether **Arcade**
+ * Only the app's identity provider and its loan module are in the loop here
+ * (`apps/idp` and `apps/loan-app` until #6 and #5). Whether **Arcade**
  * presents a stale token or raises an authorization card instead is Arcade's
  * decision, it is not measurable without the project credential, and it is not
  * what is being tested: measured live on 2026-09-19, Arcade raises the card
@@ -24,9 +25,9 @@
  *
  * ## Why it joins the real IdP to the real loan book
  *
- * `test/reset.test.ts` deliberately does not: it points `apps/loan-app` at a
+ * `test/reset.test.ts` deliberately does not: it points the loan module at a
  * `/oauth2/userinfo` stand-in, because walking a whole authorize flow to read
- * one loan is `apps/idp/test/flow.test.ts`'s job. But a token minted by a
+ * one loan is `app-test/identity/flow.test.ts`'s job. But a token minted by a
  * stand-in cannot be invalidated when the real IdP is reset, which is the
  * entire subject here. So this file spends the authorize flow once and gets a
  * **real** access token.
@@ -36,19 +37,27 @@
  * that passed after a reset would prove nothing; a write re-introspects at the
  * provider every time, by design, which is exactly the measurement this file
  * needs.
+ *
+ * ## One app since #6
+ *
+ * Until #6 these were three services on three ports. The identity provider
+ * was the last to fold in, so this boots the real app once (`test/app.ts`):
+ * the authorize flow runs at its own `/oauth2/…`, `/login` and `/consent`, the
+ * loan module validates the grant at its own `/oauth2/userinfo` over its local
+ * listener (`IDENTITY_HOST` unset, the default), and the reset command is
+ * handed the one address.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { Subprocess } from "bun";
-import { mkdirSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// The fixture itself, not `apps/idp/src/db.ts`'s `loadPeople`: that module
-// imports `./schema.sql`, which only `apps/idp`'s own tsconfig knows how to
-// resolve. The persona-email overrides `loadPeople` applies are deliberately
-// not wanted here anyway — `boot` drops every `PERSONA_*` from the
-// environment, so the fixture's own address is the one that gets seeded.
-import people from "../apps/idp/src/fixtures/people.json" with { type: "json" };
+// The fixture itself, not the provider's `loadPeople`: the persona-email
+// overrides it applies are deliberately not wanted here — `bootApp` drops
+// every `PERSONA_*` from the environment, so the fixture's own address is the
+// one that gets seeded.
+import people from "../lib/identity/provider/fixtures/people.json" with { type: "json" };
+import { bootApp, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const RESET_TOKEN = "reset-grants-token-for-tests";
@@ -59,99 +68,18 @@ const OVER_LIMIT_LOAN = "LN-2291";
 
 const alice = people.people.find((person) => person.persona === "dana")!;
 
-interface Instance {
-  child: Subprocess;
-  host: string;
-  baseUrl: string;
-  dir: string;
-  env: Record<string, string>;
-}
-
-/** A port the OS says is free, rather than a guess. `conftest.py::_free_port`. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
-const started: Instance[] = [];
-
-/**
- * One service, booted the way Render boots it. `env` is a function of the
- * address because `apps/idp` has to be told its own public URL and the port is
- * only known once it has been picked.
- */
-/**
- * `mount` is the path the instance serves under: empty for the services, and
- * `/bank` for the loan module since #5, whose runner lays it out as the app
- * does. `host` stays the bare address, because that is what the reset command
- * is handed; `baseUrl` carries the mount, so reads below use the same paths.
- */
-async function boot(
-  name: string,
-  entry: string,
-  env: Record<string, string> | ((baseUrl: string) => Record<string, string>),
-  mount = "",
-): Promise<Instance> {
-  const port = freePort();
-  const host = `127.0.0.1:${port}`;
-  const baseUrl = `http://${host}${mount}`;
-  const dir = join(tmpdir(), `cg-grants-${name}-${crypto.randomUUID()}`);
-  mkdirSync(dir, { recursive: true });
-
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) =>
-        value !== undefined &&
-        !key.startsWith("PERSONA_") &&
-        !key.startsWith("IDP_") &&
-        !key.endsWith("_PUBLIC_HOST") &&
-        key !== "RESET_TOKEN",
-    ),
-  ) as Record<string, string>;
-
-  const full = {
-    ...inherited,
-    PORT: String(port),
-    ...(typeof env === "function" ? env(baseUrl) : env),
-  };
-  const child = Bun.spawn(["bun", join(ROOT, entry)], {
-    env: full,
-    stdout: Bun.file(join(dir, "stdout.log")),
-    stderr: "pipe",
-  });
-
-  const deadline = Date.now() + 30_000;
-  for (;;) {
-    try {
-      // The control plane answers under /hooks since #4, as the app mounts it.
-      const health = entry.includes("control-plane") ? "/hooks/health" : "/health";
-      if ((await fetch(`${baseUrl}${health}`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `${name} did not come up:\n${await new Response(child.stderr as ReadableStream).text()}`,
-      );
-    }
-    await Bun.sleep(50);
-  }
-
-  const instance = { child, host, baseUrl, dir, env: full };
-  started.push(instance);
-  return instance;
-}
-
-let idp: Instance;
-let hooks: Instance;
-let loanApp: Instance;
+let app: App;
 /** The access token Arcade would be holding: minted once, never re-minted. */
 let arcadeToken = "";
+/** The environment the app was booted with, for the credentials script. */
+let appEnv: Record<string, string> = {};
+/** Where the app's `idp.db` is, so the credentials script opens the same one. */
+const data = join(tmpdir(), `cg-grants-${crypto.randomUUID()}`);
+
+/** The three modules, each at its own paths on the one app. */
+const idp = { get baseUrl() { return app.origin; } };
+const hooks = { get baseUrl() { return app.origin; } };
+const loanApp = { get baseUrl() { return `${app.origin}/bank`; } };
 
 /** The command, run the way a presenter runs it. */
 async function runResetCommand(args: string[] = []): Promise<{ code: number; out: string; err: string }> {
@@ -160,9 +88,7 @@ async function runResetCommand(args: string[] = []): Promise<{ code: number; out
     env: {
       ...process.env,
       RESET_TOKEN,
-      IDP_PUBLIC_HOST: idp.host,
-      HOOKS_PUBLIC_HOST: hooks.host,
-      LOAN_APP_PUBLIC_HOST: loanApp.host,
+      APP_PUBLIC_HOST: app.host,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -214,8 +140,8 @@ async function authorizeAlice(): Promise<string> {
   // once to hold one the exchange can use. Arcade's registered client *id* is
   // unchanged by this, which is the property every reset here asserts.
   const rotate = Bun.spawnSync(
-    ["bun", join(ROOT, "apps/idp/scripts/oauth-client.ts"), "--json", "--rotate"],
-    { env: idp.env },
+    ["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"],
+    { env: { ...process.env, ...appEnv, APP_PUBLIC_HOST: app.host, NODE_ENV: "test" } },
   );
   expect(rotate.exitCode).toBe(0);
   const creds = JSON.parse(rotate.stdout.toString()) as { client_id: string; client_secret: string };
@@ -307,41 +233,23 @@ const loanStatus = async (): Promise<string> =>
   ).status;
 
 beforeAll(async () => {
-  idp = await boot("idp", "apps/idp/src/index.ts", (baseUrl) => ({
+  appEnv = {
     RESET_TOKEN,
-    IDP_DB_PATH: join(tmpdir(), `cg-grants-idp-${crypto.randomUUID()}`, "idp.db"),
-    IDP_PUBLIC_URL: baseUrl,
+    ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
+    PERSONA_LOAN_OFFICER_EMAIL: alice.email,
     BETTER_AUTH_SECRET,
     IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
-  }));
-
-  [hooks, loanApp] = await Promise.all([
-    boot("hooks", "scripts/control-plane.ts", {
-      RESET_TOKEN,
-      ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
-      GOVERNANCE_DB_PATH: join(tmpdir(), `cg-grants-hooks-${crypto.randomUUID()}`, "governance.db"),
-      PERSONA_LOAN_OFFICER_EMAIL: alice.email,
-    }),
-    boot(
-      "loan-app",
-      "scripts/loans.ts",
-      {
-        RESET_TOKEN,
-        LOANS_DB_PATH: join(tmpdir(), `cg-grants-loan-${crypto.randomUUID()}`, "loans.db"),
-        IDP_PUBLIC_HOST: idp.host,
-      },
-      "/bank",
-    ),
-  ]);
+    // The credentials script below opens the same `idp.db` the app does.
+    IDP_DB_PATH: join(data, "idp.db"),
+  };
+  app = await bootApp(appEnv);
 
   arcadeToken = await authorizeAlice();
 }, 120_000);
 
-afterAll(() => {
-  for (const instance of started) {
-    instance.child.kill();
-    rmSync(instance.dir, { recursive: true, force: true });
-  }
+afterAll(async () => {
+  await app?.stop();
+  rmSync(data, { recursive: true, force: true });
 });
 
 describe("a reset between takes leaves every persona's grant alive", () => {
@@ -387,9 +295,9 @@ describe("a reset between takes leaves every persona's grant alive", () => {
   });
 
   test("the people were never touched, so nobody was signed out", async () => {
-    const before = (await (await fetch(`${idp.baseUrl}/health`)).json()) as { people: number };
+    const before = (await (await fetch(`${idp.baseUrl}/identity/health`)).json()) as { people: number };
     expect((await runResetCommand()).code).toBe(0);
-    const after = (await (await fetch(`${idp.baseUrl}/health`)).json()) as { people: number };
+    const after = (await (await fetch(`${idp.baseUrl}/identity/health`)).json()) as { people: number };
     expect(after.people).toBe(before.people);
 
     // The consent is what a re-seed would have deleted, and the grant riding
@@ -402,7 +310,7 @@ describe("a reset between takes leaves every persona's grant alive", () => {
 describe("the panel's Reset button leaves the IdP alone too", () => {
   test("`demo` mode does not disturb a grant", async () => {
     expect((await approveAsArcade()).status).toBe(200);
-    const before = (await (await fetch(`${idp.baseUrl}/health`)).json()) as { people: number };
+    const before = (await (await fetch(`${idp.baseUrl}/identity/health`)).json()) as { people: number };
 
     // Exactly the request `lib/governance/control-plane.ts`'s
     // `runReset` sends for the `demo` mode — one address, one body. Posted
@@ -420,7 +328,7 @@ describe("the panel's Reset button leaves the IdP alone too", () => {
     const health = (await (await fetch(`${hooks.baseUrl}/hooks/health`)).json()) as { audit_rows: number };
     expect(health.audit_rows).toBe(0);
     // ...and left identity entirely alone: same people, same live grant.
-    expect(((await (await fetch(`${idp.baseUrl}/health`)).json()) as { people: number }).people).toBe(
+    expect(((await (await fetch(`${idp.baseUrl}/identity/health`)).json()) as { people: number }).people).toBe(
       before.people,
     );
     expect((await approveAsArcade()).status).toBe(200);
@@ -483,11 +391,11 @@ describe("--hard invalidates it, deliberately, and says so", () => {
   });
 
   test("the OAuth client Arcade is registered against still does not move", async () => {
-    const before = (await (await fetch(`${idp.baseUrl}/health`)).json()) as {
+    const before = (await (await fetch(`${idp.baseUrl}/identity/health`)).json()) as {
       oauth: { client_id: string };
     };
     expect((await runResetCommand(["--hard"])).code).toBe(0);
-    const after = (await (await fetch(`${idp.baseUrl}/health`)).json()) as {
+    const after = (await (await fetch(`${idp.baseUrl}/identity/health`)).json()) as {
       oauth: { client_id: string };
     };
     expect(after.oauth.client_id).toBe(before.oauth.client_id);

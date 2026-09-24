@@ -1,14 +1,25 @@
 /**
- * This service knows people, not loans and not policy. It is the enterprise's
- * identity provider, standing in for the real one, and a forker deletes it —
- * so nothing in the template may depend on it and it must depend on nothing in
- * the template.
+ * The identity provider knows people, not loans and not policy. It is the
+ * enterprise's identity provider, standing in for the real one, and a forker
+ * with a real IdP replaces it — so it must depend on nothing in the template.
+ *
+ * Carried from `apps/idp/test/` on #6, when the service became the app's
+ * identity module (`lib/identity/provider/`, its scripts under
+ * `scripts/identity/` and `scripts/identity.ts`). The source scan moved with
+ * it and the assertions did not change. One test did not survive the fold:
+ * "nothing else in the template depends on it". The app mounts the provider
+ * now, by DESIGN.md's decision, so that claim is false by construction. Its
+ * replacement is the narrower rule the fold needs,
+ * `only-identity-mints.test.ts`: only the identity routes reach it, and no
+ * other module imports its signing keys or its token issuance.
  */
 import { describe, expect, test } from "bun:test";
 import { Glob } from "bun";
 import { join } from "node:path";
 
-const ROOT = join(import.meta.dir, "..");
+const REPO = join(import.meta.dir, "..", "..");
+/** The module's own directory, which holds its `package.json` as `apps/idp` did. */
+const ROOT = join(REPO, "lib", "identity", "provider");
 
 /**
  * Comments are stripped before matching, as in the loan book's sibling test:
@@ -19,20 +30,23 @@ function stripComments(source: string): string {
   return source.replaceAll(/\/\*[\s\S]*?\*\//g, "").replaceAll(/^[ \t]*\/\/.*$/gm, "");
 }
 
+/** What `apps/idp`'s `src/` and `scripts/` became: the module, its scripts, and its runner. */
+const SOURCES = ["lib/identity/provider/**/*.ts", "scripts/identity/**/*.ts", "scripts/identity.ts"];
+
 async function sourceFiles(): Promise<{ path: string; text: string }[]> {
   const files = [];
-  for (const dir of ["src", "scripts"]) {
-    for await (const path of new Glob("**/*.ts").scan(join(ROOT, dir))) {
-      files.push({
-        path: `${dir}/${path}`,
-        text: stripComments(await Bun.file(join(ROOT, dir, path)).text()),
-      });
+  for (const pattern of SOURCES) {
+    for await (const path of new Glob(pattern).scan(REPO)) {
+      if (path.includes("node_modules/")) continue;
+      files.push({ path, text: stripComments(await Bun.file(join(REPO, path)).text()) });
     }
   }
+  // Vacuous if the scan found nothing: the move is exactly when a path goes stale.
+  expect(files.map((file) => file.path)).toContain("lib/identity/provider/server.ts");
   return files;
 }
 
-describe("apps/idp knows people, not loans", () => {
+describe("the identity provider knows people, not loans", () => {
   test.each([
     ["loan", /\bloans?\b/i],
     ["borrower", /\bborrower/i],
@@ -56,48 +70,5 @@ describe("apps/idp knows people, not loans", () => {
 
     expect(declared.filter((name) => name.startsWith("@cg/"))).toEqual([]);
     expect(manifest.cg?.external).toBe(true);
-  });
-
-  /**
-   * The other half. Until #187 this service sat outside the root workspace,
-   * which made depending on it impossible by construction. It is a member now,
-   * so the rule has to be stated: no other workspace declares it, and no other
-   * workspace's source imports it by name or by relative path.
-   */
-  test("nothing else in the template depends on it", async () => {
-    const REPO = join(ROOT, "..", "..");
-    const name = (await Bun.file(join(ROOT, "package.json")).json()).name as string;
-
-    const manifests: string[] = [];
-    for await (const path of new Glob("{apps,packages}/*/package.json").scan(REPO)) {
-      if (path !== "apps/idp/package.json") manifests.push(path);
-    }
-    // The web app's manifest is the root one since #3, when it moved out of
-    // `apps/web` to the repo root.
-    manifests.push("package.json");
-    // Vacuous if the scan found nothing to check.
-    expect(manifests.length).toBeGreaterThan(0);
-
-    const declaring = [];
-    for (const path of manifests) {
-      const manifest = await Bun.file(join(REPO, path)).json();
-      if (name in { ...manifest.dependencies, ...manifest.devDependencies }) declaring.push(path);
-    }
-    expect(declaring).toEqual([]);
-
-    const importing = [];
-    let scanned = 0;
-    const specifier = new RegExp(`from\\s+["'](${name}(/[^"']*)?|[^"']*apps/idp/[^"']*|(\\.\\./)+idp/[^"']*)["']`);
-    // The second glob is the web app at the repo root (#3), the same three
-    // directories the first one read under `apps/web`.
-    for (const pattern of ["{apps,packages}/*/{src,lib,app,scripts}/**/*.{ts,tsx}", "{lib,app,scripts}/**/*.{ts,tsx}"]) {
-      for await (const path of new Glob(pattern).scan(REPO)) {
-        if (path.startsWith("apps/idp/")) continue;
-        scanned += 1;
-        if (specifier.test(stripComments(await Bun.file(join(REPO, path)).text()))) importing.push(path);
-      }
-    }
-    expect(scanned).toBeGreaterThan(0);
-    expect(importing).toEqual([]);
   });
 });

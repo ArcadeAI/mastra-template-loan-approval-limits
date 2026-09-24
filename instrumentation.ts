@@ -15,9 +15,17 @@
  * on `/health` and in every `/bank/…` route's 503 (`lib/loans/instance.ts`).
  * It never comes up empty.
  *
- * Only in the server runtime: the control plane and the loan module open
- * `governance.db` and `loans.db` with `bun:sqlite`, which is why the app runs
- * on Bun (`scripts/next.ts`).
+ * It boots the identity module (#6): `idp.db` is opened (seeded from the
+ * fixture when it is empty), Better Auth is built over it, the replay guard is
+ * installed and the OAuth clients are reconciled, before the first request. A
+ * provider that will not boot — `BETTER_AUTH_SECRET` unset in production, a
+ * disk written by another schema — is reported here, loudly, and then on
+ * `/health` and in every identity route's 503, and every browser reads as
+ * signed out until it does (`lib/identity/provider/instance.ts`).
+ *
+ * Only in the server runtime: the control plane, the loan module and the
+ * identity module open `governance.db`, `loans.db` and `idp.db` with
+ * `bun:sqlite`, which is why the app runs on Bun (`scripts/next.ts`).
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -29,4 +37,6 @@ export async function register(): Promise<void> {
   controlPlaneFailure();
   const { loanModuleFailure } = await import("./lib/loans/instance.ts");
   loanModuleFailure();
+  const { identityProviderFailure } = await import("./lib/identity/provider/instance.ts");
+  await identityProviderFailure();
 }

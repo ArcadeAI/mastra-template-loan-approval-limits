@@ -35,9 +35,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadPeople } from "../src/db.ts";
+import { loadPeople } from "../../lib/identity/provider/db.ts";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const dir = mkdtempSync(join(tmpdir(), "cg-idp-login-failure-"));
 const dbPath = join(dir, "idp.db");
 // A file rather than a pipe, so the failure line the service logs can be read
@@ -74,7 +74,7 @@ beforeAll(async () => {
   const port = freePort();
   baseUrl = `http://127.0.0.1:${port}`;
 
-  child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
     env: {
       ...(Object.fromEntries(
         Object.entries(process.env).filter(
@@ -83,7 +83,7 @@ beforeAll(async () => {
       ) as Record<string, string>),
       PORT: String(port),
       IDP_DB_PATH: dbPath,
-      IDP_PUBLIC_URL: baseUrl,
+      APP_PUBLIC_HOST: new URL(baseUrl).host,
       IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
       BETTER_AUTH_SECRET: "test-secret-".padEnd(48, "x"),
     },
@@ -94,7 +94,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
     } catch {
       // Not listening yet.
     }

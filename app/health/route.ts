@@ -54,15 +54,26 @@
  * database never opened. The module's own answer, with the count as a number,
  * is still at `/bank/health`. `reset` covers `POST /bank/admin/reset` too: the
  * same `RESET_TOKEN` decides it.
+ *
+ * **Since #6 it is the identity provider's `/health` too**, because Better
+ * Auth is part of this app (`lib/identity/provider/`). `identity` is
+ * `{ status: "ok", issuer, people }`, or `{ status: "failed", issuer: null,
+ * people: null, error }` when the provider did not boot — in production with
+ * `BETTER_AUTH_SECRET` unset, say — and a failed provider is `degraded`. It
+ * fails closed: every identity route answers 503 and every browser reads as
+ * signed out. What `cg-idp`'s `/health` said about its OAuth clients is at
+ * `/identity/health`, unchanged; `reset` covers `POST /identity/admin/reset`
+ * too.
  */
 import { deploymentReadiness, readIdentitySurface } from "../../lib/config.ts";
 import { bootedControlPlane, controlPlaneFailure } from "../../lib/control-plane/instance.ts";
 import { panelStreamHealth } from "../../lib/governance/stream-url.ts";
+import { identityCapability } from "../../lib/identity/provider/instance.ts";
 import { loanBookHealth } from "../../lib/loans/instance.ts";
 
 export const dynamic = "force-dynamic";
 
-export function GET() {
+export async function GET() {
   // `deploymentReadiness` owns the four `configured`/`missing` capabilities and
   // its own roll-up; `panel_stream` is read separately because it is not one of
   // them — see the note above about it having three answers.
@@ -70,6 +81,8 @@ export function GET() {
   const panel_stream = panelStreamHealth(process.env);
   // Read in-process: this process's `loans.db` (#5).
   const loans = loanBookHealth();
+  // Read in-process: this process's `idp.db` and Better Auth (#6).
+  const identity = await identityCapability();
 
   // The control plane's own report (#4). Read in-process: it is this process's
   // policy cache and this process's `governance.db`.
@@ -87,14 +100,15 @@ export function GET() {
   // when every capability is configured, the panel is watching something, and
   // the control plane is `healthy` (a compiled policy that matches the shipped
   // fixture) — and still HTTP 200, so Render brings the instance up and a
-  // human can read the fields that say which one. #86, #88, #4 and #5 each
+  // human can read the fields that say which one. #86, #88, #4, #5 and #6 each
   // added a term to this expression; a deployment that satisfies some and not
   // all is `degraded`.
   const status =
     deployment === "ok" &&
     panel_stream !== "unconfigured" &&
     controlPlaneStatus === "healthy" &&
-    loans.status === "ok"
+    loans.status === "ok" &&
+    identity.status === "ok"
       ? "ok"
       : "degraded";
 
@@ -114,6 +128,7 @@ export function GET() {
     fixture_drift,
     injection_detection,
     loans,
+    identity,
     reset,
     warnings,
     control_plane: { status: controlPlaneStatus, ...controlPlane },

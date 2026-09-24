@@ -19,7 +19,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-${crypto.randomUUID()}`, "idp.db");
 const SECRET = "test-secret-".padEnd(48, "x");
 
@@ -62,12 +62,12 @@ beforeAll(async () => {
     ),
   ) as Record<string, string>;
 
-  child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
     env: {
       ...inherited,
       PORT: String(port),
       IDP_DB_PATH: dbPath,
-      IDP_PUBLIC_URL: baseUrl,
+      APP_PUBLIC_HOST: new URL(baseUrl).host,
       IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
       BETTER_AUTH_SECRET: SECRET,
       PERSONA_LOAN_OFFICER_EMAIL: CONFIGURED,
@@ -79,7 +79,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
     } catch {
       // Not listening yet.
     }

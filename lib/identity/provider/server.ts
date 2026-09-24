@@ -1,20 +1,39 @@
 /**
- * The enterprise's identity provider — a demo fixture standing in for the real
- * one, the same category of thing as the persona switcher. A forker deletes
- * this service and points Arcade at their Okta.
+ * The identity provider: a demo fixture standing in for the enterprise's real
+ * one. A forker with a real IdP replaces the identity module and points both
+ * hops at it (DESIGN.md → Identity and OAuth).
  *
  * Better Auth serves the OAuth 2.1 endpoints; this file serves the two pages
  * the plugin redirects to (login and consent), turns their HTML form posts into
- * the JSON calls Better Auth expects, and answers `/health` and
- * `POST /admin/reset`. Nothing here knows what a loan is or who is allowed to
- * do what.
+ * the JSON calls Better Auth expects, and answers `/identity/health` and
+ * `POST /identity/admin/reset`. Nothing here knows what a loan is or who is
+ * allowed to do what.
+ *
+ * **A module of the app since #6, not a service.** `apps/idp` booted itself on
+ * import and listened on its own port; this file exports
+ * {@link openIdentityProvider}, which does the same boot and hands back a
+ * `fetch`. The app mounts it on its own port (`lib/identity/provider/instance.ts`,
+ * the routes under `app/`), and `scripts/identity.ts` puts the same handler
+ * behind `Bun.serve` for the test harnesses. One implementation, two ways to
+ * reach it, the same paths either way: {@link IDENTITY_PATHS}.
+ *
+ * **Only this module mints tokens.** Its signing keys and its issuance are
+ * reachable through `fetch` and nothing else, and
+ * `app-test/identity/only-identity-mints.test.ts` fails if another module
+ * imports them.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 
 import { authorizationCodeId, codeState, type CodeState } from "./authorization-code.ts";
-import { createAuth, CONSENT_PAGE, ID_TOKEN_ALG, JWKS_PATH, LOGIN_PAGE } from "./auth.ts";
-import { CLIENT_SECRET_STATE_MESSAGE, ensureOAuthClients, findClientName } from "./client.ts";
-import { readConfig, resetEnabled, usingDevSecret } from "./config.ts";
+import { createAuth, CONSENT_PAGE, ID_TOKEN_ALG, JWKS_PATH, LOGIN_PAGE, type Auth } from "./auth.ts";
+import {
+  ARCADE_PROVIDER_ID,
+  CLIENT_SECRET_STATE_MESSAGE,
+  ensureOAuthClients,
+  findClientName,
+  type OAuthClientCredentials,
+} from "./client.ts";
+import { readConfig, resetEnabled, usingDevSecret, type IdpConfig } from "./config.ts";
 import { countPeople, openPeople } from "./db.ts";
 import { renderConsentPage, renderLoginPage, renderMessagePage } from "./pages.ts";
 import { tolerateAuthorizationCodeReplay } from "./replay-tolerance.ts";
@@ -22,70 +41,55 @@ import { OAuthClientRotatedError, RESET_PATH, resetSummary, runIdpReset } from "
 import { formatTokenLine } from "./token-log.ts";
 
 const SERVICE = "idp";
-const config = readConfig();
 
-const db = await openPeople(config.dbPath);
-const auth = createAuth({ db, baseURL: config.baseURL, secret: config.secret });
+/**
+ * Where the module's own two routes live — what `apps/idp` served at `/health`
+ * and `/admin/reset`. Under a prefix of their own because the app's `/health`
+ * is the app's (DESIGN.md → Readiness), the way the control plane's are under
+ * `/hooks` and the loan module's under `/bank`.
+ */
+export const MOUNT = "/identity";
+export const HEALTH_PATH = `${MOUNT}/health`;
+export const MOUNTED_RESET_PATH = `${MOUNT}${RESET_PATH}`;
 
-// A replayed authorization code must refuse without taking the first
-// exchange's tokens with it (#100). Awaited here, at boot, so a service that
-// is listening is a service with the guard installed.
-//
-// The line names a count, and it is written only when that count is non-zero.
-// A code this service never issued reaches the same revocation path but has
-// nothing minted under it, and saying "kept the rows the first exchange minted"
-// about a code that had no first exchange is a false diagnosis in the one place
-// a reader trusts.
-await tolerateAuthorizationCodeReplay(auth, (model, rows) => {
-  console.log(
-    `[${SERVICE}] replay revocation refused: kept ${rows} ${model} ` +
-      `row${rows === 1 ? "" : "s"} minted by the first exchange of that code ` +
-      `(RFC 6749 §4.1.2 deviation, #100).`,
+/**
+ * Every path this module answers, and so every path the app routes to it.
+ *
+ * The OAuth endpoints hang off the site root, as they did on `apps/idp`: they
+ * are the URLs a human types into the Arcade dashboard, and the issuer an
+ * Arcade User Source matches `iss` against is the bare origin. `/sign-in/…` is
+ * Better Auth's own sign-in, which the login form calls in-process and which
+ * the carried tests call over the wire. Anything else is a 404 from here, so a
+ * Better Auth endpoint nobody routed (`/sign-up/email`, `/get-session`) is not
+ * reachable by accident. `app-test/identity/mount.test.ts` checks the app has a
+ * route for every entry.
+ */
+export const IDENTITY_PATHS = {
+  exact: [LOGIN_PAGE, CONSENT_PAGE, JWKS_PATH, HEALTH_PATH, MOUNTED_RESET_PATH],
+  prefixes: ["/oauth2/", "/.well-known/", "/sign-in/"],
+} as const;
+
+export function isIdentityPath(pathname: string): boolean {
+  return (
+    (IDENTITY_PATHS.exact as readonly string[]).includes(pathname) ||
+    IDENTITY_PATHS.prefixes.some((prefix) => pathname.startsWith(prefix))
   );
-});
+}
 
-// Create-if-absent, one per configured key. Credentials are deliberately not
-// logged: read them with `bun run oauth-client`. Only the fact and the id,
-// which is public anyway.
-const clients = await ensureOAuthClients(auth, { clients: config.clients, secret: config.secret });
+/** What `/identity/health` says. The fields `apps/idp`'s `/health` carried, unchanged. */
+export type IdentityHealth = Record<string, unknown> & { status: "ok"; issuer: string; people: number };
 
-// The first one, which is the whole story for a deployment that never set
-// `IDP_OAUTH_CLIENTS` — every field `/health` published before #79 is this one.
-const client = clients[0]!;
-
-/** Every client id this service will answer for, for the token-endpoint log. */
-const registeredClientIds = clients.map((each) => each.clientId);
+export interface IdentityProvider {
+  /** Every path in {@link IDENTITY_PATHS}; a 404 for anything else. */
+  fetch(request: Request): Promise<Response>;
+  health(): IdentityHealth;
+  config: IdpConfig;
+  /** Closes `idp.db`. For the test harnesses and the runner; the app never closes it. */
+  close(): void;
+}
 
 function html(body: string, status = 200): Response {
   return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
-}
-
-/**
- * Calls a Better Auth endpoint the way its own client would — JSON body,
- * the browser's cookies, and an `Origin` that passes the CSRF check — and
- * returns the raw response so `Set-Cookie` and redirects can be passed on.
- */
-async function callAuth(
-  path: string,
-  body: Record<string, unknown>,
-  incoming: Request,
-): Promise<Response> {
-  const headers = new Headers({
-    "Content-Type": "application/json",
-    Origin: config.baseURL,
-    // A page navigation, so the plugin answers the continued authorize flow
-    // with a redirect rather than a JSON `{ redirect, url }` body.
-    Accept: "text/html",
-    "Sec-Fetch-Mode": "navigate",
-  });
-  for (const name of ["cookie", "user-agent", "x-forwarded-for"]) {
-    const value = incoming.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-
-  return auth.handler(
-    new Request(`${config.baseURL}${path}`, { method: "POST", headers, body: JSON.stringify(body) }),
-  );
 }
 
 /**
@@ -110,22 +114,6 @@ async function redirectFrom(response: Response): Promise<Response | null> {
   return new Response(null, { status: 303, headers });
 }
 
-async function loginPage(
-  url: URL,
-  extra: { error?: string; email?: string; status?: number } = {},
-): Promise<Response> {
-  const clientId = url.searchParams.get("client_id");
-  return html(
-    renderLoginPage({
-      oauthQuery: url.search.slice(1),
-      clientName: clientId ? await findClientName(auth, clientId) : null,
-      error: extra.error,
-      email: extra.email,
-    }),
-    extra.status ?? (extra.error ? 401 : 200),
-  );
-}
-
 /**
  * The provider's own sentence about a failure, when it gave one.
  *
@@ -147,138 +135,6 @@ function providerMessage(body: string): string {
   })();
   const message = typeof parsed?.message === "string" ? parsed.message.trim() : "";
   return message === "" ? "" : ` ${message.slice(0, 200)}`;
-}
-
-async function handleLogin(request: Request): Promise<Response> {
-  const form = await request.formData();
-  const email = String(form.get("email") ?? "").trim();
-  const password = String(form.get("password") ?? "");
-  const oauthQuery = String(form.get("oauth_query") ?? "");
-  const pageUrl = new URL(`${LOGIN_PAGE}?${oauthQuery}`, config.baseURL);
-
-  // `oauth_query` rides along in the sign-in body: the plugin verifies its
-  // signature, and once the session cookie is set it resumes the authorize
-  // flow itself — on to consent, or straight back to Arcade with a code.
-  const body: Record<string, unknown> = { email, password };
-  if (oauthQuery) body.oauth_query = oauthQuery;
-
-  const response = await callAuth("/sign-in/email", body, request);
-
-  if (response.status === 429) {
-    // Refused at the rate limiter, before any password was read (the ceiling
-    // is `RATE_LIMIT.signIn`). Every branch below is about a credential, and
-    // falling past them lands on the 303 a *successful* sign-in gets — so
-    // until #170 a refusal bounced the persona to the provider's home page
-    // with no session and nothing said, which reads exactly like having
-    // signed in. The limiter says how long it will keep saying no; pass that
-    // on rather than inviting an immediate retry that slides the window.
-    const retryAfter = Number(response.headers.get("X-Retry-After"));
-    const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 10;
-    return loginPage(pageUrl, {
-      error: `Too many sign-in attempts from this network. Try again in ${seconds} seconds.`,
-      email,
-      status: 429,
-    });
-  }
-
-  if (response.status === 401 || response.status === 403 || response.status === 400) {
-    // The plugin checks the signed query *before* the password, in a
-    // before-hook, and a query that is tampered with or older than ten minutes
-    // fails there as `invalid_signature`. Telling that persona their password
-    // was wrong would send them retyping it forever — the stale query is in
-    // the hidden field. Tell them the truth and where to restart.
-    const failure = (await response.clone().json().catch(() => null)) as
-      | { error?: string; code?: string }
-      | null;
-    const expired = failure?.error === "invalid_signature" || failure?.code === "INVALID_SIGNATURE";
-
-    return loginPage(pageUrl, {
-      error: expired
-        ? "This sign-in request has expired. Go back to the application and start again."
-        : "That email and password did not match.",
-      email,
-    });
-  }
-  if (response.status >= 400) {
-    // Everything else the provider said, and the reason this branch is one
-    // comparison rather than two. A sign-in that worked is 2xx, and one that
-    // continues an authorize flow arrives as a 3xx with a `Location`, so 400
-    // and above is "not a session" exhaustively.
-    //
-    // Until #170 this read `!response.ok && response.status < 300`, and
-    // `Response.ok` is true only for 200–299 — the two halves intersect at
-    // **1xx**, which this service never returns. So the one branch written to
-    // catch failures could not fire for any of them, and a 500 from a broken
-    // database fell through to the `303 Location: /` below: byte-for-byte what
-    // a successful sign-in with no OAuth flow to continue returns. The persona
-    // landed on the provider's home page with no session and nothing said.
-    //
-    // The page answers 502 rather than echoing the provider's status: this
-    // route exists and did answer, so mirroring a 404 onto `POST /login` would
-    // assert something false about the route. The status that *is* true about
-    // what happened goes in the text, where it is a statement rather than a
-    // header nobody reads.
-    const detail = (await response.clone().text().catch(() => "")).trim();
-    console.log(
-      `[${SERVICE}] POST ${LOGIN_PAGE} failed: status=${response.status} ` +
-        `body=${JSON.stringify(detail.slice(0, 500) || "(empty)")}`,
-    );
-    return html(
-      renderMessagePage(
-        "Sign-in failed",
-        `The identity provider answered ${response.status}.${providerMessage(detail)}`,
-      ),
-      502,
-    );
-  }
-
-  const redirect = await redirectFrom(response);
-  if (redirect) return redirect;
-
-  // Signed in with no OAuth flow to continue: nothing to hand back to.
-  const headers = new Headers({ Location: "/" });
-  for (const cookie of response.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
-  return new Response(null, { status: 303, headers });
-}
-
-async function consentPage(request: Request, url: URL): Promise<Response> {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) {
-    // No session — the plugin would have sent them to login first, so this is
-    // a stale tab or a hand-typed URL. Same query, login page.
-    return Response.redirect(new URL(`${LOGIN_PAGE}${url.search}`, config.baseURL).toString(), 303);
-  }
-
-  const clientId = url.searchParams.get("client_id") ?? "";
-  const clientName = (await findClientName(auth, clientId)) ?? "An application";
-  const scopes = (url.searchParams.get("scope") ?? "").split(/\s+/).filter(Boolean);
-
-  return html(
-    renderConsentPage({
-      oauthQuery: url.search.slice(1),
-      clientName,
-      scopes,
-      user: { name: session.user.name, email: session.user.email },
-    }),
-  );
-}
-
-async function handleConsent(request: Request): Promise<Response> {
-  const form = await request.formData();
-  const accept = form.get("decision") === "allow";
-  const oauthQuery = String(form.get("oauth_query") ?? "");
-
-  const response = await callAuth("/oauth2/consent", { accept, oauth_query: oauthQuery }, request);
-  const redirect = await redirectFrom(response);
-  if (redirect) return redirect;
-
-  if (response.status === 401) {
-    return Response.redirect(new URL(`${LOGIN_PAGE}?${oauthQuery}`, config.baseURL).toString(), 303);
-  }
-  return html(
-    renderMessagePage("Consent failed", `The identity provider answered ${response.status}.`),
-    502,
-  );
 }
 
 /**
@@ -352,7 +208,7 @@ function basicCredentials(authorization: string): { clientId: string; clientSecr
 /**
  * Classifies a token request against RFC 6749 §2.3's one-method rule — which
  * `@better-auth/oauth-provider` enforces in
- * `normalizeClientAuthenticationParameters` (`utils-C2yu_zRr.mjs:541`) by
+ * `normalizeClientAuthenticationParameters` (`utils-CWjOhEQb.mjs:541`) by
  * throwing `invalid_request: "A request must use only one client
  * authentication method"` the moment an `Authorization` header arrives beside a
  * body `client_secret` or a client assertion.
@@ -595,111 +451,340 @@ function bearerIs(request: Request, expected: string): boolean {
 }
 
 /**
- * `POST /admin/reset` (#23) — the same work `scripts/reset.ts` does, for a
- * caller with no shell on this service.
+ * Opens `idp.db`, builds Better Auth over it, installs the replay guard and
+ * reconciles the OAuth clients — what `apps/idp` did at the top of its entry
+ * point, in the same order, with the same boot lines — and returns the handler.
  *
- * A rotated OAuth client is a **500**, not a 200 with a warning in the body.
- * The whole reason this endpoint asserts at all is that the failure it guards
- * against is silent everywhere else: Arcade would go on holding a dead client
- * id and the next authorize would fail before any hook ran. `bun run reset`
- * exits non-zero on a non-2xx, so the one thing a presenter must not miss is
- * the one thing that stops the command.
- *
- * The response names what was **not** reset for the same reason the other two
- * services do: a presenter who reset one and assumed the rest followed is
- * about to go on stage with half a demo.
+ * Throws on anything that would have stopped `apps/idp` from booting: an
+ * unset `BETTER_AUTH_SECRET` in production (`readConfig`), a disk this build
+ * cannot read (`openPeople`), a stranger's client row (`ensureOAuthClients`).
+ * The caller decides what refusing to boot means; the app keeps serving
+ * everything else and answers 503 here (`instance.ts`).
  */
-async function handleReset(): Promise<Response> {
+export async function openIdentityProvider(config: IdpConfig = readConfig()): Promise<IdentityProvider> {
+  const db = await openPeople(config.dbPath);
+  let auth: Auth;
+  let clients: OAuthClientCredentials[];
   try {
-    const result = await runIdpReset({
-      db,
-      auth,
-      clients: config.clients,
-      secret: config.secret,
+    auth = createAuth({ db, baseURL: config.baseURL, secret: config.secret });
+
+    // A replayed authorization code must refuse without taking the first
+    // exchange's tokens with it (#100). Awaited here, at boot, so a service that
+    // is listening is a service with the guard installed.
+    //
+    // The line names a count, and it is written only when that count is non-zero.
+    // A code this service never issued reaches the same revocation path but has
+    // nothing minted under it, and saying "kept the rows the first exchange minted"
+    // about a code that had no first exchange is a false diagnosis in the one place
+    // a reader trusts.
+    await tolerateAuthorizationCodeReplay(auth, (model, rows) => {
+      console.log(
+        `[${SERVICE}] replay revocation refused: kept ${rows} ${model} ` +
+          `row${rows === 1 ? "" : "s"} minted by the first exchange of that code ` +
+          `(RFC 6749 §4.1.2 deviation, #100).`,
+      );
     });
-    console.log(`[${SERVICE}] ${resetSummary(config.dbPath, result)}`);
-    return Response.json({
-      service: SERVICE,
-      reset: "idp.db",
-      ...result,
-      not_reset: {
-        oauthClient:
-          "untouched, and asserted unchanged on both sides of the reset — it is the client id and secret Arcade is registered against",
-        jwks: "untouched — new signing keys would be rejected by anything holding the old key set",
-        other_services:
-          "nothing outside this database: every other service resets its own through its own endpoint, and `bun run reset` at the repo root calls all of them in order",
-      },
-    });
+
+    // Create-if-absent, one per configured key. Credentials are deliberately not
+    // logged: read them with `bun run oauth-client`. Only the fact and the id,
+    // which is public anyway.
+    clients = await ensureOAuthClients(auth, { clients: config.clients, secret: config.secret });
   } catch (cause) {
-    if (!(cause instanceof OAuthClientRotatedError)) throw cause;
-    console.error(`[${SERVICE}] ${cause.message}`);
-    return Response.json(
-      { service: SERVICE, error: cause.message, oauth_client_rotated: cause.rotations },
-      { status: 500 },
+    // Leave no open handle behind a boot that did not happen.
+    db.close();
+    throw cause;
+  }
+
+  // The first one, which is the whole story for a deployment that never set
+  // `IDP_OAUTH_CLIENTS` — every field `/health` published before #79 is this one.
+  const client = clients[0]!;
+
+  /** Every client id this service will answer for, for the token-endpoint log. */
+  const registeredClientIds = clients.map((each) => each.clientId);
+
+  /**
+   * Calls a Better Auth endpoint the way its own client would — JSON body,
+   * the browser's cookies, and an `Origin` that passes the CSRF check — and
+   * returns the raw response so `Set-Cookie` and redirects can be passed on.
+   */
+  async function callAuth(
+    path: string,
+    body: Record<string, unknown>,
+    incoming: Request,
+  ): Promise<Response> {
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      Origin: config.baseURL,
+      // A page navigation, so the plugin answers the continued authorize flow
+      // with a redirect rather than a JSON `{ redirect, url }` body.
+      Accept: "text/html",
+      "Sec-Fetch-Mode": "navigate",
+    });
+    for (const name of ["cookie", "user-agent", "x-forwarded-for"]) {
+      const value = incoming.headers.get(name);
+      if (value) headers.set(name, value);
+    }
+
+    return auth.handler(
+      new Request(`${config.baseURL}${path}`, { method: "POST", headers, body: JSON.stringify(body) }),
     );
   }
-}
 
-const server = Bun.serve({
-  port: config.port,
-  idleTimeout: 60,
-  async fetch(request) {
-    const url = new URL(request.url);
-    const { pathname } = url;
+  async function loginPage(
+    url: URL,
+    extra: { error?: string; email?: string; status?: number } = {},
+  ): Promise<Response> {
+    const clientId = url.searchParams.get("client_id");
+    return html(
+      renderLoginPage({
+        oauthQuery: url.search.slice(1),
+        clientName: clientId ? await findClientName(auth, clientId) : null,
+        error: extra.error,
+        email: extra.email,
+      }),
+      extra.status ?? (extra.error ? 401 : 200),
+    );
+  }
 
-    if (request.method === "GET" && pathname === "/health") {
-      return Response.json({
-        status: "ok",
-        service: SERVICE,
-        issuer: config.baseURL,
-        people: countPeople(db),
-        oauth: {
-          client_id: client.clientId,
-          authorize: `${config.baseURL}/oauth2/authorize`,
-          token: `${config.baseURL}/oauth2/token`,
-          userinfo: `${config.baseURL}/oauth2/userinfo`,
-          jwks: `${config.baseURL}${JWKS_PATH}`,
-          id_token_signing_alg: ID_TOKEN_ALG,
-          // What the client row registers for at the token endpoint, and
-          // therefore the one value the Arcade dashboard's "client
-          // authentication" field may hold. Reported because the reconcile in
-          // `ensureOAuthClient` is otherwise invisible: a row still on
-          // `client_secret_post` fails server-to-server, fires no hook, and
-          // leaves the panel dark (#61).
-          token_endpoint_auth_method: client.tokenEndpointAuthMethod,
-          // What happened to the stored client secret when this process
-          // booted. `rotated` is the one that costs a human a re-registration
-          // in the Arcade dashboard, and #70 exists because that is otherwise
-          // indistinguishable from a service that came up fine (the failure
-          // lands at the authorize step, where no hook fires).
-          client_secret_state: client.secretState,
-          client_secret_note: CLIENT_SECRET_STATE_MESSAGE[client.secretState],
-          // Every configured client, first one first (#79). A deployment that
-          // never set `IDP_OAUTH_CLIENTS` has exactly one entry here, and that
-          // entry is the object above — which is how a human checks from
-          // outside whether a second registration exists at all, rather than
-          // inferring it from a dashboard they may not be looking at.
-          clients: clients.map((each) => ({
-            key: each.key,
-            name: each.name,
-            client_id: each.clientId,
-            redirect_uris: each.redirectUris,
-            token_endpoint_auth_method: each.tokenEndpointAuthMethod,
-            client_secret_state: each.secretState,
-          })),
-          // What the token endpoint does with Arcade's duplicated credentials
-          // (#79). Stated because it is a deviation from RFC 6749 §2.3 and a
-          // reviewer should not have to read the source to find its bounds.
-            duplicate_client_credentials:
-            "accepted when the Authorization: Basic pair and the body client_id/client_secret pair are identical; refused invalid_request when they differ",
-        },
-        // Named even when it is off, so the 404 `bun run reset` gets has
-        // somewhere to be explained (#23).
-        reset: resetEnabled(config) ? "enabled" : "disabled",
+  async function handleLogin(request: Request): Promise<Response> {
+    const form = await request.formData();
+    const email = String(form.get("email") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+    const oauthQuery = String(form.get("oauth_query") ?? "");
+    const pageUrl = new URL(`${LOGIN_PAGE}?${oauthQuery}`, config.baseURL);
+
+    // `oauth_query` rides along in the sign-in body: the plugin verifies its
+    // signature, and once the session cookie is set it resumes the authorize
+    // flow itself — on to consent, or straight back to Arcade with a code.
+    const body: Record<string, unknown> = { email, password };
+    if (oauthQuery) body.oauth_query = oauthQuery;
+
+    const response = await callAuth("/sign-in/email", body, request);
+
+    if (response.status === 429) {
+      // Refused at the rate limiter, before any password was read (the ceiling
+      // is `RATE_LIMIT.signIn`). Every branch below is about a credential, and
+      // falling past them lands on the 303 a *successful* sign-in gets — so
+      // until #170 a refusal bounced the persona to the provider's home page
+      // with no session and nothing said, which reads exactly like having
+      // signed in. The limiter says how long it will keep saying no; pass that
+      // on rather than inviting an immediate retry that slides the window.
+      const retryAfter = Number(response.headers.get("X-Retry-After"));
+      const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : 10;
+      return loginPage(pageUrl, {
+        error: `Too many sign-in attempts from this network. Try again in ${seconds} seconds.`,
+        email,
+        status: 429,
       });
     }
 
-    if (pathname === RESET_PATH) {
+    if (response.status === 401 || response.status === 403 || response.status === 400) {
+      // The plugin checks the signed query *before* the password, in a
+      // before-hook, and a query that is tampered with or older than ten minutes
+      // fails there as `invalid_signature`. Telling that persona their password
+      // was wrong would send them retyping it forever — the stale query is in
+      // the hidden field. Tell them the truth and where to restart.
+      const failure = (await response.clone().json().catch(() => null)) as
+        | { error?: string; code?: string }
+        | null;
+      const expired = failure?.error === "invalid_signature" || failure?.code === "INVALID_SIGNATURE";
+
+      return loginPage(pageUrl, {
+        error: expired
+          ? "This sign-in request has expired. Go back to the application and start again."
+          : "That email and password did not match.",
+        email,
+      });
+    }
+    if (response.status >= 400) {
+      // Everything else the provider said, and the reason this branch is one
+      // comparison rather than two. A sign-in that worked is 2xx, and one that
+      // continues an authorize flow arrives as a 3xx with a `Location`, so 400
+      // and above is "not a session" exhaustively.
+      //
+      // Until #170 this read `!response.ok && response.status < 300`, and
+      // `Response.ok` is true only for 200–299 — the two halves intersect at
+      // **1xx**, which this service never returns. So the one branch written to
+      // catch failures could not fire for any of them, and a 500 from a broken
+      // database fell through to the `303 Location: /` below: byte-for-byte what
+      // a successful sign-in with no OAuth flow to continue returns. The persona
+      // landed on the provider's home page with no session and nothing said.
+      //
+      // The page answers 502 rather than echoing the provider's status: this
+      // route exists and did answer, so mirroring a 404 onto `POST /login` would
+      // assert something false about the route. The status that *is* true about
+      // what happened goes in the text, where it is a statement rather than a
+      // header nobody reads.
+      const detail = (await response.clone().text().catch(() => "")).trim();
+      console.log(
+        `[${SERVICE}] POST ${LOGIN_PAGE} failed: status=${response.status} ` +
+          `body=${JSON.stringify(detail.slice(0, 500) || "(empty)")}`,
+      );
+      return html(
+        renderMessagePage(
+          "Sign-in failed",
+          `The identity provider answered ${response.status}.${providerMessage(detail)}`,
+        ),
+        502,
+      );
+    }
+
+    const redirect = await redirectFrom(response);
+    if (redirect) return redirect;
+
+    // Signed in with no OAuth flow to continue: nothing to hand back to.
+    const headers = new Headers({ Location: "/" });
+    for (const cookie of response.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
+    return new Response(null, { status: 303, headers });
+  }
+
+  async function consentPage(request: Request, url: URL): Promise<Response> {
+    const session = await auth.api.getSession({ headers: request.headers });
+    if (!session) {
+      // No session — the plugin would have sent them to login first, so this is
+      // a stale tab or a hand-typed URL. Same query, login page.
+      return Response.redirect(new URL(`${LOGIN_PAGE}${url.search}`, config.baseURL).toString(), 303);
+    }
+
+    const clientId = url.searchParams.get("client_id") ?? "";
+    const clientName = (await findClientName(auth, clientId)) ?? "An application";
+    const scopes = (url.searchParams.get("scope") ?? "").split(/\s+/).filter(Boolean);
+
+    return html(
+      renderConsentPage({
+        oauthQuery: url.search.slice(1),
+        clientName,
+        scopes,
+        user: { name: session.user.name, email: session.user.email },
+      }),
+    );
+  }
+
+  async function handleConsent(request: Request): Promise<Response> {
+    const form = await request.formData();
+    const accept = form.get("decision") === "allow";
+    const oauthQuery = String(form.get("oauth_query") ?? "");
+
+    const response = await callAuth("/oauth2/consent", { accept, oauth_query: oauthQuery }, request);
+    const redirect = await redirectFrom(response);
+    if (redirect) return redirect;
+
+    if (response.status === 401) {
+      return Response.redirect(new URL(`${LOGIN_PAGE}?${oauthQuery}`, config.baseURL).toString(), 303);
+    }
+    return html(
+      renderMessagePage("Consent failed", `The identity provider answered ${response.status}.`),
+      502,
+    );
+  }
+
+  /**
+   * `POST /admin/reset` (#23) — the same work `scripts/reset.ts` does, for a
+   * caller with no shell on this service.
+   *
+   * A rotated OAuth client is a **500**, not a 200 with a warning in the body.
+   * The whole reason this endpoint asserts at all is that the failure it guards
+   * against is silent everywhere else: Arcade would go on holding a dead client
+   * id and the next authorize would fail before any hook ran. `bun run reset`
+   * exits non-zero on a non-2xx, so the one thing a presenter must not miss is
+   * the one thing that stops the command.
+   *
+   * The response names what was **not** reset for the same reason the other two
+   * services do: a presenter who reset one and assumed the rest followed is
+   * about to go on stage with half a demo.
+   */
+  async function handleReset(): Promise<Response> {
+    try {
+      const result = await runIdpReset({
+        db,
+        auth,
+        clients: config.clients,
+        secret: config.secret,
+      });
+      console.log(`[${SERVICE}] ${resetSummary(config.dbPath, result)}`);
+      return Response.json({
+        service: SERVICE,
+        reset: "idp.db",
+        ...result,
+        not_reset: {
+          oauthClient:
+            "untouched, and asserted unchanged on both sides of the reset — it is the client id and secret Arcade is registered against",
+          jwks: "untouched — new signing keys would be rejected by anything holding the old key set",
+          other_services:
+            "nothing outside this database: every other service resets its own through its own endpoint, and `bun run reset` at the repo root calls all of them in order",
+        },
+      });
+    } catch (cause) {
+      if (!(cause instanceof OAuthClientRotatedError)) throw cause;
+      console.error(`[${SERVICE}] ${cause.message}`);
+      return Response.json(
+        { service: SERVICE, error: cause.message, oauth_client_rotated: cause.rotations },
+        { status: 500 },
+      );
+    }
+  }
+
+  function health(): IdentityHealth {
+    return {
+      status: "ok",
+      service: SERVICE,
+      issuer: config.baseURL,
+      people: countPeople(db),
+      oauth: {
+        client_id: client.clientId,
+        authorize: `${config.baseURL}/oauth2/authorize`,
+        token: `${config.baseURL}/oauth2/token`,
+        userinfo: `${config.baseURL}/oauth2/userinfo`,
+        jwks: `${config.baseURL}${JWKS_PATH}`,
+        id_token_signing_alg: ID_TOKEN_ALG,
+        // What the client row registers for at the token endpoint, and
+        // therefore the one value the Arcade dashboard's "client
+        // authentication" field may hold. Reported because the reconcile in
+        // `ensureOAuthClient` is otherwise invisible: a row still on
+        // `client_secret_post` fails server-to-server, fires no hook, and
+        // leaves the panel dark (#61).
+        token_endpoint_auth_method: client.tokenEndpointAuthMethod,
+        // What happened to the stored client secret when this process
+        // booted. `rotated` is the one that costs a human a re-registration
+        // in the Arcade dashboard, and #70 exists because that is otherwise
+        // indistinguishable from a service that came up fine (the failure
+        // lands at the authorize step, where no hook fires).
+        client_secret_state: client.secretState,
+        client_secret_note: CLIENT_SECRET_STATE_MESSAGE[client.secretState],
+        // Every configured client, first one first (#79). A deployment that
+        // never set `IDP_OAUTH_CLIENTS` has exactly one entry here, and that
+        // entry is the object above — which is how a human checks from
+        // outside whether a second registration exists at all, rather than
+        // inferring it from a dashboard they may not be looking at.
+        clients: clients.map((each) => ({
+          key: each.key,
+          name: each.name,
+          client_id: each.clientId,
+          redirect_uris: each.redirectUris,
+          token_endpoint_auth_method: each.tokenEndpointAuthMethod,
+          client_secret_state: each.secretState,
+        })),
+        // What the token endpoint does with Arcade's duplicated credentials
+        // (#79). Stated because it is a deviation from RFC 6749 §2.3 and a
+        // reviewer should not have to read the source to find its bounds.
+          duplicate_client_credentials:
+          "accepted when the Authorization: Basic pair and the body client_id/client_secret pair are identical; refused invalid_request when they differ",
+      },
+      // Named even when it is off, so the 404 `bun run reset` gets has
+      // somewhere to be explained (#23).
+      reset: resetEnabled(config) ? "enabled" : "disabled",
+    };
+  }
+
+  async function fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const { pathname } = url;
+
+    if (!isIdentityPath(pathname)) return Response.json({ error: "Not found" }, { status: 404 });
+
+    if (request.method === "GET" && pathname === HEALTH_PATH) return Response.json(health());
+
+    if (pathname === MOUNTED_RESET_PATH) {
       // Unset token: the route does not exist. A 404 and not a 403, so an
       // unconfigured deployment is indistinguishable from one that never had
       // the endpoint; /health says `reset: "disabled"`, which is where the
@@ -721,15 +806,6 @@ const server = Bun.serve({
     if (pathname === CONSENT_PAGE) {
       if (request.method === "GET") return consentPage(request, url);
       if (request.method === "POST") return handleConsent(request);
-    }
-
-    if (request.method === "GET" && pathname === "/") {
-      return html(
-        renderMessagePage(
-          "Enterprise Identity",
-          "This is the demo's identity provider. Sign-in happens when an application sends you here.",
-        ),
-      );
     }
 
     // The token endpoint, wrapped for two things: Arcade's duplicated
@@ -834,47 +910,50 @@ const server = Bun.serve({
       return response;
     }
 
-    // Everything else is Better Auth: /oauth2/*, /.well-known/*, /sign-in/*, ...
+    // Everything else in `IDENTITY_PATHS` is Better Auth: /oauth2/*,
+    // /.well-known/*, /jwks, /sign-in/*.
     return auth.handler(request);
-  },
-});
+  }
 
-console.log(
-  `[${SERVICE}] listening on :${server.port} — issuer ${config.baseURL}, ` +
-    `${countPeople(db)} people in ${config.dbPath}, ` +
-    `OAuth client${clients.length > 1 ? "s" : ""} ` +
-    `${clients.map((each) => `${each.clientId} (${each.key}, ${each.created ? "created" : "existing"})`).join(", ")}, ` +
-    `JWKS ${config.baseURL}${JWKS_PATH} (${ID_TOKEN_ALG})` +
-    (usingDevSecret(config) ? " — using the development secret" : ""),
-);
-
-console.log(
-  resetEnabled(config)
-    ? `[${SERVICE}] POST ${RESET_PATH} is enabled (bearer RESET_TOKEN)`
-    : `[${SERVICE}] POST ${RESET_PATH} is disabled: RESET_TOKEN is unset, so the route answers 404`,
-);
-
-// Its own line, and on stderr when it is the one that costs a human something,
-// so `render logs` shows it without anyone having to know to look. The secret
-// itself is never printed here, whatever happened to it — `bun run
-// oauth-client --rotate` is the only thing that prints one.
-for (const each of clients) {
-  const label = clients.length > 1 ? `OAuth client secret (${each.key})` : "OAuth client secret";
-  const secretLine = `[${SERVICE}] ${label}: ${CLIENT_SECRET_STATE_MESSAGE[each.secretState]}`;
-  if (each.secretState === "rotated") console.error(secretLine);
-  else console.log(secretLine);
-}
-
-// The other thing that can cost a human a field in the Arcade dashboard, and
-// the one this boot may just have changed underneath them. On stderr for the
-// same reason the rotation line is: `render logs` shows it without anyone
-// having to know to look.
-for (const each of clients.filter((candidate) => candidate.authMethodReconciled)) {
-  console.error(
-    `[${SERVICE}] OAuth client token auth method reconciled to ` +
-      `${each.tokenEndpointAuthMethod} (#61)${clients.length > 1 ? ` for "${each.key}"` : ""}. ` +
-      `The Arcade cg-idp provider's ` +
-      `"client authentication" must now be ${each.tokenEndpointAuthMethod} — ` +
-      `the credentials are unchanged, and the other form is refused with invalid_client.`,
+  console.log(
+    `[${SERVICE}] identity provider ready — issuer ${config.baseURL}, ` +
+      `${countPeople(db)} people in ${config.dbPath}, ` +
+      `OAuth client${clients.length > 1 ? "s" : ""} ` +
+      `${clients.map((each) => `${each.clientId} (${each.key}, ${each.created ? "created" : "existing"})`).join(", ")}, ` +
+      `JWKS ${config.baseURL}${JWKS_PATH} (${ID_TOKEN_ALG})` +
+      (usingDevSecret(config) ? " — using the development secret" : ""),
   );
+
+  console.log(
+    resetEnabled(config)
+      ? `[${SERVICE}] POST ${MOUNTED_RESET_PATH} is enabled (bearer RESET_TOKEN)`
+      : `[${SERVICE}] POST ${MOUNTED_RESET_PATH} is disabled: RESET_TOKEN is unset, so the route answers 404`,
+  );
+
+  // Its own line, and on stderr when it is the one that costs a human something,
+  // so `render logs` shows it without anyone having to know to look. The secret
+  // itself is never printed here, whatever happened to it — `bun run
+  // oauth-client --rotate` is the only thing that prints one.
+  for (const each of clients) {
+    const label = clients.length > 1 ? `OAuth client secret (${each.key})` : "OAuth client secret";
+    const secretLine = `[${SERVICE}] ${label}: ${CLIENT_SECRET_STATE_MESSAGE[each.secretState]}`;
+    if (each.secretState === "rotated") console.error(secretLine);
+    else console.log(secretLine);
+  }
+
+  // The other thing that can cost a human a field in the Arcade dashboard, and
+  // the one this boot may just have changed underneath them. On stderr for the
+  // same reason the rotation line is: `render logs` shows it without anyone
+  // having to know to look.
+  for (const each of clients.filter((candidate) => candidate.authMethodReconciled)) {
+    console.error(
+      `[${SERVICE}] OAuth client token auth method reconciled to ` +
+        `${each.tokenEndpointAuthMethod} (#61)${clients.length > 1 ? ` for "${each.key}"` : ""}. ` +
+        `The Arcade ${ARCADE_PROVIDER_ID} provider's ` +
+        `"client authentication" must now be ${each.tokenEndpointAuthMethod} — ` +
+        `the credentials are unchanged, and the other form is refused with invalid_client.`,
+    );
+  }
+
+  return { fetch, health, config, close: () => db.close() };
 }

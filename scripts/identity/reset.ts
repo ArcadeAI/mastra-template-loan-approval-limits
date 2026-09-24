@@ -4,17 +4,17 @@
  * touched**, so the credentials registered in the Arcade dashboard keep
  * working. See `src/reset.ts` for why that is asserted rather than assumed.
  *
- *   bun run --cwd apps/idp reset
+ *   bun run identity:reset
  *
  * This is the shell-on-the-service path. `bun run reset` at the repo root does
  * the same work through `POST /admin/reset`, which is the one to reach for
  * when there is no shell — and the only one that reaches the running image
  * rather than whichever instance a shell attached to.
  */
-import { createAuth } from "../src/auth.ts";
-import { readConfig } from "../src/config.ts";
-import { openPeople } from "../src/db.ts";
-import { OAuthClientRotatedError, resetSummary, runIdpReset } from "../src/reset.ts";
+import { createAuth } from "../../lib/identity/provider/auth.ts";
+import { readConfig } from "../../lib/identity/provider/config.ts";
+import { openPeople } from "../../lib/identity/provider/db.ts";
+import { OAuthClientRotatedError, resetSummary, runIdpReset } from "../../lib/identity/provider/reset.ts";
 
 const config = readConfig();
 const db = await openPeople(config.dbPath);

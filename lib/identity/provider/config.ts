@@ -32,9 +32,15 @@ export interface OAuthClientSpec {
 export interface IdpConfig {
   port: number;
   dbPath: string;
-  /** Public origin and OAuth issuer. */
+  /**
+   * Public origin and OAuth issuer: the app's own, `APP_PUBLIC_HOST` with its
+   * scheme (#6). The identity module is served by the app on the app's port,
+   * so the issuer an Arcade User Source matches `iss` against, the origin
+   * Better Auth sets its session cookie on and the origin the custom verifier
+   * reads the app's sealed session from are one origin, by construction.
+   */
   baseURL: string;
-  /** True when nothing set the public URL and `baseURL` is the localhost fallback. */
+  /** True when nothing set `APP_PUBLIC_HOST` and `baseURL` is the localhost fallback. */
   baseURLIsFallback: boolean;
   secret: string;
   /** The first client's redirect URIs. Same value as `clients[0].redirectUris`. */
@@ -120,22 +126,41 @@ function readClients(env: Record<string, string | undefined>, sharedUris: string
   });
 }
 
+/**
+ * The issuer: `APP_PUBLIC_HOST` with its scheme, no trailing slash (#6).
+ *
+ * http for a localhost or 127.0.0.1 host and https for anything else, so a
+ * local run needs no tunnel and the ngrok host is https. The same rule as the
+ * app's `appOrigin` (`lib/config.ts`), written out here rather than imported
+ * because this module depends on nothing else in the app — a forker with a
+ * real IdP deletes it — and `app-test/identity/issuer.test.ts` fails if the
+ * two ever disagree. Unset, it is the app's own port on localhost.
+ */
+export function issuerOf(env: Record<string, string | undefined>): string {
+  const host = env.APP_PUBLIC_HOST?.trim() || `localhost:${env.PORT?.trim() || "3000"}`;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host)) {
+    throw new Error(`APP_PUBLIC_HOST=${host} is a URL; it is HOST-form, and the scheme is added here`);
+  }
+  const local = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  return `${local ? "http" : "https"}://${host}`.replace(/\/+$/, "");
+}
+
 export function readConfig(env: Record<string, string | undefined> = process.env): IdpConfig {
   // Validate before opening the database. An obsolete name-based variable
   // must not leave this service apparently healthy while seeding fixture
   // addresses.
   readPersonaEmailOverrides(env);
-  const port = Number(env.PORT ?? 8083);
+  const port = Number(env.PORT ?? 3000);
 
   const secret = env.BETTER_AUTH_SECRET?.trim();
   if (!secret && env.NODE_ENV === "production") {
     throw new Error("BETTER_AUTH_SECRET is required in production");
   }
 
-  // Render injects RENDER_EXTERNAL_URL into every service, so on Render
-  // nothing has to be configured; locally the fallback is the port.
-  const configuredURL = env.IDP_PUBLIC_URL?.trim() || env.RENDER_EXTERNAL_URL?.trim();
-  const baseURL = (configuredURL || `http://localhost:${port}`).replace(/\/+$/, "");
+  // The app's own origin since #6, which replaced `IDP_PUBLIC_URL`: http for
+  // a localhost or 127.0.0.1 host, https for anything else, so a local run
+  // needs no tunnel. Unset, it is the app's own port on localhost.
+  const baseURL = issuerOf(env);
 
   const redirectUris = splitList(env.IDP_OAUTH_REDIRECT_URIS ?? DEFAULT_ARCADE_REDIRECT_URI);
   const clients = readClients(env, redirectUris);
@@ -144,7 +169,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     port,
     dbPath: env.IDP_DB_PATH ?? "./idp.db",
     baseURL,
-    baseURLIsFallback: !configuredURL,
+    baseURLIsFallback: !env.APP_PUBLIC_HOST?.trim(),
     secret: secret || DEV_SECRET,
     redirectUris: clients[0]!.redirectUris,
     clients,

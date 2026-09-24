@@ -25,6 +25,18 @@ import type { Auth } from "./auth.ts";
 import { decryptLegacyClientSecret, hashClientSecret, SCOPES } from "./auth.ts";
 import { PRIMARY_CLIENT_KEY, type OAuthClientSpec } from "./config.ts";
 
+/**
+ * The id the Arcade auth provider for hop 2 is registered under, and the one
+ * `tools/loan` names in `OAuth2(id=...)` (`IDP_PROVIDER_ID` there). Fixed, not
+ * configurable: the toolkit reads it at import, and the README tells a
+ * developer to register the provider under exactly this string. `cg-idp`, the
+ * demo's service name, until #6. Named here only so the messages that tell a
+ * human which registration went stale say the right one;
+ * `app-test/identity/provider-id.test.ts` fails if it and the toolkit's
+ * disagree.
+ */
+export const ARCADE_PROVIDER_ID = "app-identity";
+
 /** Shown on the login and consent pages: "Arcade is asking you to sign in." */
 export const OAUTH_CLIENT_NAME = "Arcade";
 
@@ -57,7 +69,7 @@ export const REQUIRE_PKCE = true;
  *
  * First, `@better-auth/oauth-provider` permits **exactly one** method per
  * client, and checks it *before* it checks the secret
- * (`utils-C2yu_zRr.mjs:640`):
+ * (`utils-CWjOhEQb.mjs:640`):
  *
  * ```js
  * const registeredAuthMethod = client.tokenEndpointAuthMethod ?? "client_secret_basic";
@@ -121,7 +133,7 @@ export const CLIENT_SECRET_STATE_MESSAGE: Record<ClientSecretState, string> = {
   migrated:
     "re-hashed in place from the pre-#70 encrypted form; client id and secret UNCHANGED, the Arcade registration is still valid",
   rotated:
-    "ROTATED: the pre-#70 encrypted secret could not be decrypted with this BETTER_AUTH_SECRET. The Arcade cg-idp provider MUST be re-registered — run `bun run oauth-client --rotate` to print a readable secret",
+    `ROTATED: the pre-#70 encrypted secret could not be decrypted with this BETTER_AUTH_SECRET. The Arcade ${ARCADE_PROVIDER_ID} provider MUST be re-registered — run \`bun run oauth-client --rotate\` to print a readable secret`,
 };
 
 export interface OAuthClientCredentials {

@@ -5,17 +5,21 @@
  *     bun run reset --hard          # ...and the IdP, which signs every persona out
  *     bun run reset --target render # either of the above, against the deployed ones
  *
- * Three databases, three services — but **not on every run**:
+ * Three databases, three modules of the one app — but **not on every run**:
  *
- *     apps/hooks      POST /admin/reset   {"mode":"demo"} — the four policy
- *                                         tables from the fixture, and grants,
- *                                         approval requests and the audit log
- *                                         emptied
- *     the app         POST /bank/admin/reset   the loan book, LN-2291 unapproved
- *                                         (the loan module; `apps/loan-app`
- *                                         until #5)
- *     apps/idp        POST /admin/reset   people, sessions, tokens, consents
- *                                         — `--hard` only
+ *     control plane   POST /hooks/admin/reset   {"mode":"demo"} — the four
+ *                                         policy tables from the fixture, and
+ *                                         grants, approval requests and the
+ *                                         audit log emptied (`apps/hooks`
+ *                                         until #4)
+ *     loan module     POST /bank/admin/reset   the loan book, LN-2291 unapproved
+ *                                         (`apps/loan-app` until #5)
+ *     identity        POST /identity/admin/reset   people, sessions, tokens,
+ *                                         consents — `--hard` only
+ *                                         (`apps/idp` until #6)
+ *
+ * All three at one address since #6: `APP_PUBLIC_HOST`, or
+ * `RENDER_APP_PUBLIC_HOST` with `--target render`.
  *
  * ## Why the IdP is not in the default run (#123)
  *
@@ -101,12 +105,16 @@ interface ServiceSpec {
   hostVar: Record<Target, string>;
   body?: unknown;
   /**
-   * Its reset endpoint. `/admin/reset` for the services; `/hooks/admin/reset`
-   * for the control plane since #4, which the app mounts under `/hooks`, and
-   * `/bank/admin/reset` for the loan module since #5, mounted under `/bank`.
+   * Its reset endpoint: `/hooks/admin/reset` for the control plane since #4,
+   * which the app mounts under `/hooks`, `/bank/admin/reset` for the loan
+   * module since #5, mounted under `/bank`, and `/identity/admin/reset` for
+   * the identity module since #6, mounted under `/identity`.
    */
-  resetPath?: string;
+  resetPath: string;
 }
+
+/** The one address every module is reset at, since #6 made them one app. */
+const APP_HOST: Record<Target, string> = { local: "APP_PUBLIC_HOST", render: "RENDER_APP_PUBLIC_HOST" };
 
 /**
  * Identity first when it runs at all. It is the only one whose failure means
@@ -115,8 +123,9 @@ interface ServiceSpec {
  */
 const IDP: ServiceSpec = {
   label: "idp",
-  render: "cg-idp",
-  hostVar: { local: "IDP_PUBLIC_HOST", render: "RENDER_IDP_PUBLIC_HOST" },
+  render: "cg-web",
+  hostVar: APP_HOST,
+  resetPath: "/identity/admin/reset",
 };
 
 /**
@@ -131,18 +140,18 @@ const BETWEEN_TAKES: ServiceSpec[] = [
   // command exists to replace.
   {
     label: "hooks",
-    render: "cg-hooks",
-    hostVar: { local: "HOOKS_PUBLIC_HOST", render: "RENDER_HOOKS_PUBLIC_HOST" },
+    render: "cg-web",
+    hostVar: APP_HOST,
     body: { mode: "demo" },
     resetPath: "/hooks/admin/reset",
   },
   // The loan module, in the app since #5. Still labelled `loan-app`, because
   // that is what its reset answers as and what a presenter reads in this
-  // output. `LOAN_APP_PUBLIC_HOST` is the app's host now.
+  // output.
   {
     label: "loan-app",
-    render: "cg-loan-app",
-    hostVar: { local: "LOAN_APP_PUBLIC_HOST", render: "RENDER_LOAN_APP_PUBLIC_HOST" },
+    render: "cg-web",
+    hostVar: APP_HOST,
     resetPath: "/bank/admin/reset",
   },
 ];
@@ -182,7 +191,7 @@ export const SOFT_SKIP_LINE =
  * would have sent someone to a dashboard to fix something that was not broken.
  */
 export const HARD_SIGNOUT_NOTICE =
-  "All four personas are signed out and their consents are gone. Each one now needs a cg-idp " +
+  "All four personas are signed out and their consents are gone. Each one now needs a sign-in " +
   "login, and their first governed tool call raises the hop-2 authorization card — authorize, " +
   "then Continue. That is the flow this reset exists to make demonstrable (#174); budget the " +
   "clicks before you are on stage.";
@@ -227,11 +236,10 @@ function requireToken(env: Record<string, string | undefined>): string {
   const token = env.RESET_TOKEN?.trim() ?? "";
   if (token.length > 0) return token;
   throw new ResetConfigError(
-    "RESET_TOKEN is unset. It is the bearer all three services require, it has no development " +
-      "default, and without it each of them answers 404 on /admin/reset. Generate one with " +
-      "`openssl rand -hex 32`, set it on cg-web (which holds the control plane since #4), cg-idp " +
-      "and cg-loan-app, and put the " +
-      "same value in .env.local here.",
+    "RESET_TOKEN is unset. It is the bearer all three modules require, it has no development " +
+      "default, and without it each of them answers 404 on its admin/reset route. Generate one " +
+      "with `openssl rand -hex 32`, set it on the app (which holds the control plane, the loan " +
+      "module and the identity module since #6), and put the same value in .env.local here.",
   );
 }
 
@@ -291,13 +299,13 @@ async function resetOne(
   // same response that claims nothing moved.
   let clientsBefore: { key: string; client_id: string }[] | null = null;
   if (spec.label === "idp") {
-    const health = (await readJson(`${origin}/health`, options)) as IdpHealth | null;
+    const health = (await readJson(`${origin}/identity/health`, options)) as IdpHealth | null;
     clientsBefore = health?.oauth?.clients ?? null;
   }
 
   let response: Response;
   try {
-    response = await options.fetch(`${origin}${spec.resetPath ?? "/admin/reset"}`, {
+    response = await options.fetch(`${origin}${spec.resetPath}`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       ...(spec.body === undefined ? {} : { body: JSON.stringify(spec.body) }),
@@ -332,7 +340,7 @@ async function resetOne(
         label: spec.label,
         ok: false,
         line:
-          `${label} OAUTH CLIENT ROTATED  ${moved.join(", ")} — the Arcade cg-idp provider ` +
+          `${label} OAUTH CLIENT ROTATED  ${moved.join(", ")} — the Arcade app-identity provider ` +
           "registration is now stale and must be re-registered by hand. Authorization will fail " +
           "before any hook runs, so nothing on the panel will say why.",
       };
@@ -421,7 +429,7 @@ export async function runReset(options: ResetOptions): Promise<ResetOutcome> {
   const specs = servicesFor(hard);
 
   // Only the addresses this run will actually use. A soft run that demanded
-  // IDP_PUBLIC_HOST would refuse to put the loan book back because of a
+  // IDENTITY_HOST would refuse to put the loan book back because of a
   // variable it was never going to read.
   log(
     `[reset] target ${options.target}, scope ${hard ? "hard (includes the IdP)" : "between-takes"} — ` +

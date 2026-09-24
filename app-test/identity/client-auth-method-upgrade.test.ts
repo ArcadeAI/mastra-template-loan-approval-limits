@@ -24,7 +24,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-auth-method-${crypto.randomUUID()}`, "idp.db");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
 const SECRET = "test-secret-".padEnd(48, "x");
@@ -60,7 +60,7 @@ function baseEnv(port: number): Record<string, string> {
     ...inherited,
     PORT: String(port),
     IDP_DB_PATH: dbPath,
-    IDP_PUBLIC_URL: `http://127.0.0.1:${port}`,
+    APP_PUBLIC_HOST: new URL(`http://127.0.0.1:${port}`).host,
     IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
     BETTER_AUTH_SECRET: SECRET,
   };
@@ -89,7 +89,7 @@ async function boot(): Promise<{ baseUrl: string; stderr: () => Promise<string> 
   const baseUrl = `http://127.0.0.1:${port}`;
   env = baseEnv(port);
 
-  const child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+  const child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
     env,
     stdout: "pipe",
     stderr: "pipe",
@@ -99,7 +99,7 @@ async function boot(): Promise<{ baseUrl: string; stderr: () => Promise<string> 
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
     } catch {
       // Not listening yet.
     }
@@ -149,7 +149,7 @@ function writeAuthMethod(method: string) {
 }
 
 async function health(baseUrl: string): Promise<Health> {
-  return (await (await fetch(`${baseUrl}/health`)).json()) as Health;
+  return (await (await fetch(`${baseUrl}/identity/health`)).json()) as Health;
 }
 
 /** `Authorization: Basic base64(client_id:client_secret)`, RFC 6749 §2.3.1. */
@@ -163,7 +163,7 @@ function basicAuth(clientId: string, clientSecret: string): string {
  *
  * Asked at `/oauth2/introspect` rather than `/oauth2/token`, deliberately.
  * Introspection authenticates the client **before** it looks at the token
- * (`introspect-C6P1zrTr.mjs:2505..2515`), whereas the authorization_code grant
+ * (`introspect-njKASm3q.mjs:2505..2515`), whereas the authorization_code grant
  * consumes the code first — so a token request with a placeholder code answers
  * `invalid_grant` without ever reaching the client checks, and would pass this
  * assertion whatever the secret was. Same `validateClientCredentials`, same
@@ -195,7 +195,7 @@ beforeAll(async () => {
   // Boot once to create the disk and the client, then rotate for a readable
   // secret — the operational path a human takes on a fresh deploy (#70).
   const first = await boot();
-  const rotate = Bun.spawn(["bun", join(ROOT, "scripts", "oauth-client.ts"), "--json", "--rotate"], {
+  const rotate = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"], {
     env,
     stdout: "pipe",
     stderr: "pipe",
@@ -261,7 +261,7 @@ describe("booting on a disk whose client is registered client_secret_post", () =
     // field stops matching what this service accepts.
     const stderr = await second.stderr();
     expect(stderr).toContain("token auth method reconciled to client_secret_basic");
-    expect(stderr).toContain("cg-idp");
+    expect(stderr).toContain("app-identity");
     expect(stderr).not.toContain(registeredSecret);
   });
 

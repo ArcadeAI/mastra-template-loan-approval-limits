@@ -188,7 +188,11 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
         // The app mounts the control plane since #4; a throwaway one, not
         // a governance.db in the repo.
         GOVERNANCE_DB_PATH: ":memory:",
-        PUBLIC_URL: origin,
+        // The app's origin, and its identity provider's issuer since #6. The
+        // session below is sealed by hand, so nothing here signs in, and the
+        // provider gets a throwaway idp.db rather than `./idp.db`.
+        APP_PUBLIC_HOST: new URL(origin).host,
+        IDP_DB_PATH: ":memory:",
         ARCADE_API_URL: harness.gateway.url,
         ARCADE_API_KEY: "arcade-key-for-local-next-browser",
         ARCADE_GATEWAY_ID: "cg-demo-us",
@@ -197,7 +201,6 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
         ANTHROPIC_API_KEY: "not-used-by-local-chat-intercept",
         MODEL_ID: "claude-sonnet-5",
         SESSION_SECRET,
-        IDP_ISSUER: harness.config.identity.idpIssuer,
         IDP_CLIENT_ID: "web",
         IDP_CLIENT_SECRET: "not-used-by-local-next-browser",
         APPROVALS_STORE_TOKEN: "store-token-for-agent-tests",
@@ -207,7 +210,7 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
         // gateway's tool calls write through the harness's loan module — and
         // validates the bearer below against the harness's real dev IdP.
         LOANS_DB_PATH: harness.loansDbPath,
-        IDP_PUBLIC_HOST: harness.idpHost,
+        IDENTITY_HOST: harness.idpHost,
       };
 
       next = Bun.spawn({

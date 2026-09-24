@@ -22,9 +22,9 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { loadPeople } from "../src/db.ts";
+import { loadPeople } from "../../lib/identity/provider/db.ts";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const RESET_TOKEN = "idp-reset-token-for-tests";
 const SECRET = "test-secret-".padEnd(48, "x");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
@@ -89,12 +89,12 @@ async function boot(overrides: Record<string, string>): Promise<Instance> {
     ),
   ) as Record<string, string>;
 
-  const child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+  const child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
     env: {
       ...inherited,
       PORT: String(port),
       IDP_DB_PATH: dbPath,
-      IDP_PUBLIC_URL: baseUrl,
+      APP_PUBLIC_HOST: new URL(baseUrl).host,
       IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
       BETTER_AUTH_SECRET: SECRET,
       ...overrides,
@@ -106,7 +106,7 @@ async function boot(overrides: Record<string, string>): Promise<Instance> {
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
     } catch {
       // Not listening yet.
     }
@@ -126,10 +126,10 @@ async function boot(overrides: Record<string, string>): Promise<Instance> {
 let live: Instance;
 
 const health = async (base: string): Promise<HealthBody> =>
-  (await (await fetch(`${base}/health`)).json()) as HealthBody;
+  (await (await fetch(`${base}/identity/health`)).json()) as HealthBody;
 
 const reset = (base: string, token: string | null = RESET_TOKEN, method = "POST") =>
-  fetch(`${base}/admin/reset`, {
+  fetch(`${base}/identity/admin/reset`, {
     method,
     ...(token === null ? {} : { headers: { authorization: `Bearer ${token}` } }),
   });

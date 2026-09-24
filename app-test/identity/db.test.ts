@@ -8,10 +8,10 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { createAuth, hashClientSecret } from "../src/auth.ts";
-import { ensureOAuthClient } from "../src/client.ts";
-import type { PersonSeed } from "../src/db.ts";
-import { countPeople, listPeople, loadPeople, openPeople, resetPeople, seed } from "../src/db.ts";
+import { createAuth, hashClientSecret } from "../../lib/identity/provider/auth.ts";
+import { ensureOAuthClient } from "../../lib/identity/provider/client.ts";
+import type { PersonSeed } from "../../lib/identity/provider/db.ts";
+import { countPeople, listPeople, loadPeople, openPeople, resetPeople, seed } from "../../lib/identity/provider/db.ts";
 
 const SECRET = "test-secret-".padEnd(48, "x");
 const fixture = loadPeople({});

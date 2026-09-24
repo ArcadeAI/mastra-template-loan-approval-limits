@@ -95,14 +95,15 @@ beforeAll(async () => {
   // test configures the environment rather than reaching past the route.
   // Restored afterwards: `bun test` shares one process across files.
   set("SESSION_SECRET", SESSION_SECRET);
-  set("IDP_ISSUER", identity.idpUrl);
+  // The app's origin since #6, which is its identity provider's issuer too.
+  set("APP_PUBLIC_HOST", new URL(identity.idpUrl).host);
   set("IDP_CLIENT_ID", identity.config.identity.idpClientId);
   set("IDP_CLIENT_SECRET", identity.config.identity.idpClientSecret);
   // The loan module opens on the first read, from this environment: its own
   // `loans.db`, and bearers checked at the recording proxy.
   closeLoanModule();
   set("LOANS_DB_PATH", join(workspace, "loans.db"));
-  set("IDP_PUBLIC_HOST", `localhost:${proxy.port}`);
+  set("IDENTITY_HOST", `localhost:${proxy.port}`);
   // So `decided_by_name` can resolve an address to the name a room reads.
   set("PERSONA_LOAN_OFFICER_EMAIL", PEOPLE.dana.email);
   set("PERSONA_CREDIT_ANALYST_EMAIL", PEOPLE.sam.email);

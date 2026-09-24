@@ -2,10 +2,10 @@
  * Prints what the Arcade dashboard needs (#13): the client id, the endpoints,
  * and — exactly once, at the moment it produces one — the client secret.
  *
- *   bun run --cwd apps/idp oauth-client            # id and endpoints, every client
- *   bun run --cwd apps/idp oauth-client --json     # the same, machine-readable
- *   bun run --cwd apps/idp oauth-client --rotate   # mint a new secret, same client id
- *   bun run --cwd apps/idp oauth-client --client <key> --rotate   # rotate just that one
+ *   bun run oauth-client            # id and endpoints, every client
+ *   bun run oauth-client --json     # the same, machine-readable
+ *   bun run oauth-client --rotate   # mint a new secret, same client id
+ *   bun run oauth-client --client <key> --rotate   # rotate just that one
  *
  * **The secret is stored hashed and cannot be shown twice.** Before #70 it was
  * stored encrypted and this script could re-print it on any later day; that is
@@ -20,18 +20,20 @@
  * a human a dashboard field, and which registration it costs must not be a
  * guess this script makes on their behalf.
  *
- * On Render: open a shell on the cg-idp service and run the same command.
+ * It opens `idp.db` directly, so run it where the app's `idp.db` is (the repo
+ * root, `IDP_DB_PATH` unset), with the app's `APP_PUBLIC_HOST` and
+ * `BETTER_AUTH_SECRET` in the environment — `bun run` loads `.env.local`.
  */
-import { createAuth, JWKS_PATH } from "../src/auth.ts";
+import { createAuth, JWKS_PATH } from "../../lib/identity/provider/auth.ts";
 import {
   ensureOAuthClients,
   type OAuthClientCredentials,
   REQUIRE_PKCE,
   rotateOAuthClientSecret,
   TOKEN_ENDPOINT_AUTH_METHOD,
-} from "../src/client.ts";
-import { readConfig } from "../src/config.ts";
-import { openPeople } from "../src/db.ts";
+} from "../../lib/identity/provider/client.ts";
+import { readConfig } from "../../lib/identity/provider/config.ts";
+import { openPeople } from "../../lib/identity/provider/db.ts";
 
 const config = readConfig();
 const db = await openPeople(config.dbPath);
@@ -77,12 +79,13 @@ const printed: OAuthClientCredentials[] = ensured.map((each) =>
 const client = printed.find((each) => each.key === target.key)!;
 
 if (config.baseURLIsFallback) {
-  // The credentials are right regardless; the three URLs are not. On Render
-  // this means the shell did not carry RENDER_EXTERNAL_URL — set IDP_PUBLIC_URL
-  // on the service, or read the URLs off /health, which the running service
+  // The credentials are right regardless; the three URLs are not. Since #6
+  // the issuer is the app's own origin, `APP_PUBLIC_HOST` — the ngrok host
+  // Arcade reaches the app at — so a shell without it prints localhost URLs.
+  // Set it, or read the URLs off `/identity/health`, which the running app
   // computes from its own environment.
   console.error(
-    `[idp] warning: no IDP_PUBLIC_URL or RENDER_EXTERNAL_URL set — the URLs below point at ` +
+    `[idp] warning: APP_PUBLIC_HOST is not set — the URLs below point at ` +
       `${config.baseURL}, which is not the address Arcade should be given.`,
   );
 }

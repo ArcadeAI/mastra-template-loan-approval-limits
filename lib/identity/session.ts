@@ -18,6 +18,7 @@
  */
 import { cookiesAreSecure, readIdentitySurface, type IdentitySurface } from "../config.ts";
 import { appendCookie, expireCookie, readCookies } from "./cookies.ts";
+import { identityFailure } from "./link.ts";
 import { chunk, chunkName, clearedChunks, joinChunks, openSealed, seal } from "./seal.ts";
 
 /** The gateway access token this browser's persona holds for `cg-demo-us`. */
@@ -201,6 +202,13 @@ export interface PendingFlow {
  * `null` covers every failure: no cookie, a missing chunk, a value sealed under
  * a different `SESSION_SECRET`, a tampered byte. All of them mean the same
  * thing to every caller — nobody is signed in — and that state is always safe.
+ *
+ * Including one failure that is not the cookie's (#6): **an identity provider
+ * that did not boot.** Then nobody is signed in, whatever the cookie says. The
+ * seal still opens — the key is `SESSION_SECRET`, not the provider's — but the
+ * person it names was vouched for by a provider this process no longer has,
+ * and every use of a session is a decision made as that person: an approval,
+ * a verifier binding a tool grant. Failing closed means none of those happen.
  */
 export async function readSession(request: Request, config: IdentitySurface = readIdentitySurface()): Promise<Session | null> {
   return readSessionFromCookies(readCookies(request), config);
@@ -218,6 +226,7 @@ export async function readSessionFromCookies(
   cookies: ReadonlyMap<string, string>,
   config: IdentitySurface = readIdentitySurface(),
 ): Promise<Session | null> {
+  if (identityFailure() !== null) return null;
   const joined = joinChunks(SESSION_COOKIE, cookies);
   const session = await openSealed<Session>(joined, config.identity.sessionSecret);
   return session?.email ? session : null;

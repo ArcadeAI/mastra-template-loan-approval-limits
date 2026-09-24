@@ -20,9 +20,9 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { loadPeople } from "../src/db.ts";
+import { loadPeople } from "../../lib/identity/provider/db.ts";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-${crypto.randomUUID()}`, "idp.db");
 // Everything the service prints, from boot to the end of the run. A file
 // rather than a pipe so "never logs the secret" can read all of it, not
@@ -77,7 +77,7 @@ interface Credentials {
 let creds: Credentials;
 
 async function runScript(name: string, ...args: string[]): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(["bun", join(ROOT, "scripts", name), ...args], {
+  const proc = Bun.spawn(["bun", join(ROOT, "scripts", "identity", name), ...args], {
     env,
     stdout: "pipe",
     stderr: "pipe",
@@ -179,13 +179,13 @@ beforeAll(async () => {
     ...inherited,
     PORT: String(port),
     IDP_DB_PATH: dbPath,
-    IDP_PUBLIC_URL: baseUrl,
+    APP_PUBLIC_HOST: new URL(baseUrl).host,
     IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
     BETTER_AUTH_SECRET: SECRET,
   };
 
   mkdirSync(dirname(logPath), { recursive: true });
-  child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
     env,
     stdout: Bun.file(logPath),
     stderr: "pipe",
@@ -194,7 +194,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
     } catch {
       // Not listening yet.
     }
@@ -397,7 +397,7 @@ async function authorizeAs(
  * its verifier, stopping short of the token endpoint.
  *
  * Needed because the `authorization_code` grant validates in this order,
- * measured in `introspect-C6P1zrTr.mjs:1975..1982`: the code is looked up and
+ * measured in `introspect-njKASm3q.mjs:1975..1982`: the code is looked up and
  * **consumed** first, the client is authenticated second. So a token request
  * carrying a made-up code never reaches the client checks at all — it comes
  * back `invalid_grant: invalid code`, whatever the credentials were. Any test
@@ -537,7 +537,7 @@ describe("the fixture's port probe", () => {
 
 describe("health", () => {
   test("answers for Render's health check and names the endpoints", async () => {
-    const body = (await (await fetch(`${baseUrl}/health`)).json()) as Record<string, any>;
+    const body = (await (await fetch(`${baseUrl}/identity/health`)).json()) as Record<string, any>;
 
     expect(body).toMatchObject({ status: "ok", service: "idp", people: 4, issuer: baseUrl });
     expect(body.oauth.authorize).toBe(`${baseUrl}/oauth2/authorize`);
@@ -548,7 +548,7 @@ describe("health", () => {
   });
 
   test("says what happened to the client secret, so a rotation is not invisible", async () => {
-    const body = (await (await fetch(`${baseUrl}/health`)).json()) as Record<string, any>;
+    const body = (await (await fetch(`${baseUrl}/identity/health`)).json()) as Record<string, any>;
 
     // This database was created by this test run, so the client was born here.
     expect(body.oauth.client_secret_state).toBe("created");
@@ -687,7 +687,7 @@ describe("the OAuth client", () => {
   test("the script and the running service name the same auth method", async () => {
     // Two places a human reads it — `oauth-client` on a shell, `/health` over
     // the wire — and they are only useful if they cannot disagree.
-    const health = (await (await fetch(`${baseUrl}/health`)).json()) as {
+    const health = (await (await fetch(`${baseUrl}/identity/health`)).json()) as {
       oauth: { token_endpoint_auth_method: string };
     };
     expect(health.oauth.token_endpoint_auth_method).toBe(creds.token_endpoint_auth_method);
@@ -1356,7 +1356,7 @@ describe("a replayed authorization code is named as one", () => {
     // Revoking the **refresh** token is what exercises it: `revokeRefreshToken`
     // marks the refresh row revoked and then issues
     // `deleteMany({ model: "oauthAccessToken", where: [{ field: "refreshId" }] })`
-    // (`authorize-BmTe2VYG.mjs:3539`) — the same guarded model, a different
+    // (`authorize-riRRCSbC.mjs:3539`) — the same guarded model, a different
     // where-shape, which must pass straight through. Revoking the access token
     // instead would not reach `deleteMany` at all, and the test would pass
     // whatever the guard did.
@@ -1644,7 +1644,7 @@ describe("reset does not rotate the OAuth client", () => {
 
     // The people are back to the fixture, and every earlier session is gone:
     // Alice has to log in and consent again, with the very same client.
-    const health = (await (await fetch(`${baseUrl}/health`)).json()) as { people: number };
+    const health = (await (await fetch(`${baseUrl}/identity/health`)).json()) as { people: number };
     expect(health.people).toBe(4);
 
     const { accessToken } = await authorizeAs(new Browser(), before, dana, { expectConsent: true });
@@ -1669,8 +1669,8 @@ describe("the log", () => {
   });
 
   test("the credentials script warns when it would print localhost URLs", async () => {
-    const { IDP_PUBLIC_URL: _dropped, ...withoutUrl } = env;
-    const proc = Bun.spawn(["bun", join(ROOT, "scripts", "oauth-client.ts"), "--json"], {
+    const { APP_PUBLIC_HOST: _dropped, ...withoutUrl } = env;
+    const proc = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json"], {
       env: withoutUrl,
       stdout: "pipe",
       stderr: "pipe",
@@ -1684,6 +1684,6 @@ describe("the log", () => {
     // Credentials still right, URLs flagged.
     expect((JSON.parse(out) as Credentials).client_id).toBe(creds.client_id);
     expect(err).toContain("warning");
-    expect(err).toContain("IDP_PUBLIC_URL");
+    expect(err).toContain("APP_PUBLIC_HOST");
   });
 });

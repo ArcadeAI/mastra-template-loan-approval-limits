@@ -7,7 +7,7 @@
  * and Refresh Token Settings alike. So its token request presents the same
  * credentials twice, which RFC 6749 §2.3 forbids and
  * `@better-auth/oauth-provider` enforces in
- * `normalizeClientAuthenticationParameters` (`utils-C2yu_zRr.mjs:541`).
+ * `normalizeClientAuthenticationParameters` (`utils-CWjOhEQb.mjs:541`).
  * Measured on the live `cg-idp`, spike #75, 2026-09-11T17:38Z:
  *
  * ```
@@ -30,9 +30,9 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { loadPeople } from "../src/db.ts";
+import { loadPeople } from "../../lib/identity/provider/db.ts";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-dual-${crypto.randomUUID()}`, "idp.db");
 const logPath = join(dirname(dbPath), "stdout.log");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
@@ -237,13 +237,13 @@ beforeAll(async () => {
     ...inherited,
     PORT: String(port),
     IDP_DB_PATH: dbPath,
-    IDP_PUBLIC_URL: baseUrl,
+    APP_PUBLIC_HOST: new URL(baseUrl).host,
     IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
     BETTER_AUTH_SECRET: SECRET,
   };
 
   mkdirSync(dirname(logPath), { recursive: true });
-  child = Bun.spawn(["bun", join(ROOT, "src", "index.ts")], {
+  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
     env,
     stdout: Bun.file(logPath),
     stderr: "pipe",
@@ -252,7 +252,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
+      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
     } catch {
       // Not listening yet.
     }
@@ -267,7 +267,7 @@ beforeAll(async () => {
   // The service created the client on the line above and hashed its secret, so
   // rotate once for one this test can send. The operational path on a fresh
   // deploy (#70).
-  const rotate = Bun.spawn(["bun", join(ROOT, "scripts", "oauth-client.ts"), "--json", "--rotate"], {
+  const rotate = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"], {
     env,
     stdout: "pipe",
     stderr: "pipe",
@@ -641,7 +641,7 @@ describe("the log, over the whole run", () => {
   });
 
   test("/health states what the token endpoint tolerates", async () => {
-    const health = (await (await fetch(`${baseUrl}/health`)).json()) as {
+    const health = (await (await fetch(`${baseUrl}/identity/health`)).json()) as {
       oauth: { duplicate_client_credentials: string };
     };
     expect(health.oauth.duplicate_client_credentials).toContain("identical");
