@@ -275,6 +275,13 @@ export function handleEvents(request: Request, deps: EventStreamDeps): Response 
   let replayTo = 0;
   let unsubscribe: () => void = () => {};
   let unsubscribeNotices: () => void = () => {};
+  /** The client is gone: stop writing, and leave both buses. */
+  const release = (): void => {
+    closed = true;
+    unsubscribe();
+    unsubscribeNotices();
+    notify();
+  };
   /** Resolves the idle wait in `pull`. Non-null only while `pull` is waiting. */
   let wake: (() => void) | null = null;
   /**
@@ -327,10 +334,13 @@ export function handleEvents(request: Request, deps: EventStreamDeps): Response 
         }) ?? (() => {});
       const cutoff = maxSeq(db);
 
-      request.signal.addEventListener("abort", () => {
-        closed = true;
-        notify();
-      });
+      // Released here as well as in `cancel` (#4). `Bun.serve` cancels the body
+      // when the client leaves, so `cancel` used to be the whole story; behind
+      // Next the request's signal aborts and the body is never cancelled, and a
+      // stream that only set `closed` here stayed subscribed to the bus for the
+      // life of the process — every closed panel tab one more `stream_clients`.
+      // Both unsubscribes are idempotent, so whichever runs second is a no-op.
+      request.signal.addEventListener("abort", release);
 
       // Where the replay starts. `cutoff` means "nothing to replay".
       let anchor = cutoff;
@@ -454,10 +464,7 @@ export function handleEvents(request: Request, deps: EventStreamDeps): Response 
     },
 
     cancel() {
-      closed = true;
-      unsubscribe();
-      unsubscribeNotices();
-      notify();
+      release();
     },
   });
 

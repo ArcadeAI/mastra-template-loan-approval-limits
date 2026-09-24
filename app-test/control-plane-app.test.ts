@@ -193,6 +193,25 @@ describe("the control plane, on the app's own port", () => {
     }
   }, 60_000);
 
+  test("a panel that closes its stream is let go", async () => {
+    // Behind Next on Bun, two things had to change for this to hold (#4):
+    // Bun's node:http never said the response closed (lib/runtime/
+    // response-close.ts), and the stream only left the bus when its body was
+    // cancelled, which Next does not do (lib/control-plane/events.ts).
+    // Without either, every closed tab stayed subscribed for the life of the
+    // process.
+    const clients = async () =>
+      ((await (await fetch(`${app!.origin}/health`)).json()) as { control_plane: { stream_clients: number } })
+        .control_plane.stream_clients;
+    const baseline = await clients();
+    const streams = await Promise.all([1, 2, 3].map(() => openEventStream(app!.origin)));
+    expect(await clients()).toBe(baseline + 3);
+    for (const stream of streams) stream.abort();
+    const deadline = Date.now() + 5_000;
+    while ((await clients()) !== baseline && Date.now() < deadline) await Bun.sleep(50);
+    expect(await clients()).toBe(baseline);
+  }, 60_000);
+
   test("/health is one response carrying the control plane's fields", async () => {
     const response = await fetch(`${app!.origin}/health`);
     expect(response.status).toBe(200);

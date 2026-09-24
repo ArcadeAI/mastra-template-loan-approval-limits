@@ -13,6 +13,10 @@
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // First, so no request is served before a closed client can be noticed.
+  // See the file for the Bun behaviour it corrects.
+  const { installResponseClose } = await import("./lib/runtime/response-close.ts");
+  installResponseClose();
   const { controlPlaneFailure } = await import("./lib/control-plane/instance.ts");
   controlPlaneFailure();
 }
