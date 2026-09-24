@@ -31,7 +31,7 @@ type SeedRecord = Record<string, unknown>;
 const seed = (() => {
   const records = (fixture as { loans?: unknown }).loans;
   if (!Array.isArray(records)) {
-    throw new Error("apps/loan-app/src/fixtures/loans.json has no loans array");
+    throw new Error("lib/loans/fixtures/loans.json has no loans array");
   }
 
   const record = records.find(
@@ -41,7 +41,7 @@ const seed = (() => {
       (candidate as SeedRecord).loan_id === "LN-2291",
   );
   if (record === undefined) {
-    throw new Error("LN-2291 is missing from apps/loan-app/src/fixtures/loans.json");
+    throw new Error("LN-2291 is missing from lib/loans/fixtures/loans.json");
   }
   return record;
 })();

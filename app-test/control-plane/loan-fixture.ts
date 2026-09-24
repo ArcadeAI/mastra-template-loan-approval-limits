@@ -33,7 +33,7 @@ export function loanFixtures(): LoanFixture[] {
 export function loanFixture(loanId: string): LoanFixture {
   const loan = loanFixtures().find((candidate) => candidate.loan_id === loanId);
   if (loan === undefined) {
-    throw new Error(`apps/loan-app's fixture has no ${loanId}`);
+    throw new Error(`the loan module's fixture has no ${loanId}`);
   }
   return loan;
 }

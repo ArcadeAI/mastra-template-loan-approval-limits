@@ -125,7 +125,7 @@ export function handleReset(request: Request, db: Database): Response {
     reset: "loans.db",
     counts: { before, after },
     not_reset: {
-      "governance.db": "owned by apps/hooks; reset with that service's own endpoint",
+      "governance.db": "owned by the control plane; reset with POST /hooks/admin/reset",
       "idp.db": "owned by apps/idp; its reset never touches the OAuth client Arcade holds",
     },
   });
