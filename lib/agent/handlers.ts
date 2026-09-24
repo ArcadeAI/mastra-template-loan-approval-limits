@@ -91,8 +91,8 @@ import { planResume, readResumeRequest, type ResumeRequest } from "./resume.ts";
 import { anthropicModel, buildAgent } from "./agent.ts";
 import { CHAT_PATH, encodeEvent, NDJSON, type ChatEvent } from "./events.ts";
 import { serverFault } from "./fault.ts";
-import { CHAT_PAGE, liveGatewayToken, refreshedGatewayToken, GATEWAY_START_PATH,
-  SIGNIN_PATH } from "../identity/handlers.ts";
+import { CHAT_PAGE, GATEWAY_START_PATH, SIGNIN_PATH } from "../identity/handlers.ts";
+import { gatewayToken } from "./gateway-token.ts";
 import { mcpUrl, probeGatewayToken } from "../identity/gateway.ts";
 import { gatewayClient, governedToolset } from "./tools.ts";
 import { createNativeElicitationBridge } from "./native-elicitation.ts";
@@ -226,7 +226,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
     }
 
     step = PRE_STREAM.token;
-    const live = await liveGatewayToken(session, config);
+    const live = await gatewayToken(session, config);
     if (live.token === null) {
       // Hop 1 has never run on this browser — no token, and no record of one
       // having been refused. There is nothing to re-authorize and nothing dead
@@ -255,7 +255,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
     // reads these rather than `live`, so a turn that refreshed mid-flight
     // reseals the session it actually used.
     let bearer = live.token;
-    let current = live.session;
+    let current = live.holder;
 
     step = PRE_STREAM.client;
     client = gatewayClient({
@@ -300,7 +300,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
       console.warn(`[chat] ${gatewayUrl} answered ${probe.status} to this browser's gateway token; refreshing it once`);
 
       step = PRE_STREAM.retry;
-      const renewed = await refreshedGatewayToken(current, config);
+      const renewed = await gatewayToken(current, config, { refresh: true });
       if (renewed.token === null) {
         // The refresh itself failed. *Now* the card is the truthful answer, and
         // it carries both halves: what the gateway said, and why the refresh
@@ -308,7 +308,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
         return reauthorize(request, config, current, `${refusal}, and ${renewed.reason}`);
       }
       bearer = renewed.token;
-      current = renewed.session;
+      current = renewed.holder;
 
       client = gatewayClient({
         arcadeApiUrl: config.arcadeApiUrl,
