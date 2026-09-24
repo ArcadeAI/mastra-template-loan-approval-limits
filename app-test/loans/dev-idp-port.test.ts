@@ -56,17 +56,31 @@ function freePort(): number {
 }
 
 /**
+ * What the stub is started with: enough of the caller's environment to run
+ * `bun`, and nothing the fixture decides.
+ *
  * `bun test` sets `NODE_ENV=test`, and under it Bun skips `.env.local`
- * entirely — a real dev server's environment is the one without it. `PORT` is
- * dropped too: the whole question is which of two values in the file the stub
- * picks, so neither may reach it from the caller. Measured on #50.
+ * entirely — a real dev server's environment is the one without it, so
+ * `NODE_ENV` is not passed. And the whole question is which of the fixture
+ * `.env.local`'s two values the stub picks, so neither `PORT` nor
+ * `IDP_PUBLIC_HOST` may reach it from the caller: Bun lets a variable already
+ * in the environment win over the file. Measured on #50.
+ *
+ * An allowlist, not a list of exclusions, since round 1 of #5's review: the
+ * first cut dropped `PORT` and `NODE_ENV` only, and a shell that had exported
+ * the worktree's own `.env.local` (`set -a; . ./.env.local`) handed the stub
+ * `IDP_PUBLIC_HOST=localhost:4443`, so it bound that and the test timed out on
+ * the fixture's port. Every `*_PUBLIC_HOST`, `CG_PORT_*` or anything else a
+ * future fixture writes is excluded the same way, by not being on this list.
  */
+const PASSED_THROUGH = ["PATH", "HOME", "TMPDIR", "USER", "LOGNAME", "SHELL", "LANG", "TERM"] as const;
+
 function devEnv(extra: Record<string, string> = {}): Record<string, string> {
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && key !== "PORT" && key !== "NODE_ENV",
-    ),
-  ) as Record<string, string>;
+  const inherited: Record<string, string> = {};
+  for (const key of PASSED_THROUGH) {
+    const value = process.env[key];
+    if (value !== undefined) inherited[key] = value;
+  }
   return { ...inherited, ...extra };
 }
 
