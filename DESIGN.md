@@ -96,6 +96,17 @@ still has `apps/hooks`, `apps/loan-app` and `apps/idp` as separate services.
 the app, with `src/mastra/` and the Next.js routes at the root, so Mastra's Quickstart and
 `mastra dev` run from the top of a fresh clone. `packages/*` stay workspaces.
 
+**The app runs on Bun** (decided 2026-09-23, #4): `bun:sqlite` does not load under Node, so
+`next dev`, `next build` and the standalone server all run under `bun --bun`. Studio
+(`mastra dev`) is a separate Node process, so the shared agent never imports a module that
+opens `bun:sqlite`.
+
+**The control plane is mounted under `/hooks`** (decided 2026-09-23, #4). Arcade's hook
+extension base URL is `<APP_PUBLIC_HOST>/hooks`, so Arcade calls `/hooks/access`,
+`/hooks/pre`, `/hooks/post` and `/hooks/health`, and the last answers Arcade's
+`healthy|degraded|unhealthy`. The app's own `/health` (see **Readiness**) keeps
+`ok|degraded`, so neither contract bends. The approvals store API is `/api/approvals/*`.
+
     app (Next.js + src/mastra)
       agent            one Mastra agent, registered in src/mastra/index.ts. The same one
                        answers in Studio and in the chat route.
