@@ -7,9 +7,12 @@
  *
  * `CG_PROBE_EXPECT` says which world this run is in:
  *
- *   - `failed` — no `BETTER_AUTH_SECRET`, so the provider refuses to boot;
- *   - `ok` — the same environment with one, the control: every difference
- *     between the two runs is the identity provider's doing.
+ *   - `failed` — the provider refuses to boot, and `CG_PROBE_ERROR` is a
+ *     phrase its reason must contain: no `BETTER_AUTH_SECRET` in production,
+ *     none on a public host (#9), or an `idp.db` whose signing key the secret
+ *     cannot open (#9);
+ *   - `ok` — a control: every difference between the runs is the identity
+ *     provider's doing.
  *
  * Next's request-context APIs (`cookies()`, `revalidatePath`) are the only
  * things substituted, because the decide action is a server action and there
@@ -24,6 +27,8 @@ import { SESSION_COOKIE, readSessionFromCookies } from "../../lib/identity/sessi
 const EXPECT = process.env.CG_PROBE_EXPECT;
 if (EXPECT !== "failed" && EXPECT !== "ok") throw new Error(`CG_PROBE_EXPECT=${String(EXPECT)}; want failed or ok`);
 const FAILED = EXPECT === "failed";
+const REASON = process.env.CG_PROBE_ERROR ?? "";
+if (FAILED && REASON === "") throw new Error("CG_PROBE_EXPECT=failed needs CG_PROBE_ERROR, a phrase the refusal must contain");
 
 const CHARLIE = "charlie@bank.example";
 
@@ -48,7 +53,7 @@ const { identityProviderFailure, serve } = await import("../../lib/identity/prov
 const failure = await identityProviderFailure();
 
 test(`the identity provider ${FAILED ? "refused to boot" : "booted"}`, () => {
-  if (FAILED) expect(failure).toBe("BETTER_AUTH_SECRET is required in production");
+  if (FAILED) expect(failure).toContain(REASON);
   else expect(failure).toBeNull();
 });
 
@@ -58,12 +63,8 @@ test(`/health reports identity as ${FAILED ? "failed" : "ok"}, still with HTTP 2
   expect(response.status).toBe(200);
   const body = (await response.json()) as { status: string; identity: Record<string, unknown> };
   if (FAILED) {
-    expect(body.identity).toEqual({
-      status: "failed",
-      issuer: null,
-      people: null,
-      error: "BETTER_AUTH_SECRET is required in production",
-    });
+    expect(body.identity).toMatchObject({ status: "failed", issuer: null, people: null });
+    expect(String(body.identity.error)).toContain(REASON);
     // And the whole answer is degraded — for that reason alone: the `ok` run,
     // identical but for the secret, answers `ok`.
     expect(body.status).toBe("degraded");
@@ -86,7 +87,7 @@ test(`every identity route ${FAILED ? "answers 503 and names why" : "answers"}`,
     const response = await serve(new Request(`${origin}${path}`, { method }));
     if (FAILED) {
       expect({ path, status: response.status }).toEqual({ path, status: 503 });
-      expect(await response.text()).toContain("BETTER_AUTH_SECRET is required in production");
+      expect(await response.text()).toContain(REASON);
     } else {
       expect({ path, unavailable: response.status === 503 }).toEqual({ path, unavailable: false });
     }

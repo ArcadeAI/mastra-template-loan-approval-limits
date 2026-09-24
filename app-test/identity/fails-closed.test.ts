@@ -5,18 +5,26 @@
  * identity route answers 503, every browser reads as signed out, and the
  * decide action has nobody to decide as.
  *
- * Driven in a process of its own, twice, by `fails-closed.probe.ts`: the
+ * Since #9, two more refusals take the same path. On a public host the
+ * published development secret is refused whatever `NODE_ENV` says, and an
+ * `idp.db` whose signing key the configured secret cannot open is refused at
+ * boot, never re-keyed. Plain localhost with no secret still boots, which is
+ * what keeps a fresh clone zero-config.
+ *
+ * Driven in a process of its own per world by `fails-closed.probe.ts`: the
  * provider is one per process and remembers a failed boot, so doing this in
  * the suite's process would read every browser as signed out for every file
- * after it. The second run is the control — the same environment with a
- * secret — so each assertion is shown to turn on the provider and on nothing
- * else.
+ * after it. The controls are the same environments with the one thing fixed,
+ * so each assertion is shown to turn on the provider and on nothing else.
  */
+import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { openIdentityProvider } from "../../lib/identity/provider/server.ts";
+import { readConfig } from "../../lib/identity/provider/config.ts";
 import { spawnChild } from "../child.ts";
 import { childEnv } from "../child-env.ts";
 
@@ -25,15 +33,30 @@ const scratch = mkdtempSync(join(tmpdir(), "cg-fails-closed-"));
 
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-/** Everything a deployment needs except, in the `failed` run, the one secret. */
-function environment(expect: "failed" | "ok"): Record<string, string> {
-  // An allowlist (`child-env.ts`): the one variable this is about must not
+const PUBLIC = "fails-closed.ngrok.app";
+const randomSecret = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
+
+interface World {
+  expect: "failed" | "ok";
+  /** A phrase the refusal must contain, for a `failed` world. */
+  reason?: string;
+  NODE_ENV: string;
+  APP_PUBLIC_HOST: string;
+  /** Absent means unset. */
+  BETTER_AUTH_SECRET?: string;
+  IDP_DB_PATH?: string;
+}
+
+/** Everything a deployment needs; each world varies only the identity secret, the host and NODE_ENV. */
+function environment(world: World, name: string): Record<string, string> {
+  // An allowlist (`child-env.ts`): the variables this is about must not
   // arrive from the shell that runs the suite.
   return childEnv({
-    CG_PROBE_EXPECT: expect,
-    NODE_ENV: "production",
-    APP_PUBLIC_HOST: "localhost:3999",
-    IDP_DB_PATH: join(scratch, `${expect}-idp.db`),
+    CG_PROBE_EXPECT: world.expect,
+    ...(world.reason ? { CG_PROBE_ERROR: world.reason } : {}),
+    NODE_ENV: world.NODE_ENV,
+    APP_PUBLIC_HOST: world.APP_PUBLIC_HOST,
+    IDP_DB_PATH: world.IDP_DB_PATH ?? join(scratch, `${name}-idp.db`),
     GOVERNANCE_DB_PATH: ":memory:",
     LOANS_DB_PATH: ":memory:",
     ARCADE_HOOK_SIGNING_SECRET: "fails-closed-hook-secret",
@@ -46,14 +69,14 @@ function environment(expect: "failed" | "ok"): Record<string, string> {
     ARCADE_GATEWAY_ID: "cg-demo-us",
     ANTHROPIC_API_KEY: "fails-closed-anthropic-key",
     GOVERNANCE_STREAM: "fixture",
-    ...(expect === "ok" ? { BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex") } : {}),
+    ...(world.BETTER_AUTH_SECRET === undefined ? {} : { BETTER_AUTH_SECRET: world.BETTER_AUTH_SECRET }),
   });
 }
 
-async function probe(expect: "failed" | "ok"): Promise<{ code: number; output: string }> {
+async function probe(world: World, name: string): Promise<{ code: number; output: string }> {
   const child = spawnChild(["bun", "test", "./app-test/identity/fails-closed.probe.ts"], {
     cwd: REPO,
-    env: environment(expect),
+    env: environment(world, name),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -65,18 +88,68 @@ async function probe(expect: "failed" | "ok"): Promise<{ code: number; output: s
   return { code, output: `${out}\n${err}` };
 }
 
+async function passes(world: World, name: string): Promise<void> {
+  const { code, output } = await probe(world, name);
+  expect({ code, output }).toMatchObject({ code: 0 });
+  expect(output).toContain(" 5 pass");
+  expect(output).toContain(" 0 fail");
+}
+
 describe("an identity provider that cannot boot fails closed", () => {
   test("with BETTER_AUTH_SECRET unset in production: refused, reported, 503, signed out, no decision", async () => {
-    const { code, output } = await probe("failed");
-    expect({ code, output }).toMatchObject({ code: 0 });
-    expect(output).toContain(" 5 pass");
-    expect(output).toContain(" 0 fail");
+    await passes(
+      { expect: "failed", reason: "BETTER_AUTH_SECRET is required in production", NODE_ENV: "production", APP_PUBLIC_HOST: "localhost:3999" },
+      "production",
+    );
+  }, 120_000);
+
+  test("with BETTER_AUTH_SECRET unset on a public host, in development: refused the published secret (#9)", async () => {
+    await passes(
+      {
+        expect: "failed",
+        reason: "the development secret is published in this repository",
+        NODE_ENV: "development",
+        APP_PUBLIC_HOST: PUBLIC,
+      },
+      "public-host",
+    );
+  }, 120_000);
+
+  test("with an idp.db whose signing key the secret cannot open: refused at boot, and never re-keyed (#9)", async () => {
+    // A signing key minted under one secret, the way a localhost run mints it
+    // on its first `/jwks` or sign-in, then the app started under another.
+    const dbPath = join(scratch, "stale-idp.db");
+    const before = await openIdentityProvider(readConfig({ IDP_DB_PATH: dbPath, BETTER_AUTH_SECRET: randomSecret() }));
+    expect((await before.fetch(new Request("http://localhost:3999/jwks"))).status).toBe(200);
+    before.close();
+    const keys = () => new Database(dbPath, { readonly: true }).query(`select id, privateKey from jwks`).all();
+    const minted = keys();
+    expect(minted).toHaveLength(1);
+
+    await passes(
+      {
+        expect: "failed",
+        reason: "holds an ID-token signing key encrypted under a different BETTER_AUTH_SECRET",
+        NODE_ENV: "development",
+        APP_PUBLIC_HOST: PUBLIC,
+        BETTER_AUTH_SECRET: randomSecret(),
+        IDP_DB_PATH: dbPath,
+      },
+      "stale",
+    );
+    // No replacement key was minted over the one it could not open.
+    expect(keys()).toEqual(minted);
   }, 120_000);
 
   test("and the control, with a secret: booted, ok, answering, Charlie, past the session", async () => {
-    const { code, output } = await probe("ok");
-    expect({ code, output }).toMatchObject({ code: 0 });
-    expect(output).toContain(" 5 pass");
-    expect(output).toContain(" 0 fail");
+    await passes({ expect: "ok", NODE_ENV: "production", APP_PUBLIC_HOST: "localhost:3999", BETTER_AUTH_SECRET: randomSecret() }, "ok");
+  }, 120_000);
+
+  test("the control on a public host: with a secret it boots (#9)", async () => {
+    await passes({ expect: "ok", NODE_ENV: "development", APP_PUBLIC_HOST: PUBLIC, BETTER_AUTH_SECRET: randomSecret() }, "public-ok");
+  }, 120_000);
+
+  test("plain localhost with no secret still boots on the development secret: a fresh clone stays zero-config (#9)", async () => {
+    await passes({ expect: "ok", NODE_ENV: "development", APP_PUBLIC_HOST: "localhost:3999" }, "localhost-dev");
   }, 120_000);
 });

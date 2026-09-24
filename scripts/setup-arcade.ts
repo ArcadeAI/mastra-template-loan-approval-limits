@@ -14,7 +14,7 @@
  * 3. **Mints** the app's three OAuth clients in `idp.db`: `arcade` (hop 2),
  *    `arcade-user-source` (hop 1) and `web` (the app's own sign-in).
  * 4. **Fills in `.env`**, blanks only, never overwriting: `APP_PUBLIC_HOST`,
- *    `SESSION_SECRET`, `ARCADE_HOOK_SIGNING_SECRET`, `APPROVALS_STORE_TOKEN`,
+ *    `SESSION_SECRET`, `BETTER_AUTH_SECRET`, `ARCADE_HOOK_SIGNING_SECRET`, `APPROVALS_STORE_TOKEN`,
  *    `IDP_OAUTH_CLIENTS` and the clients' redirect URIs, `IDP_CLIENT_ID` and
  *    `IDP_CLIENT_SECRET`, `ARCADE_GATEWAY_ID`, and `GOVERNANCE_STREAM=hooks`.
  * 5. **Registers by API**: the provider, the tool secrets `APP_PUBLIC_HOST`
@@ -157,6 +157,10 @@ function secretFor(key: string): { value: string; generated: boolean } {
 }
 
 const sessionSecret = secretFor("SESSION_SECRET");
+// The identity provider's own secret (#9). On a public host it refuses the
+// published development one, and it must exist before the clients are minted
+// below: `oauth-client` reads the same configuration the provider boots on.
+const identitySecret = secretFor("BETTER_AUTH_SECRET");
 const hookToken = secretFor("ARCADE_HOOK_SIGNING_SECRET");
 const storeToken = secretFor("APPROVALS_STORE_TOKEN");
 
@@ -164,6 +168,7 @@ const storeToken = secretFor("APPROVALS_STORE_TOKEN");
 const planned: Record<string, string> = {
   APP_PUBLIC_HOST: host,
   SESSION_SECRET: sessionSecret.value,
+  BETTER_AUTH_SECRET: identitySecret.value,
   ARCADE_HOOK_SIGNING_SECRET: hookToken.value,
   APPROVALS_STORE_TOKEN: storeToken.value,
   IDP_OAUTH_CLIENTS: CLIENT_KEYS.join(","),

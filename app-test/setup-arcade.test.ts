@@ -252,6 +252,11 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   expect(owned.length).toBeGreaterThan(5);
   for (const key of owned) expect(env[key], `setup-arcade left ${key} blank`).toMatch(/\S/);
   expect(env.ARCADE_API_KEY).toBe(KEY);
+  // The identity provider's secret (#9): filled, fresh, and never printed.
+  expect(env.BETTER_AUTH_SECRET).toMatch(/^[0-9a-f]{64}$/);
+  expect(new Set([env.BETTER_AUTH_SECRET, env.SESSION_SECRET, env.ARCADE_HOOK_SIGNING_SECRET, env.APPROVALS_STORE_TOKEN]).size).toBe(4);
+  expect(run.stdout).toMatch(/filled\s+.*\bBETTER_AUTH_SECRET\b/);
+  expect(`${run.stdout}${run.stderr}`).not.toContain(env.BETTER_AUTH_SECRET!);
   // A value setup-arcade would otherwise have written, set by hand first: kept.
   expect(env.SESSION_SECRET).toBe(mine);
   expect(run.stdout).toMatch(/kept\s+SESSION_SECRET/);
@@ -291,6 +296,7 @@ test("--dry-run prints the same requests a real run makes, in order, and writes 
     "GET /v1/admin/settings/session_verification",
   ]);
   expect(run.stdout).toContain("Authorization: Bearer <ARCADE_API_KEY>");
+  expect(run.stdout).toMatch(/would fill .*\bBETTER_AUTH_SECRET\b/);
   expect(run.stdout).not.toContain(KEY);
   expect(run.stdout).toContain(`"url": "${ORIGIN}/hooks/pre"`);
 });
@@ -394,3 +400,13 @@ test("a verifier setting that does not read back fails the run, naming open risk
   expect(run.stderr).toContain("the custom verifier did not take");
   expect(run.stderr).toContain("open risk 2");
 });
+
+test("a BETTER_AUTH_SECRET the developer set is kept, and the clients are minted under it", async () => {
+  const mine = "a-developer-chosen-better-auth-secret-0123456789abcdef";
+  const dir = project("identity-secret", (env) => env.replace(/^BETTER_AUTH_SECRET=$/m, `BETTER_AUTH_SECRET=${mine}`));
+  const run = await setupArcade(dir);
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  expect(envOf(dir).BETTER_AUTH_SECRET).toBe(mine);
+  expect(run.stdout).toMatch(/kept\s+.*\bBETTER_AUTH_SECRET\b/);
+  expect(`${run.stdout}${run.stderr}`).not.toContain(mine);
+}, 60_000);

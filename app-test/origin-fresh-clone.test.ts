@@ -13,7 +13,9 @@
  *   `.env.example` pinned `APP_PUBLIC_HOST=localhost:3000`, and an app on any
  *   other port named `http://localhost:3000` as its issuer.
  * - `APP_PUBLIC_HOST` set: the launcher prints that URL and the tunnel command,
- *   and the home page served on another host says where to go instead.
+ *   and the home page served on another host says where to go instead. With
+ *   no `BETTER_AUTH_SECRET`, identity refuses the published development
+ *   secret on that host and fails closed, and `/health` says why (#9).
  */
 import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -127,7 +129,20 @@ test("with APP_PUBLIC_HOST set, bun run dev prints it and the home page on anoth
   const right = await fetch(`${app.origin}/`, { headers: { "x-forwarded-host": PUBLIC, "x-forwarded-proto": "https" } });
   expect(await right.text()).not.toContain("data-origin-banner");
 
-  expect((await fetch(`${app.origin}/health`)).status).toBe(200);
+  // No BETTER_AUTH_SECRET on a public host (#9): identity refuses the published
+  // development secret and fails closed, and /health names the reason, while
+  // the rest of the app stays up.
+  const health = await fetch(`${app.origin}/health`);
+  expect(health.status).toBe(200);
+  const body = (await health.json()) as Record<string, any>;
+  expect(body.status).toBe("degraded");
+  expect(body.identity.status).toBe("failed");
+  expect(body.identity.error).toContain("BETTER_AUTH_SECRET is not set");
+  expect(body.identity.error).toContain("the development secret is published in this repository");
+  expect(body.policy.status).toBe("ready");
+  const token = await fetch(`${app.origin}/oauth2/token`, { method: "POST" });
+  expect(token.status).toBe(503);
+  expect(await token.text()).toContain("the development secret is published in this repository");
 }, 240_000);
 
 test("originMismatch: silent without APP_PUBLIC_HOST and on the right host, specific otherwise", () => {
