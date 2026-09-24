@@ -12,7 +12,7 @@
  * governance boundary runs the other way (`apps/loan-app` must not know about
  * governance, which `knows-nothing-about-governance.test.ts` enforces).
  */
-import loans from "../../loan-app/src/fixtures/loans.json" with { type: "json" };
+import loans from "../../apps/loan-app/src/fixtures/loans.json" with { type: "json" };
 
 export interface LoanFixture extends Record<string, unknown> {
   loan_id: string;

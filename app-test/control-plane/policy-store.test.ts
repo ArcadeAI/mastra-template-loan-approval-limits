@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 
 import { compilePolicy } from "@cg/governance-core";
 
-import { count as auditCount, byExecution, newEventId, recent, record } from "../src/audit-log.ts";
+import { count as auditCount, byExecution, newEventId, recent, record } from "../../lib/control-plane/audit-log.ts";
 import {
   counts,
   hasSchema,
@@ -21,7 +21,7 @@ import {
   readRevision,
   seed,
   type SeedOptions,
-} from "../src/policy-store.ts";
+} from "../../lib/control-plane/policy-store.ts";
 
 const OPTIONS: SeedOptions = { loanToolkit: "Loan", approvalsToolkit: "Approvals", personaEmails: {} };
 
@@ -86,7 +86,7 @@ describe("the seed", () => {
   });
 
   test("uses the same fallback emails as apps/idp, the join key", async () => {
-    const people = (await import("../../idp/src/fixtures/people.json")).default.people;
+    const people = (await import("../../apps/idp/src/fixtures/people.json")).default.people;
     const ours = loadSeed(OPTIONS).subjects.map((s) => s.user_id).sort();
     expect(ours).toEqual(people.map((p) => p.email).sort());
   });

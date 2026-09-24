@@ -307,7 +307,7 @@ beforeAll(async () => {
   }));
 
   [hooks, loanApp] = await Promise.all([
-    boot("hooks", "apps/hooks/src/index.ts", {
+    boot("hooks", "scripts/control-plane.ts", {
       RESET_TOKEN,
       ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
       GOVERNANCE_DB_PATH: join(tmpdir(), `cg-grants-hooks-${crypto.randomUUID()}`, "governance.db"),

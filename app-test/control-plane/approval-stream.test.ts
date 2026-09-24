@@ -31,13 +31,13 @@ import {
   APPROVAL_EVENT_NAME,
   createApprovalNoticeBus,
   type ApprovalNoticeBus,
-} from "../src/approval-notices.ts";
-import type { HooksConfig } from "../src/config.ts";
-import { GOVERNANCE_EVENT_NAME } from "../src/events.ts";
-import { allGrants } from "../src/grants-store.ts";
-import { createPolicyCache, type PolicyCache } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+} from "../../lib/control-plane/approval-notices.ts";
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { GOVERNANCE_EVENT_NAME } from "../../lib/control-plane/events.ts";
+import { allGrants } from "../../lib/control-plane/grants-store.ts";
+import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 import { openEventStream } from "./sse-reader.ts";
 
 const DANA = "alice@bank.example";

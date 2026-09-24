@@ -240,7 +240,7 @@ beforeAll(async () => {
       BETTER_AUTH_SECRET: "root-reset-test-secret-".padEnd(48, "x"),
       IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
     }),
-    boot("hooks", "apps/hooks/src/index.ts", {
+    boot("hooks", "scripts/control-plane.ts", {
       RESET_TOKEN,
       ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
       GOVERNANCE_DB_PATH: join(tmpdir(), `cg-reset-hooks-${crypto.randomUUID()}`, "governance.db"),

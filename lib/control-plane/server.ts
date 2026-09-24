@@ -114,7 +114,16 @@ class Timeout extends Error {
   }
 }
 
-export function createServer(deps: ServerDeps) {
+/**
+ * The control plane as one request handler, with no socket of its own (#4).
+ *
+ * This is what the app mounts: every control-plane route under `app/` hands its
+ * `Request` to `fetch` here, in-process, on the app's own port. `createServer`
+ * below wraps the same handler in `Bun.serve` for the tests and the harnesses
+ * that want the module on a port without booting Next, so there is one
+ * implementation of every route and two ways to reach it.
+ */
+export function createControlPlane(deps: ServerDeps) {
   const { config, db, cache, bus, notices } = deps;
   const log = deps.log ?? ((line: string) => console.log(`[${SERVICE}] ${line}`));
   /**
@@ -335,7 +344,7 @@ export function createServer(deps: ServerDeps) {
    * same condition, and `status`, `policy.status`, `policy.error` and
    * `warnings` say so in the body a human can now actually read.
    */
-  const health = (): Response => {
+  const healthBody = () => {
     const policy = cache.status();
     const drift = policy.fixture_drift;
     const warnings = [
@@ -390,13 +399,14 @@ export function createServer(deps: ServerDeps) {
       stream_clients: bus?.subscribers ?? 0,
       failure_mode: "fail-closed",
     };
-    return json(body);
+    return body;
   };
+  const health = (): Response => json(healthBody());
 
-  return Bun.serve({
-    port: config.port,
-    idleTimeout: 30,
-    async fetch(request) {
+  return {
+    /** The `/health` body, for the app's one readiness response to fold in. */
+    health: healthBody,
+    async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
       const { pathname } = url;
 
@@ -470,5 +480,17 @@ export function createServer(deps: ServerDeps) {
 
       return handleHook(hook, request);
     },
+  };
+}
+
+export type ControlPlane = ReturnType<typeof createControlPlane>;
+
+/** The same handler on a socket of its own: `config.port`, `0` for any. */
+export function createServer(deps: ServerDeps) {
+  const plane = createControlPlane(deps);
+  return Bun.serve({
+    port: deps.config.port,
+    idleTimeout: 30,
+    fetch: (request) => plane.fetch(request),
   });
 }

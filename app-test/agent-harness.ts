@@ -184,7 +184,7 @@ export async function startAgentHarness(
   await readPort(idp as Subprocess<"ignore", "pipe", "pipe">);
 
   const hooks = spawn({
-    cmd: ["bun", join(REPO_ROOT, "apps", "hooks", "src", "index.ts")],
+    cmd: ["bun", join(REPO_ROOT, "scripts", "control-plane.ts")],
     cwd: REPO_ROOT,
     env: {
       ...process.env,

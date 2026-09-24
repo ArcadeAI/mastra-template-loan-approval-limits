@@ -10,9 +10,9 @@
  *
  *   bun run --cwd apps/hooks bench
  */
-import { createPolicyCache } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 
 const SECRET = "bench";
 const SAM = "bob@bank.example";

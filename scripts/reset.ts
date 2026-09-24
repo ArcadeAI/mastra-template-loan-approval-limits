@@ -82,7 +82,7 @@
  * human copies off the Render dashboard once. Scheme is added here: `http` for
  * loopback, `https` for everything else.
  */
-import { assertPublicHost, PublicHostError } from "../apps/hooks/src/public-host.ts";
+import { assertPublicHost, PublicHostError } from "../lib/control-plane/public-host.ts";
 
 /** sysexits: the environment is wrong, not the invocation. */
 const EX_CONFIG = 78;

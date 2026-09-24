@@ -22,10 +22,10 @@ import type { Database } from "bun:sqlite";
 import { createEventBus, type EventBus } from "@cg/governance-core";
 import { PostHookResult } from "@cg/policy-schema";
 
-import type { HooksConfig } from "../src/config.ts";
-import { createPolicyCache, type PolicyCache } from "../src/policy-cache.ts";
-import { openGovernance, readOutputRules } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance, readOutputRules } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 import { loanFixture, loanFixtures } from "./loan-fixture.ts";
 
 const SECRET = "test-secret";

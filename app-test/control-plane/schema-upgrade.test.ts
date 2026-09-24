@@ -15,9 +15,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { HooksConfig } from "../src/config.ts";
-import { createPolicyCache } from "../src/policy-cache.ts";
-import { createServer } from "../src/server.ts";
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 import {
   count as auditCount,
   maxSeq,
@@ -25,7 +25,7 @@ import {
   pageAfter,
   record,
   recent,
-} from "../src/audit-log.ts";
+} from "../../lib/control-plane/audit-log.ts";
 import {
   SCHEMA_VERSION,
   counts,
@@ -38,7 +38,7 @@ import {
   seed,
   type MigrationReport,
   type SeedOptions,
-} from "../src/policy-store.ts";
+} from "../../lib/control-plane/policy-store.ts";
 
 const OPTIONS: SeedOptions = {
   loanToolkit: "Loan",

@@ -31,13 +31,13 @@ import { resolve } from "node:path";
 import { createEventBus } from "@cg/governance-core";
 import { GovernanceEvent } from "@cg/policy-schema";
 
-import { newEventId, record } from "../src/audit-log.ts";
-import type { HooksConfig } from "../src/config.ts";
-import { createPolicyCache } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+import { newEventId, record } from "../../lib/control-plane/audit-log.ts";
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 
-const DEFAULT_CLIENT_DIR = resolve(import.meta.dir, "../../../lib/governance");
+const DEFAULT_CLIENT_DIR = resolve(import.meta.dir, "../../lib/governance");
 const clientDir = resolve(process.argv[2] ?? DEFAULT_CLIENT_DIR);
 const clientEntry = resolve(clientDir, "subscribe.ts");
 

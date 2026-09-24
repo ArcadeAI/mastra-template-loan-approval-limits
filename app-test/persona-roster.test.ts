@@ -38,7 +38,7 @@ interface SeedSubject {
 }
 
 function seededSubjects(): SeedSubject[] {
-  const path = join(REPO_ROOT, "apps", "hooks", "src", "fixtures", "governance.json");
+  const path = join(REPO_ROOT, "lib", "control-plane", "fixtures", "governance.json");
   return (JSON.parse(readFileSync(path, "utf8")) as { subjects: SeedSubject[] }).subjects;
 }
 

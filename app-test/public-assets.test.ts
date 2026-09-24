@@ -195,8 +195,9 @@ function artifact(): Promise<Artifact> {
     const origin = `http://127.0.0.1:${port}`;
     const server = Bun.spawn({
       // The artifact's own entrypoint, run the way the root `Dockerfile`'s
-      // `CMD` runs it: Node, from the root of the standalone tree.
-      cmd: ["node", "server.js"],
+      // `CMD` runs it: Bun since #4 (Node until then), from the root of the
+      // standalone tree.
+      cmd: ["bun", "server.js"],
       cwd: STANDALONE,
       env: {
         ...(process.env as Record<string, string>),

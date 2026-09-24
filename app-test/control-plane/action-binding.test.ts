@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { compilePolicy, type ToolCatalogue } from "@cg/governance-core";
 import { PolicyRule, type PolicyRuleInput } from "@cg/policy-schema";
 
-import { pascalCase, resolveAction } from "../src/action-binding.ts";
+import { pascalCase, resolveAction } from "../../lib/control-plane/action-binding.ts";
 
 const rule = (input: PolicyRuleInput) => PolicyRule.parse(input);
 

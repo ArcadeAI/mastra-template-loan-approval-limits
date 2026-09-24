@@ -15,17 +15,17 @@ import type { Database } from "bun:sqlite";
 
 import { GovernanceEvent } from "@cg/policy-schema";
 
-import { AUDIT_DEFAULT_LIMIT, AUDIT_MAX_LIMIT } from "../src/audit-api.ts";
+import { AUDIT_DEFAULT_LIMIT, AUDIT_MAX_LIMIT } from "../../lib/control-plane/audit-api.ts";
 import {
   AUDIT_RETENTION_ROWS,
   newEventId,
   record,
   retentionWarning,
-} from "../src/audit-log.ts";
-import type { HooksConfig } from "../src/config.ts";
-import { createPolicyCache, type PolicyCache } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+} from "../../lib/control-plane/audit-log.ts";
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 
 const SECRET = "test-secret";
 const STORE_TOKEN = "test-store-token";

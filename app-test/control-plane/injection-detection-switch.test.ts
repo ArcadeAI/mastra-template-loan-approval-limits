@@ -38,11 +38,11 @@ import type { Database } from "bun:sqlite";
 
 import { PostHookResult } from "@cg/policy-schema";
 
-import { readConfig, type HooksConfig, type ScannerSetting } from "../src/config.ts";
-import { fixtureDigest } from "../src/fixture-drift.ts";
-import { createPolicyCache, type PolicyCache } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+import { readConfig, type HooksConfig, type ScannerSetting } from "../../lib/control-plane/config.ts";
+import { fixtureDigest } from "../../lib/control-plane/fixture-drift.ts";
+import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 import { loanFixture } from "./loan-fixture.ts";
 
 const SECRET = "test-secret";

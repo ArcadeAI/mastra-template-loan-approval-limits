@@ -175,7 +175,7 @@ export async function startHooks(
   env: Record<string, string> = {},
 ): Promise<Hooks> {
   const child = spawn({
-    cmd: ["bun", join(REPO_ROOT, "apps", "hooks", "src", "index.ts")],
+    cmd: ["bun", join(REPO_ROOT, "scripts", "control-plane.ts")],
     cwd: REPO_ROOT,
     env: {
       ...process.env,

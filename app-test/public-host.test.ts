@@ -166,6 +166,6 @@ test("the three copies of the check are byte-identical", () => {
 
   const web = region("lib", "public-host.ts");
 
-  expect(region("apps", "hooks", "src", "public-host.ts")).toBe(web);
+  expect(region("lib", "control-plane", "public-host.ts")).toBe(web);
   expect(region("apps", "loan-app", "src", "public-host.ts")).toBe(web);
 });

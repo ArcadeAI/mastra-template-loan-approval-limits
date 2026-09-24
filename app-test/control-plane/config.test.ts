@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { readConfig } from "../src/config.ts";
-import { loadSeed } from "../src/policy-store.ts";
+import { readConfig } from "../../lib/control-plane/config.ts";
+import { loadSeed } from "../../lib/control-plane/policy-store.ts";
 
 describe("persona email configuration", () => {
   test("maps the role variables into the seeded persona keys", () => {

@@ -37,7 +37,7 @@ describe("the approvals store token", () => {
     const token = readWebConfig({}).approvalsStoreToken;
 
     expect(token).not.toBe("");
-    expect(sourceOf("apps", "hooks", "src", "config.ts")).toContain(
+    expect(sourceOf("lib", "control-plane", "config.ts")).toContain(
       `const DEV_STORE_TOKEN = "${token}"`,
     );
   });
@@ -92,7 +92,7 @@ describe("both services guard production the same way", () => {
     // value in production while the control plane refused to boot on it.
     for (const source of [
       sourceOf("lib", "config.ts"),
-      sourceOf("apps", "hooks", "src", "config.ts"),
+      sourceOf("lib", "control-plane", "config.ts"),
     ]) {
       expect(source).toContain(GUARD);
     }
@@ -104,7 +104,7 @@ describe("both services guard production the same way", () => {
     // Three copies of two strings is drift waiting to happen, and a stand-in
     // whose hook bearer had drifted would fail with a 401 that looks like a
     // governance decision and is not one.
-    const hooks = sourceOf("apps", "hooks", "src", "config.ts");
+    const hooks = sourceOf("lib", "control-plane", "config.ts");
     const standIn = sourceOf("scripts", "arcade-stand-in.ts");
 
     for (const literal of ["DEV_SECRET", "DEV_STORE_TOKEN"] as const) {
@@ -115,7 +115,7 @@ describe("both services guard production the same way", () => {
   });
 
   test("apps/hooks refuses to boot in production without a real one", () => {
-    expect(sourceOf("apps", "hooks", "src", "config.ts")).toContain(
+    expect(sourceOf("lib", "control-plane", "config.ts")).toContain(
       "APPROVALS_STORE_TOKEN is required in production",
     );
   });

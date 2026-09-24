@@ -7,12 +7,12 @@ import type { Database } from "bun:sqlite";
 
 import { AccessHookResult, PreHookResult } from "@cg/policy-schema";
 
-import { count as auditCount, recent } from "../src/audit-log.ts";
-import type { HooksConfig } from "../src/config.ts";
-import { CORRELATION_TOKEN } from "../src/correlation.ts";
-import { createPolicyCache, type PolicyCache } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+import { count as auditCount, recent } from "../../lib/control-plane/audit-log.ts";
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { CORRELATION_TOKEN } from "../../lib/control-plane/correlation.ts";
+import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 
 /** How long a test waits for the background poll to notice an edit. */
 const POLL_MS = 10;

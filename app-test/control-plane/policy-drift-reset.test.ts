@@ -32,13 +32,13 @@ import { join } from "node:path";
 
 import { AccessHookResult, PreHookResult } from "@cg/policy-schema";
 
-import type { HooksConfig } from "../src/config.ts";
-import { fixtureDigest } from "../src/fixture-drift.ts";
-import { createPolicyCache } from "../src/policy-cache.ts";
-import { recoverStalePolicy } from "../src/policy-recovery.ts";
-import { loadSeed, openGovernance, seed as seedInto, type Seed } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
-import rawFixture from "../src/fixtures/governance.json" with { type: "json" };
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { fixtureDigest } from "../../lib/control-plane/fixture-drift.ts";
+import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { recoverStalePolicy } from "../../lib/control-plane/policy-recovery.ts";
+import { loadSeed, openGovernance, seed as seedInto, type Seed } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
+import rawFixture from "../../lib/control-plane/fixtures/governance.json" with { type: "json" };
 
 const SECRET = "test-secret";
 const RESET_TOKEN = "test-reset-token";

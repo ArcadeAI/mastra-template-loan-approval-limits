@@ -9,13 +9,12 @@
   "scripts": {
     "dev": "bun scripts/next.ts dev",
     "dev:web": "bun run dev",
-    "dev:hooks": "bun run --cwd apps/hooks dev",
     "dev:loan-app": "bun run --cwd apps/loan-app dev",
     "dev:idp": "bun run --cwd apps/idp dev",
     "dev:idp-stub": "bun run --cwd apps/loan-app dev:idp",
     "arcade-stand-in": "bun scripts/arcade-stand-in.ts",
     "gateway-stand-in": "bun scripts/gateway-stand-in.ts",
-    "build": "next build && bun run --filter '*' build",
+    "build": "bun --bun next build && bun run --filter '*' build",
     "start": "bun scripts/next.ts start",
     "typecheck": "next typegen && tsc --noEmit && bun run --filter '*' typecheck",
     "verify:standalone": "bun scripts/verify-standalone.ts",
@@ -23,6 +22,7 @@
   },
   "//": [
     "The root manifest is the app's since #3: the Next.js app that was apps/web lives at the repo root, and the workspaces are the services still to fold plus packages/*. `--filter '*'` in `build` and `typecheck` matches the workspaces and never the root, so neither recurses. There is no `test` script: at the root `bun test` runs every group in the repo, and a script scoped to one of them would read as the whole suite. The app's group is `bun test ./app-test/`.",
+    "The app runs on Bun, not Node, since #4: `build` is `bun --bun next build`, and `dev` and `start` pass `--bun` in `scripts/next.ts`. The control plane in `lib/control-plane/` opens `governance.db` with `bun:sqlite`, which Node cannot load, and `next`'s bin is `#!/usr/bin/env node`, which plain `bun run` honours. Measured on #4: under Node the build fails collecting page data and the route answers 500.",
     "`dev` and `start` go through `scripts/next.ts` so that PORT comes from the root `.env.local`, the way it does for the three Bun services from theirs. `next dev --port ${PORT:-3000}` did not: the shell expanded it before anything read the file, and the service bound 3000 in a worktree that owns 4410. See #50 and the comment at the top of that script; `app-test/dev-port.test.ts` fails if the shell-expanded form comes back. `dev:web` is the name the app ran under before #3, kept as an alias.",
     "zod is pinned to one exact 4.x version, repo-wide, by the override below. The old 3.x pin (#28) guarded an Arcade TypeScript SDK this repo never depended on, and by #187 it blocked @mastra/mcp 2, whose MCP SDK requires zod ^4.2. One version everywhere is the point: two zods in one process disagree about instanceof.",
     "apps/idp is a workspace member since #187: with the override at zod 4, Better Auth installs from the root like everything else, so a fresh clone needs one `bun install` and there is one lockfile. It is still the enterprise IdP stand-in a forker deletes, so it depends on nothing in the template and nothing depends on it — apps/idp/test/knows-people-not-loans.test.ts enforces both halves.",
@@ -31,6 +31,7 @@
   "//ws": "`ws` is a transitive runtime dependency, declared here on purpose. `@mastra/core` opens it at module scope (`import WebSocket from \"ws\"`), and Bun's isolated install links only a package's *declared* dependencies — so without this line `ws` exists only under `node_modules/.bun/@mastra+core@…/node_modules/ws` and is unreachable from the app. In the Alpine builder webpack left it as a bare `require(\"ws\")` external, Next's file tracing could not resolve that specifier from the emitted route, and the standalone image shipped without it: `POST /api/chat` answered `Cannot find module 'ws'` on Render while `next start` on a full node_modules was fine. Declaring it is the whole fix — the specifier now resolves from this package, so tracing carries it. Measured in #92; `scripts/verify-standalone.ts` is what proves it, against the Docker image rather than `next start`.",
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.61",
+    "@cg/governance-core": "workspace:*",
     "@cg/policy-schema": "workspace:*",
     "@mastra/core": "^1.69.0",
     "@mastra/mcp": "^2.0.0",
@@ -41,9 +42,8 @@
     "ws": "^8.21.0",
     "zod": "4.6.5"
   },
-  "//gc": "`@cg/governance-core` is a devDependency, not a dependency: nothing the deployed service renders or routes imports it. The one importer is `scripts/gateway-stand-in.ts`, a local fixture a forker deletes, which needs #9's `routeApproval` — the same module `tools/approvals` is checked against — so the offline run routes an escalation by the real rule rather than by a second copy of it. A dependency edge from the governed UI to the control plane's engine is exactly what this repo keeps refusing; a dev-only edge from a stand-in is not that.",
+  "//gc": "`@cg/governance-core` is a runtime dependency since #4: the control plane is a module of this app (`lib/control-plane/`), and it is the engine's one consumer. The edge that matters runs the other way and still does not exist: `packages/governance-core` imports nothing from any app, and its `no-app-dependencies.test.ts` fails if it starts to. The UI side of the app still reaches the control plane only through its routes and `lib/control-plane/`'s exports, never the engine directly.",
   "devDependencies": {
-    "@cg/governance-core": "workspace:*",
     "@happy-dom/global-registrator": "^20.14.5",
     "@types/bun": "^1.4.2",
     "@types/node": "^22.15.3",

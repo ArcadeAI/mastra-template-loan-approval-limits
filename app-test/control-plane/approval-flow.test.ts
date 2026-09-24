@@ -24,14 +24,14 @@ import type { Database } from "bun:sqlite";
 
 import { PreHookResult, type ApprovalRecord } from "@cg/policy-schema";
 
-import { createApprovalControl } from "../src/approval-governance.ts";
-import { recent } from "../src/audit-log.ts";
-import type { HooksConfig } from "../src/config.ts";
-import { handlePre, type HandlerContext } from "../src/handlers.ts";
-import { allGrants } from "../src/grants-store.ts";
-import { createPolicyCache, type PolicyCache } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
-import { createServer } from "../src/server.ts";
+import { createApprovalControl } from "../../lib/control-plane/approval-governance.ts";
+import { recent } from "../../lib/control-plane/audit-log.ts";
+import type { HooksConfig } from "../../lib/control-plane/config.ts";
+import { handlePre, type HandlerContext } from "../../lib/control-plane/handlers.ts";
+import { allGrants } from "../../lib/control-plane/grants-store.ts";
+import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { createServer } from "../../lib/control-plane/server.ts";
 
 const DANA = "alice@bank.example";
 const SAM = "bob@bank.example";

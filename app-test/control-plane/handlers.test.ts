@@ -8,11 +8,11 @@ import type { Database } from "bun:sqlite";
 import { AccessHookResult, type GovernanceEvent, PostHookResult, PreHookResult } from "@cg/policy-schema";
 
 import { loanFixture } from "./loan-fixture.ts";
-import { createApprovalControl } from "../src/approval-governance.ts";
-import { CORRELATION_TOKEN, correlationId } from "../src/correlation.ts";
-import { handleAccess, handlePost, handlePre, type HandlerContext } from "../src/handlers.ts";
-import { createPolicyCache, type CacheState } from "../src/policy-cache.ts";
-import { openGovernance } from "../src/policy-store.ts";
+import { createApprovalControl } from "../../lib/control-plane/approval-governance.ts";
+import { CORRELATION_TOKEN, correlationId } from "../../lib/control-plane/correlation.ts";
+import { handleAccess, handlePost, handlePre, type HandlerContext } from "../../lib/control-plane/handlers.ts";
+import { createPolicyCache, type CacheState } from "../../lib/control-plane/policy-cache.ts";
+import { openGovernance } from "../../lib/control-plane/policy-store.ts";
 
 const DANA = "alice@bank.example";
 const SAM = "bob@bank.example";
