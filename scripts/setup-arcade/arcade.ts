@@ -32,9 +32,14 @@
  * Auth is `Authorization: Bearer <ARCADE_API_KEY>`, a project key, which
  * selects the project (spec `securitySchemes.Bearer`).
  */
-import { ARCADE_PROVIDER_ID } from "../../lib/identity/provider/client.ts";
-
-export const PROVIDER_ID = ARCADE_PROVIDER_ID;
+/**
+ * The hop-2 provider id, fixed because `tools/loan` reads `OAuth2(id=...)` at
+ * import. A literal rather than an import of the identity provider's
+ * constant: nothing outside `lib/identity/` imports the provider's internals
+ * (`only-identity-mints.test.ts`). `app-test/identity/provider-id.test.ts`
+ * fails if this, the provider's and `tools/loan`'s ever disagree.
+ */
+export const PROVIDER_ID = "app-identity";
 /** The hook extension's name, which is how a re-run finds the one it made. */
 export const PLUGIN_NAME = "loan-approval-limits-hooks";
 

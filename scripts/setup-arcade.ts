@@ -219,10 +219,36 @@ if (dryRun) {
 
 // --- 2. The provider is read back before anything is written ----------------
 
-const { createAuth } = await import("../lib/identity/provider/auth.ts");
-const { ensureOAuthClients, rotateOAuthClientSecret } = await import("../lib/identity/provider/client.ts");
-const { readConfig } = await import("../lib/identity/provider/config.ts");
-const { openPeople } = await import("../lib/identity/provider/db.ts");
+/**
+ * The identity module's own tool, `bun run oauth-client`, as a subprocess.
+ * Only the identity module mints (DESIGN.md → Services;
+ * `app-test/identity/only-identity-mints.test.ts`), so this script never
+ * imports the provider: it runs the same command a human would, with the
+ * environment this run has built, and reads its `--json`.
+ */
+interface MintedClient {
+  key: string;
+  client_id: string;
+  client_secret: string | null;
+  created: boolean;
+  redirect_uris: string[];
+}
+async function oauthClient(...args: string[]): Promise<MintedClient[]> {
+  const run = Bun.spawn(["bun", "--no-env-file", join(import.meta.dir, "identity", "oauth-client.ts"), "--json", ...args], {
+    cwd,
+    env: process.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([new Response(run.stdout).text(), new Response(run.stderr).text(), run.exited]);
+  if (code !== 0) fail(`bun run oauth-client ${args.join(" ")} exited ${code}:\n${stderr}`);
+  const printed = (JSON.parse(stdout) as { clients: MintedClient[] }).clients;
+  // A secret is printed only by the call that minted it, and every later call
+  // lists that client again with none: keep each one this run has seen.
+  for (const each of printed) if (each.client_secret !== null) minted.set(each.key, each.client_secret);
+  return printed.map((each) => ({ ...each, client_secret: minted.get(each.key) ?? null }));
+}
+const minted = new Map<string, string>();
 
 out(`\nArcade (${apiUrl}):`);
 const existingProvider = await admin.request("GET", `/v1/admin/auth_providers/${PROVIDER_ID}`);
@@ -233,17 +259,17 @@ const providerExists = existingProvider.status === 200;
 
 // --- 3. The OAuth clients ---------------------------------------------------
 
-const identity = readConfig(process.env);
-const db = await openPeople(identity.dbPath);
-const auth = createAuth({ db, baseURL: identity.baseURL, secret: identity.secret });
-let clients = await ensureOAuthClients(auth, { clients: identity.clients, secret: identity.secret });
-const client = (key: string) => clients.find((each) => each.key === key)!;
+let clients = await oauthClient();
+const client = (key: string) => {
+  const found = clients.find((each) => each.key === key);
+  if (!found) fail(`bun run oauth-client printed no ${key} client`);
+  return found;
+};
 
 if (providerExists) {
-  const desired = providerBody({ host, origin, arcadeClientId: client("arcade").clientId, arcadeClientSecret: "", hookToken: "", approvalsStoreToken: "" });
+  const desired = providerBody({ host, origin, arcadeClientId: client("arcade").client_id, arcadeClientSecret: "", hookToken: "", approvalsStoreToken: "" });
   const differences = providerDifferences(existingProvider.json, desired);
   if (differences.length > 0) {
-    db.close();
     out(`\nThe provider ${PROVIDER_ID} already exists in this Arcade project, and it is not what this app needs:`);
     for (const line of differences) out(`  - ${line}`);
     fail(
@@ -257,11 +283,10 @@ if (providerExists) {
 /** The secret a client needs this run, minting a new one only where nothing registered depends on the old. */
 async function secretOf(key: string, rotate: boolean): Promise<string | null> {
   const current = client(key);
-  if (current.clientSecret !== null) return current.clientSecret;
+  if (current.client_secret !== null) return current.client_secret;
   if (!rotate) return null;
-  const rotated = await rotateOAuthClientSecret(auth, key);
-  clients = clients.map((each) => (each.key === key ? rotated : each));
-  return rotated.clientSecret;
+  clients = await oauthClient("--client", key, "--rotate");
+  return client(key).client_secret;
 }
 
 // `arcade`: rotated only when the provider is about to be created with it.
@@ -269,18 +294,18 @@ const arcadeSecret = await secretOf("arcade", !providerExists);
 // `web`: its credentials live in .env, so rotating is safe whenever .env has none.
 const webConfigured = effective("IDP_CLIENT_ID") !== "" && effective("IDP_CLIENT_SECRET") !== "";
 const webSecret = webConfigured ? null : await secretOf("web", true);
-if (webConfigured && effective("IDP_CLIENT_ID") !== client("web").clientId) {
-  out(`  warning       IDP_CLIENT_ID is ${effective("IDP_CLIENT_ID")}, but idp.db's web client is ${client("web").clientId}; sign-in will fail until they match`);
+if (webConfigured && effective("IDP_CLIENT_ID") !== client("web").client_id) {
+  out(`  warning       IDP_CLIENT_ID is ${effective("IDP_CLIENT_ID")}, but idp.db's web client is ${client("web").client_id}; sign-in will fail until they match`);
 }
 // `arcade-user-source`: shown when minted now; never rotated behind a User Source that may exist.
-const userSourceSecret = client("arcade-user-source").clientSecret;
+const userSourceSecret = client("arcade-user-source").client_secret;
 
 // --- 4. .env, blanks only ---------------------------------------------------
 
 const toWrite: Record<string, string> = {};
 for (const [key, value] of Object.entries(planned)) if (!setElsewhere(key)) toWrite[key] = value;
 if (webSecret !== null) {
-  toWrite.IDP_CLIENT_ID = client("web").clientId;
+  toWrite.IDP_CLIENT_ID = client("web").client_id;
   toWrite.IDP_CLIENT_SECRET = webSecret;
 }
 let filled = fillBlanks(envText, toWrite);
@@ -294,7 +319,7 @@ if (filled.kept.length > 0) out(`  kept     ${filled.kept.join(", ")}  (already 
 const registration: Registration = {
   host,
   origin,
-  arcadeClientId: client("arcade").clientId,
+  arcadeClientId: client("arcade").client_id,
   arcadeClientSecret: arcadeSecret ?? "",
   hookToken: hookToken.value,
   approvalsStoreToken: storeToken.value,
@@ -304,7 +329,6 @@ async function step<T>(what: string, run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    db.close();
     fail(
       `${what} failed: ${(error as Error).message}\n` +
         `.env and idp.db keep what this run wrote, so running the same command again picks up from here.`,
@@ -320,7 +344,7 @@ if (!providerExists) {
 // Arcade generates the provider's callback, one per provider (docs/spikes/05:
 // `…/oauth/<id>/callback`), and the `arcade` client must allowlist it exactly.
 const callback = (provider as { oauth2?: { redirect_uri?: string } } | null)?.oauth2?.redirect_uri;
-if (callback && !client("arcade").redirectUris.includes(callback)) {
+if (callback && !client("arcade").redirect_uris.includes(callback)) {
   const key = "IDP_OAUTH_REDIRECT_URIS_ARCADE";
   if (setElsewhere(key) || (fileEnv[key]?.trim() ?? "") !== "") {
     out(`  warning       the provider's callback is ${callback}; add it to ${key} yourself, it is already set and never overwritten`);
@@ -328,12 +352,11 @@ if (callback && !client("arcade").redirectUris.includes(callback)) {
     filled = fillBlanks(filled.text, { [key]: callback });
     writeEnvFile(envPath, filled.text);
     process.env[key] = callback;
-    clients = await ensureOAuthClients(auth, { clients: readConfig(process.env).clients, secret: identity.secret });
+    // Brings the client's allowlist in line in place; the id and secret do not change.
+    clients = await oauthClient();
     out(`  allowlisted the provider's callback on the arcade client: ${callback}`);
   }
 }
-db.close();
-
 await step("setting the tool secret APP_PUBLIC_HOST", () =>
   admin.expect("POST", "/v1/admin/secrets/APP_PUBLIC_HOST", { value: host, description: "The app's public host (setup-arcade)" }),
 );
@@ -389,7 +412,7 @@ out(`  custom verifier: ${verifier.verifier_url} (read back)`);
 // --- 6. What the API cannot do ----------------------------------------------
 
 out("\nTwo dashboard forms are left. Arcade's API cannot fill these:\n");
-out(userSourceForm({ origin, clientId: client("arcade-user-source").clientId, clientSecret: userSourceSecret }));
+out(userSourceForm({ origin, clientId: client("arcade-user-source").client_id, clientSecret: userSourceSecret }));
 out();
 out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
 out(`
