@@ -3,8 +3,8 @@
  *
  * Cookie-bound and server-side, which is the whole of its security story: the
  * IdP bearer lives in a sealed, HTTP-only cookie this process can open and the
- * browser cannot, so the browser asks this route and this route asks
- * `apps/loan-app` as whoever is signed in. There is no parameter on this route
+ * browser cannot, so the browser asks this route and this route asks the loan
+ * module, in-process (#5), as whoever is signed in. There is no parameter on this route
  * — no persona, no id, no filter — because every one of them would be a way for
  * the caller to name somebody else's loan book.
  *

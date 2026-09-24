@@ -11,7 +11,7 @@
  * Authorization code + PKCE, `openid email`. Sign-in itself wants one thing
  * from the access token — the **email**, read from `/oauth2/userinfo` — and
  * since #157 the token is kept afterwards rather than dropped, because the
- * bank's own screens read `apps/loan-app` with it as the signed-in person.
+ * bank's own screens read the loan module with it as the signed-in person.
  * `lib/identity/session.ts` → `IdpToken` has the argument and the measurement;
  * this module's job is only to obtain and renew one.
  */

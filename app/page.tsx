@@ -35,7 +35,7 @@
  *    `app-test/home-surface.test.ts` asserts the counts.
  *
  *    It also reads the loan book, but not from the gateway: `readLoanBook`
- *    calls `apps/loan-app` over HTTP with this browser's IdP bearer, so the
+ *    calls the loan module in-process with this browser's IdP bearer, so the
  *    first paint is already correct and the cards poll `GET /api/loans` from
  *    then on. `lib/loan-context/loans.ts` has the argument. The two reads are
  *    independent — one goes to the gateway, one to the bank's own API — so the

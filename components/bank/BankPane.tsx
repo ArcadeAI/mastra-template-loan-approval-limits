@@ -26,8 +26,8 @@
  * ## What is real here
  *
  * Everything, and since #176 that includes the chrome. The loan cards are read
- * from `apps/loan-app` — the bank's own HTTP API, over HTTP, as the signed-in
- * person, and polled (#157) — the session controls in the top chrome are #82's
+ * from the loan module — the bank's own API, in-process since #5, as the
+ * signed-in person, and polled (#157) — the session controls in the top chrome are #82's
  * real OIDC sign-in against `apps/idp`, the two tabs both navigate, and the chat
  * is #14's real agent. Nothing on this screen is a mock, and the one region that
  * is not built yet says so ({@link ToolListSlot}).
@@ -172,7 +172,7 @@ export function BankPane({
    * The bank has an intact session cookie and will not accept it.
    *
    * `expired` is `lib/loan-context/read.ts`'s name for a real 401 from
-   * `apps/loan-app` on this browser's own IdP bearer. It is **not** a policy
+   * the loan module on this browser's own IdP bearer. It is **not** a policy
    * decision — no hook runs on this path — so nothing keyed on it may reach for
    * the control plane's words. What it is is a sign-in to do again, and the
    * reason the whole screen has to know is #176's third complaint: the cookie

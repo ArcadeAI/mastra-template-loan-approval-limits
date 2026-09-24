@@ -11,7 +11,7 @@
  *
  * ## Why polling and not a stream
  *
- * `apps/loan-app` is the bank's system of record and it stays ignorant: no SSE,
+ * The loan module is the bank's system of record and it stays ignorant: no SSE,
  * no subscriptions, no idea anything is watching (`DESIGN.md` → Business
  * system, and `knows-nothing-about-governance.test.ts` is what keeps it that
  * way). A demo loan book answering nine cheap reads every two seconds is not a
