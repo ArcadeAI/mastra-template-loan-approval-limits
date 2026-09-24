@@ -40,6 +40,6 @@ export function installResponseClose(): void {
         if (!closed && !response.writableFinished) response.emit("close");
       });
     }
-    return emit.call(this, event, ...args);
+    return (emit as (this: http.Server, event: string | symbol, ...args: unknown[]) => boolean).call(this, event, ...args);
   } as typeof proto.emit;
 }
