@@ -57,6 +57,7 @@
  * that a model which *does* spin hits it visibly rather than being quietly
  * capped at one call.
  */
+import { TEMPERATURE } from "./agent.ts";
 import { authorizationRequired, isHookDecision, remediationText } from "./authorization.ts";
 import { approvalRequested } from "./escalation.ts";
 import { CORRELATION_TOKEN } from "../governance/correlation.ts";
@@ -66,8 +67,8 @@ import { readNativeUrlElicitations, type NativeElicitationBridge, type NativeUrl
 /** The ceiling on tool calls in one turn. High enough that a spin is visible as a spin. */
 export const MAX_STEPS = 8;
 
-/** Temperature 0, on every run. `DESIGN.md` → Model. */
-export const TEMPERATURE = 0;
+/** Temperature 0, on every run. Defined with the agent, and passed on every turn here. */
+export { TEMPERATURE };
 
 /** Anything with the `stream` method an agent has. Narrow on purpose — this file uses one method. */
 export interface Streamable {

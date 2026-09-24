@@ -1151,6 +1151,56 @@ sealed session, which means hop 1's authorization server, and the only stand-in 
 lives in `test/identity-harness.ts`. Folding the two stand-ins together so the chat runs
 offline end to end is worth doing and is filed as #87, not done here.
 
+## The same agent in Mastra Studio (#8)
+
+`src/mastra/index.ts` is what `mastra dev` loads, and it registers the agent `/chat`
+runs: `buildAgent` from `lib/agent/agent.ts`, the same instructions, and a toolset built
+the chat route's way (the gateway's `tools/list`, filtered to the project's toolkits,
+closed when the escalation returns). `app-test/studio-entry.test.ts` runs one turn
+through each entry and fails if the model is handed a different system prompt or a
+different tool.
+
+    bun run studio            # mastra dev, on STUDIO_PORT
+
+Studio runs under **Node**, in its own process, while the app runs on Bun. Nothing the
+entry imports may open `bun:sqlite` or any other `bun:` module; the same test walks the
+import graph and imports the entry with `node`. Studio binds `STUDIO_PORT` rather than
+`PORT`, because `mastra dev` loads the root `.env.local` and `PORT` there is the app's.
+
+**Where `STUDIO_PORT` comes from.** In an Orca worktree, `scripts/orca-setup.sh` writes it
+into the root `.env.local` as `CG_PORT_BASE+5`, inside the worktree's own block, so two
+worktrees never ask for the same port (`test/orca-setup.test.ts`). Anywhere else, with
+`STUDIO_PORT` unset, Studio takes **4111, Mastra's own default**, on purpose: it is where
+Mastra's Quickstart tells a developer to look. Set `STUDIO_PORT` to move it. The tests
+that boot Studio never use 4111; they bind a port the OS hands them.
+
+### Where Studio's gateway token comes from
+
+Studio has no browser session: it is a different origin, and the app's sealed cookie is
+never sent to it. So Studio runs hop 1 itself, as a loopback MCP client, and holds the
+grant in memory for the life of the process:
+
+    open http://localhost:<STUDIO_PORT>/arcade/authorize
+      → dynamic registration for http://localhost:<STUDIO_PORT>/arcade/callback, PKCE
+      → the gateway's sign-in (the app's user source), then Arcade's consent screen
+      → /arcade/callback exchanges the code; Studio now acts as whoever signed in
+
+The callback is built from the address the browser reached Studio at, so it follows
+whatever port Studio is actually on. The steps are `lib/identity/gateway.ts`, the same
+module the web UI's hop 1 uses, and the bearer comes out of `gatewayToken` in
+`lib/agent/gateway-token.ts`, the one function every entry gets a gateway token from.
+Until someone authorizes, a turn in Studio fails with a sentence naming
+`/arcade/authorize`. Studio's agent page lists no tools until then, because Mastra drops
+the error when it lists the agent. Arcade Headers mode is not used and is not an option.
+
+Hop 2 is expected to be keyed on the Arcade `user_id` rather than on the MCP client, so
+a persona who has already authorized the Loan toolkit in the web UI should not be asked
+again in Studio. That is an assumption, not a measurement. A native URL elicitation
+arriving in Studio is written to the Studio server's log and cancelled.
+
+What only a real Arcade account can confirm, starting with whether the gateway accepts
+a loopback redirect URI, is listed on #7.
+
 ## Act 2's second half — the turn that ends, and the turn that follows (#20)
 
 `Approvals_RequestApproval` routes the escalation, records it, messages the approver, and

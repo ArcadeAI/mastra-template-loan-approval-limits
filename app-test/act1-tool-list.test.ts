@@ -29,6 +29,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { DANA, OVER_LIMIT_LOAN, SAM, startAgentHarness, type AgentHarness } from "./agent-harness.ts";
+import { BEHAVIOURAL } from "./behaviour.ts";
 import { anthropicModel } from "../lib/agent/agent.ts";
 import { chat, CHAT_PATH } from "../lib/agent/handlers.ts";
 import { decodeEvents, replyText, type ChatEvent } from "../lib/agent/events.ts";
@@ -180,25 +181,33 @@ describe("the tool list comes from the gateway, per signed-in persona", () => {
    * Read through `sessionTools`, so what is checked is what a real `tools/list`
    * put in front of the model, not a string in a file that may not reach it.
    *
-   * Scoped to the approvals toolkit: the loan descriptions carry "there is no
-   * undo", which is open as #90 and is not this slice's to change. When #90
-   * lands, widen this to every tool the gateway advertises.
+   * Every tool the gateway advertises, since #8. **This reads the stand-in's
+   * copy of the descriptions, and a copy is not what deploys.** Until #8 it was
+   * scoped to the approvals toolkit and green, while the Python `request_approval`
+   * that `arcade deploy` publishes still said "and only then … tell the user who
+   * was asked and stop". The deployed sentences are guarded where they live, by
+   * `tools/loan/tests/test_descriptions.py` and
+   * `tools/approvals/tests/test_descriptions.py`, against the same vocabulary.
    */
-  test("the approvals descriptions instruct the model in nothing", async () => {
+  test("no tool description instructs the model in anything", async () => {
     const result = await sessionTools(sessionFor(DANA), { config: harness.config });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const approvals = result.tools.filter((tool) => tool.name.startsWith("Approvals_"));
-    // Both of them, so a toolkit that silently stopped being advertised cannot
-    // pass this by having nothing to check.
-    expect(approvals).toHaveLength(2);
+    // All six, so a toolkit that silently stopped being advertised cannot pass
+    // this by having nothing to check.
+    expect(result.tools.map((tool) => tool.name)).toEqual([
+      "Loan_SearchLoans",
+      "Loan_GetLoan",
+      "Loan_ApproveLoan",
+      "Loan_DenyLoan",
+      "Approvals_RequestApproval",
+      "Approvals_Decide",
+    ]);
 
-    const barred =
-      /\b(escalat\w*|refus\w*|retry|retrying|confirm\w*|caution\w*|irreversib\w*|no undo|you (?:should|must|do not|can)|only then|and stop|wait for)\b/i;
-    for (const tool of approvals) {
+    for (const tool of result.tools) {
       expect(tool.description.length).toBeGreaterThan(0);
-      expect(tool.description).not.toMatch(barred);
+      expect(tool.description).not.toMatch(BEHAVIOURAL);
     }
   });
 

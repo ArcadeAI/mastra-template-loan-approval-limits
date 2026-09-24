@@ -225,7 +225,7 @@ function loanTools(toolkit: string): LoanToolSpec[] {
       target: "loan-app",
       name: `${toolkit}_GetLoan`,
       description:
-        "Read one loan application's complete file by ID. Use this whenever you need more than the list-view fields, and always before recording a decision.",
+        "Read one loan application's complete file by ID, including the underwriter's notes and every decision already recorded.",
       inputSchema: object({ loan_id: str("The loan application ID, in the form LN-0000.") }, ["loan_id"]),
       run: (inputs) => ({ method: "GET", path: `/loans/${encodeURIComponent(String(inputs.loan_id))}` }),
     },
@@ -233,7 +233,7 @@ function loanTools(toolkit: string): LoanToolSpec[] {
       target: "loan-app",
       name: `${toolkit}_ApproveLoan`,
       description:
-        "Approve a loan application for a given dollar amount, committing the decision to the loan book. It is a write against the bank's system of record, not a recommendation, and there is no undo.",
+        "Approve a loan application for a given dollar amount, committing the decision to the loan book.",
       inputSchema: object(
         {
           loan_id: str("The loan application ID, in the form LN-0000."),
@@ -251,7 +251,7 @@ function loanTools(toolkit: string): LoanToolSpec[] {
       target: "loan-app",
       name: `${toolkit}_DenyLoan`,
       description:
-        "Decline a loan application with a stated reason, committing the decision to the loan book. There is no undo.",
+        "Decline a loan application with a stated reason, committing the decision to the loan book.",
       inputSchema: object(
         {
           loan_id: str("The loan application ID, in the form LN-0000."),

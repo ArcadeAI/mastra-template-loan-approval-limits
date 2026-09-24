@@ -53,7 +53,8 @@
 import type { MCPClient } from "@mastra/mcp";
 
 import { readIdentitySurface, type IdentitySurface } from "../config.ts";
-import { GATEWAY_START_PATH, liveGatewayToken, refreshedGatewayToken } from "../identity/handlers.ts";
+import { GATEWAY_START_PATH } from "../identity/handlers.ts";
+import { gatewayToken } from "./gateway-token.ts";
 import { mcpUrl, probeGatewayToken } from "../identity/gateway.ts";
 import type { Session } from "../identity/session.ts";
 import type { NativeElicitationBridge } from "./native-elicitation.ts";
@@ -133,7 +134,7 @@ export type SessionSurface<T> =
  * back as `{ ok: false, reason }` rather than as a throw, because the caller is
  * a server component rendering a page that has other things on it.
  *
- * **A refreshed gateway token is used and not persisted.** `liveGatewayToken`
+ * **A refreshed gateway token is used and not persisted.** `gatewayToken`
  * may mint a new access token, and a server component cannot set a cookie — so
  * the token is spent on this one call and the session cookie keeps the old one
  * until the next request that *can* reseal it (`POST /api/chat`, which does).
@@ -197,7 +198,7 @@ export async function sessionSurface<T>(
     });
   }
 
-  const live = await liveGatewayToken(session, config);
+  const live = await gatewayToken(session, config);
   if (live.token === null) {
     return unavailable({
       ok: false,
@@ -214,7 +215,7 @@ export async function sessionSurface<T>(
   // more ask, and no loop after that — the same shape and the same reasoning as
   // `lib/agent/handlers.ts`, which is the route this page is about to send the
   // person to.
-  const renewed = await refreshedGatewayToken(live.session, config);
+  const renewed = await gatewayToken(live.holder, config, { refresh: true });
   if (renewed.token === null) {
     // The refresh failed too, so there is a person's click left in this and the
     // sentence has to carry it. Same three facts #94 settled on: what happened,
