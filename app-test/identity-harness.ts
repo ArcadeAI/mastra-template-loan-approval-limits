@@ -348,6 +348,21 @@ export interface ArcadeStandIn {
   issueToolToken(email: string): string;
   /** Reset only the stand-in's provider grants between focused test cases. */
   clearToolGrantsForTest(): void;
+  /**
+   * Make hop 1 a **User Source** gateway (#6): the gateway's authorize step
+   * sends the browser to this issuer's `/oauth2/authorize` under this client,
+   * with PKCE, before its own consent screen, the way the live gateway
+   * brokered it to `cg-idp` (spike 04's addendum) and now brokers it to the
+   * app. Off unless configured, so every other suite sees the gateway it saw
+   * before.
+   */
+  configureUserSource(options: { issuer: string; clientId: string; clientSecret: string }): void;
+  /**
+   * Every login the gateway brokered to the User Source, with what it read
+   * off the ID token. `iss` is compared with the configured issuer byte for
+   * byte before anything is recorded, as Arcade compares it.
+   */
+  userSourceLogins: Array<{ iss: string; email: string; access_token: string | null }>;
   stop(): void;
 }
 
@@ -362,7 +377,7 @@ export interface ArcadeStandIn {
  * harness does not attempt to model the whole gateway.
  */
 export function startArcadeStandIn(): ArcadeStandIn {
-  const codes = new Map<string, { challenge: string; clientId: string; redirectUri: string }>();
+  const codes = new Map<string, { challenge: string; clientId: string; redirectUri: string; subject?: { email: string; login: number } }>();
   const refreshTokens = new Map<string, string>();
   const flows = new Map<
     string,
@@ -376,6 +391,11 @@ export function startArcadeStandIn(): ArcadeStandIn {
     }
   >();
   const providerCodes = new Map<string, string>();
+  /** A gateway authorize parked while the User Source signs the person in, by the state sent there. */
+  const parkedAuthorize = new Map<string, { query: string; verifier: string }>();
+  /** Who the User Source said each gateway authorize is, by the `us` key it resumes under. */
+  const userSourceSubjects = new Map<string, { email: string; login: number }>();
+  let userSource: { issuer: string; clientId: string; clientSecret: string } | null = null;
   const pendingProvider = new Map<string, { code: string; codeVerifier: string }>();
   const actors = new Map<string, string>();
   const grantsByUser = new Map<string, string>();
@@ -436,6 +456,10 @@ export function startArcadeStandIn(): ArcadeStandIn {
     clearToolGrantsForTest() {
       grantsByUser.clear();
     },
+    configureUserSource(options) {
+      userSource = options;
+    },
+    userSourceLogins: [],
     stop: () => server.stop(true),
   };
 
@@ -605,6 +629,72 @@ export function startArcadeStandIn(): ArcadeStandIn {
       // Arcade's own gateway consent screen — once per persona per MCP client
       // id. Rendered as a form so the suite has to press it, the way a human
       // does, rather than having the flow complete invisibly.
+      // A User Source gateway (#6) signs the person in at the User Source
+      // first. Parked by a key of its own, sent to the issuer's authorize
+      // under the User Source's client with PKCE, and resumed with `us=<key>`
+      // once the intermediate callback has read who it was.
+      if (pathname === "/oauth/authorize" && request.method === "GET" && userSource && !url.searchParams.has("us")) {
+        const key = crypto.randomUUID();
+        const verifier = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+        const challenge = Buffer.from(
+          await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+        ).toString("base64url");
+        parkedAuthorize.set(key, { query: url.search, verifier });
+        const brokered = new URL(`${userSource.issuer}/oauth2/authorize`);
+        brokered.search = new URLSearchParams({
+          response_type: "code",
+          client_id: userSource.clientId,
+          redirect_uri: `${state.url}/oauth2/intermediate_callback`,
+          scope: "openid email",
+          state: key,
+          code_challenge: challenge,
+          code_challenge_method: "S256",
+        }).toString();
+        return new Response(null, { status: 302, headers: { location: brokered.toString() } });
+      }
+
+      // Arcade's intermediate callback: redeem the User Source's code, read
+      // the ID token, check its issuer, and go back to the parked authorize.
+      if (pathname === "/oauth2/intermediate_callback" && request.method === "GET" && userSource) {
+        const key = url.searchParams.get("state") ?? "";
+        const parked = parkedAuthorize.get(key);
+        parkedAuthorize.delete(key);
+        const code = url.searchParams.get("code");
+        if (!parked || !code) return new Response("no such user source login", { status: 400 });
+        const half = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
+        const exchanged = await fetch(`${userSource.issuer}/oauth2/token`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            authorization: `Basic ${Buffer.from(`${half(userSource.clientId)}:${half(userSource.clientSecret)}`).toString("base64")}`,
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: `${state.url}/oauth2/intermediate_callback`,
+            code_verifier: parked.verifier,
+          }).toString(),
+        });
+        const tokens = (await exchanged.json().catch(() => ({}))) as { id_token?: string };
+        if (!exchanged.ok || !tokens.id_token) {
+          return new Response(`Token exchange with identity provider failed: ${exchanged.status}`, { status: 502 });
+        }
+        const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1]!, "base64url").toString("utf8")) as {
+          iss?: string;
+          email?: string;
+        };
+        if (claims.iss !== userSource.issuer) {
+          return new Response(`issuer mismatch: ${String(claims.iss)} is not ${userSource.issuer}`, { status: 502 });
+        }
+        if (!claims.email) return new Response("the ID token carried no email claim", { status: 502 });
+        const login = state.userSourceLogins.push({ iss: claims.iss, email: claims.email, access_token: null }) - 1;
+        const resume = crypto.randomUUID();
+        userSourceSubjects.set(resume, { email: claims.email, login });
+        const back = new URLSearchParams(parked.query);
+        back.set("us", resume);
+        return new Response(null, { status: 302, headers: { location: `/oauth/authorize?${back}` } });
+      }
+
       if (pathname === "/oauth/authorize" && request.method === "GET") {
         const query = url.search;
         return new Response(
@@ -619,10 +709,12 @@ export function startArcadeStandIn(): ArcadeStandIn {
         const redirectUri = url.searchParams.get("redirect_uri") ?? "";
         state.consents.push(clientId);
         const code = `gw-code-${crypto.randomUUID()}`;
+        const subject = userSourceSubjects.get(url.searchParams.get("us") ?? "");
         codes.set(code, {
           challenge: url.searchParams.get("code_challenge") ?? "",
           clientId,
           redirectUri,
+          ...(subject ? { subject } : {}),
         });
         const back = new URL(redirectUri);
         back.searchParams.set("code", code);
@@ -662,7 +754,14 @@ export function startArcadeStandIn(): ArcadeStandIn {
         if (form.get("client_id") !== record.clientId) {
           return Response.json({ error: "invalid_client" }, { status: 400 });
         }
-        return Response.json(issue(record.clientId));
+        const issued = issue(record.clientId);
+        // A User Source gateway's token is that person's: the bearer every
+        // later tool call carries names whoever the User Source signed in.
+        if (record.subject) {
+          actors.set(issued.access_token, record.subject.email.trim().toLowerCase());
+          state.userSourceLogins[record.subject.login]!.access_token = issued.access_token;
+        }
+        return Response.json(issued);
       }
 
       // Hop 2. The project API key is demanded, because the real one does.
@@ -838,7 +937,18 @@ export interface IdentityHarnessOptions {
    * here.
    */
   extraWebRedirectUris?: readonly string[];
+  /**
+   * Make the gateway a User Source gateway whose User Source is this app's own
+   * identity provider (#6): the provider gets its `arcade-user-source` client,
+   * allowlisting the stand-in's intermediate callback, and the stand-in
+   * brokers hop 1's login to it. Off by default, so a suite about something
+   * else sees the gateway it saw before.
+   */
+  userSource?: boolean;
 }
+
+/** The provider's client key for the Arcade User Source, as `.env.example` documents it. */
+export const USER_SOURCE_CLIENT = "arcade-user-source";
 
 export async function startIdentityHarness(
   options: IdentityHarnessOptions = {},
@@ -879,7 +989,10 @@ export async function startIdentityHarness(
     BETTER_AUTH_SECRET: "identity-suite-idp-secret".padEnd(48, "x"),
     // Client A stays the Arcade registration; client C is the web sign-in's
     // own — DESIGN.md's "one OAuth client per relying party", settled on #75/#79.
-    IDP_OAUTH_CLIENTS: "web",
+    IDP_OAUTH_CLIENTS: options.userSource ? `web,${USER_SOURCE_CLIENT}` : "web",
+    ...(options.userSource
+      ? { IDP_OAUTH_REDIRECT_URIS_ARCADE_USER_SOURCE: `${arcade.url}/oauth2/intermediate_callback` }
+      : {}),
     IDP_OAUTH_REDIRECT_URIS_WEB: [
       `${webUrl}/api/auth/callback`,
       `${arcade.url}/idp/callback`,
@@ -926,6 +1039,23 @@ export async function startIdentityHarness(
   };
   const clientC = credentials.clients.find((each) => each.key === "web");
   if (!clientC?.client_secret) throw new Error(`no readable secret for client C in:\n${rotateOut}`);
+
+  if (options.userSource) {
+    const minted = spawn(
+      ["bun", join(REPO_ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--client", USER_SOURCE_CLIENT, "--rotate"],
+      { env: idpEnv, stdout: "pipe", stderr: "pipe" },
+    );
+    const [out, err, code] = await Promise.all([
+      new Response(minted.stdout).text(),
+      new Response(minted.stderr).text(),
+      minted.exited,
+    ]);
+    if (code !== 0) throw new Error(`oauth-client --client ${USER_SOURCE_CLIENT} --rotate exited ${code}: ${err}`);
+    const printed = JSON.parse(out) as { clients: Array<{ key: string; client_id: string; client_secret: string | null }> };
+    const client = printed.clients.find((each) => each.key === USER_SOURCE_CLIENT);
+    if (!client?.client_secret) throw new Error(`no readable secret for ${USER_SOURCE_CLIENT} in:\n${out}`);
+    arcade.configureUserSource({ issuer: idpUrl, clientId: client.client_id, clientSecret: client.client_secret });
+  }
 
   // What the app's instance does when it opens: the web sign-in's server-side
   // calls reach this provider in-process, never over the network.
