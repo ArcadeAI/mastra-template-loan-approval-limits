@@ -29,10 +29,13 @@
  * Output is JSONL on stdout: one object per measurement, so a run can be
  * pasted into an issue as evidence rather than summarised.
  */
-import { spawn, type Subprocess } from "bun";
+import type { Subprocess } from "bun";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { serveOnFreePort } from "../../app-test/cdp.ts";
+import { spawnChild } from "../../app-test/child.ts";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -41,19 +44,6 @@ const RESOLUTION_TTL_MS = 60_000;
 
 /** Personas signed in during a rehearsal. DESIGN.md names four. */
 const PERSONAS = 4;
-
-/**
- * A port the OS says is free, rather than a guess. Same reasoning as
- * `test/flow.test.ts::freePort`: several worktrees run at once here, and a
- * guessed port makes a slice fail for a reason that is not in its diff.
- */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") throw new Error("Bun.serve({ port: 0 }) reported no port");
-  return port;
-}
 
 function emit(record: Record<string, unknown>): void {
   console.log(JSON.stringify(record));
@@ -76,42 +66,37 @@ interface Idp {
  */
 async function bootIdp(): Promise<Idp> {
   const dir = mkdtempSync(join(tmpdir(), "cg-idp-drill-"));
-  const port = freePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
 
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(([, value]) => value !== undefined),
   ) as Record<string, string>;
 
-  const child = spawn(["bun", join(ROOT, "src", "index.ts")], {
-    env: {
-      ...inherited,
-      NODE_ENV: "production",
-      PORT: String(port),
-      IDP_DB_PATH: join(dir, "idp.db"),
-      IDP_PUBLIC_URL: baseUrl,
-      IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
-      BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
-    },
-    stdout: "ignore",
-    stderr: "inherit",
+  // Supervised, so it dies with the drill however the drill ends, and on a port
+  // chosen inside `serveOnFreePort`, which starts it again on a new one if
+  // another process took this one first (#9). stderr is piped for that: a
+  // failed boot's error carries it.
+  const { child, port } = await serveOnFreePort(
+    (port) =>
+      spawnChild(["bun", join(ROOT, "src", "index.ts")], {
+        env: {
+          ...inherited,
+          NODE_ENV: "production",
+          PORT: String(port),
+          IDP_DB_PATH: join(dir, "idp.db"),
+          IDP_PUBLIC_URL: `http://127.0.0.1:${port}`,
+          IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
+          BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    rmSync(dir, { recursive: true, force: true });
+    throw new Error(`idp did not come up: ${(error as Error).message}`, { cause: error });
   });
 
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      child.kill();
-      throw new Error("idp did not come up within 20s");
-    }
-    await Bun.sleep(50);
-  }
-
-  return { baseUrl, child, dir };
+  return { baseUrl: `http://127.0.0.1:${port}`, child, dir };
 }
 
 function shutdown(idp: Idp): void {

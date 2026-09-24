@@ -19,20 +19,45 @@
 # Why a block and not a port. This project runs four services — web, hooks,
 # loan-app, idp — and they all read the same `PORT` variable, so a worktree
 # needs four distinct values plus the cross-service host strings derived from
-# them. Range 4400-4559 in blocks of 10 gives 16 blocks against a steady-state
+# them. Range 4560-4719 in blocks of 10 gives 16 blocks against a steady-state
 # need of 8: four implementer worktrees, which persist through review, plus one
 # reviewer worktree each. It deliberately clears outreach-library's hook, which
 # owns 4321-4380 on this machine.
+#
+# This repo's own claims directory AND its own range (#9). The hook came over
+# from the stage demo claiming 4400-4559 in
+# ~/.cache/mastra-contextual-governance/portblocks, and on 2026-09-24 ten of
+# those sixteen blocks were the stage demo's stale claims. A directory of our
+# own stops either repo reaping or releasing the other's claims; a range of our
+# own is what stops both claiming the same block, because a claim is only a
+# file and neither hook reads the other's. 4560-4719 sits directly above the
+# stage demo's 4400-4559. test/orca-setup.test.ts holds both.
 set -euo pipefail
 
 WORKTREE="$(pwd -P)"
-CLAIMS="${XDG_CACHE_HOME:-$HOME/.cache}/mastra-contextual-governance/portblocks"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
+CLAIMS="$CACHE/mastra-template-loan-approval-limits/portblocks"
+# Where this hook claimed before #9. Only ever read to release a claim this
+# worktree itself holds there; every other file in it is the stage demo's.
+LEGACY_CLAIMS="$CACHE/mastra-contextual-governance/portblocks"
 ENVFILE="$WORKTREE/.env.local"
 BLOCK=10
-BASE_MIN=4400
-BASE_MAX=4550
+BASE_MIN=4560
+BASE_MAX=4710
 
 mkdir -p "$CLAIMS"
+
+# A worktree set up before #9 holds a block in the stage demo's pool. Give it
+# back: this worktree claims from its own range below.
+if [ -d "$LEGACY_CLAIMS" ]; then
+  for f in "$LEGACY_CLAIMS"/*; do
+    [ -f "$f" ] || continue
+    if [ "$(cat "$f")" = "$WORKTREE" ]; then
+      rm -f "$f"
+      echo "orca-setup: released legacy claim $(basename "$f") in $LEGACY_CLAIMS"
+    fi
+  done
+fi
 
 listening() {  # is anything bound to this port right now?
   if command -v lsof >/dev/null 2>&1; then

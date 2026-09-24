@@ -17,14 +17,15 @@
  * `next dev` per build directory and a developer may have one running here.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
 import { HealthResponse } from "@cg/policy-schema";
 
-import { freePort, stopProcess, waitForHttp } from "./cdp.ts";
+import { serveOnFreePort, stopProcess, type Booted } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 import { loanFixture } from "./control-plane/loan-fixture.ts";
 import { openEventStream } from "./control-plane/sse-reader.ts";
 
@@ -43,51 +44,55 @@ interface App {
 }
 
 async function bootApp(env: Record<string, string> = {}): Promise<App> {
-  const port = freePort();
   const data = mkdtempSync(join(tmpdir(), "cg-app-control-plane-"));
-  const distDir = `.next/cg-test-${port}`;
-  let output = "";
-  const child = Bun.spawn(["bun", "scripts/next.ts", "dev"], {
-    cwd: ROOT,
-    env: {
-      ...(process.env as Record<string, string>),
-      PORT: String(port),
-      CG_NEXT_DIST_DIR: distDir,
-      GOVERNANCE_DB_PATH: join(data, "governance.db"),
-      // The app holds the loan book too since #5; this one's, not a loans.db
-      // in the repo.
-      LOANS_DB_PATH: join(data, "loans.db"),
-      // And the identity provider since #6: not a `./idp.db` in the repo.
-      IDP_DB_PATH: join(data, "idp.db"),
-      APP_PUBLIC_HOST: `127.0.0.1:${port}`,
-      GOVERNANCE_STREAM: "hooks",
-      NEXT_TELEMETRY_DISABLED: "1",
-      ...env,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  for (const stream of [child.stdout, child.stderr]) {
-    void (async () => {
-      const decoder = new TextDecoder();
-      for await (const chunk of stream as ReadableStream<Uint8Array>) output += decoder.decode(chunk, { stream: true });
-    })();
-  }
-  const origin = `http://127.0.0.1:${port}`;
+  const distDirs: string[] = [];
+  const cleanup = () => {
+    rmSync(data, { recursive: true, force: true });
+    for (const distDir of distDirs) rmSync(join(ROOT, distDir), { recursive: true, force: true });
+  };
+  // The port is chosen inside `serveOnFreePort`, which starts the app again on
+  // a new one if another process took it first (#9); each attempt gets its own
+  // databases and `distDir`.
+  let booted: Booted;
   try {
-    await waitForHttp(`${origin}/health`, BOOT_MS);
-  } catch (cause) {
-    await stopProcess(child);
-    throw new Error(`${String(cause)}\n--- app output ---\n${output}`);
+    booted = await serveOnFreePort(
+      (port) => {
+        const dir = join(data, String(port));
+        mkdirSync(dir);
+        const distDir = `.next/cg-test-${port}`;
+        distDirs.push(distDir);
+        return spawnChild(["bun", "scripts/next.ts", "dev"], {
+          cwd: ROOT,
+          env: {
+            ...(process.env as Record<string, string>),
+            PORT: String(port),
+            CG_NEXT_DIST_DIR: distDir,
+            GOVERNANCE_DB_PATH: join(dir, "governance.db"),
+            // The app holds the loan book too since #5; this one's, not a loans.db
+            // in the repo.
+            LOANS_DB_PATH: join(dir, "loans.db"),
+            // And the identity provider since #6: not a `./idp.db` in the repo.
+            IDP_DB_PATH: join(dir, "idp.db"),
+            APP_PUBLIC_HOST: `127.0.0.1:${port}`,
+            GOVERNANCE_STREAM: "hooks",
+            NEXT_TELEMETRY_DISABLED: "1",
+            ...env,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+      },
+      { url: (port) => `http://127.0.0.1:${port}/health`, timeoutMs: BOOT_MS },
+    );
+  } catch (error) {
+    cleanup();
+    throw error;
   }
   return {
-    origin,
-    child,
-    output: () => output,
-    cleanup: () => {
-      rmSync(data, { recursive: true, force: true });
-      rmSync(join(ROOT, distDir), { recursive: true, force: true });
-    },
+    origin: `http://127.0.0.1:${booted.port}`,
+    child: booted.child,
+    output: booted.output,
+    cleanup,
   };
 }
 

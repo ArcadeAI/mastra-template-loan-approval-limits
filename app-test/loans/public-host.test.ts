@@ -24,6 +24,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { assertPublicHost, publicHost, PublicHostError } from "../../lib/loans/public-host.ts";
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
 
 /** Values a consumer can actually reach, or is free to leave unset. */
 const ACCEPTED = [
@@ -108,7 +110,7 @@ test("a good value wins over the default, and is trimmed", () => {
 
 /** Spawn the real entry point with `IDENTITY_HOST` set to `host`. */
 function boot(host: string, port: number, dir: string): Subprocess {
-  return Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
+  return spawnChild(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
     env: {
       ...process.env,
       PORT: String(port),
@@ -118,17 +120,6 @@ function boot(host: string, port: number, dir: string): Subprocess {
     stdout: "pipe",
     stderr: "pipe",
   });
-}
-
-/** A port the OS says is free. Several worktrees run `bun test` at once. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
 }
 
 /**
@@ -170,27 +161,18 @@ test.each(["cg-idp-or5b.onrender.com", "localhost:8082", "127.0.0.1:1234", "[::1
   "the loan API starts on %p",
   async (host) => {
     const dir = mkdtempSync(join(tmpdir(), "cg-public-host-"));
-    const port = freePort();
-    const child = boot(host, port, dir);
 
     try {
-      const deadline = Date.now() + 20_000;
-      for (;;) {
-        if (child.exitCode !== null) {
-          const stderr = await new Response(child.stderr as ReadableStream).text();
-          throw new Error(`exited ${child.exitCode} instead of serving: ${stderr}`);
-        }
-        try {
-          if ((await fetch(`http://127.0.0.1:${port}/bank/health`)).ok) break;
-        } catch {
-          // Not listening yet.
-        }
-        if (Date.now() > deadline) throw new Error("loan-app did not come up");
-        await Bun.sleep(50);
-      }
-    } finally {
+      // On a port chosen inside `serveOnFreePort`, which boots again on a new
+      // one if another process took it first (#9), and fails at once, with the
+      // child's output, if it exits instead of serving.
+      const { child } = await serveOnFreePort((port) => boot(host, port, dir), {
+        ready: async (port) => (await fetch(`http://127.0.0.1:${port}/bank/health`)).ok,
+        timeoutMs: 20_000,
+      });
       child.kill();
       await child.exited;
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   },

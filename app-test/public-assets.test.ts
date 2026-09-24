@@ -52,7 +52,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Subprocess } from "bun";
 
-import { freePort, stopProcess, waitForHttp } from "./cdp.ts";
+import { serveOnFreePort, stopProcess } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 
 const WEB = join(import.meta.dir, "..");
 const PUBLIC = join(WEB, "public");
@@ -177,7 +178,7 @@ let pending: Promise<Artifact> | undefined;
 /** Build the standalone tree and serve it, once, for whichever test asks first. */
 function artifact(): Promise<Artifact> {
   pending ??= (async (): Promise<Artifact> => {
-    const build = Bun.spawn({
+    const build = spawnChild({
       cmd: ["bun", "run", "build"],
       cwd: WEB,
       env: { ...(process.env as Record<string, string>), NEXT_TELEMETRY_DISABLED: "1" },
@@ -191,26 +192,26 @@ function artifact(): Promise<Artifact> {
     ]);
     if (status !== 0) throw new Error(`\`bun run build\` exited ${String(status)}\n${out}\n${err}`);
 
-    const port = freePort();
+    // On a port chosen inside `serveOnFreePort`, which starts the server again
+    // on a new one if another process took it first (#9).
+    const { child: server, port } = await serveOnFreePort((port) =>
+      spawnChild({
+        // The artifact's own entrypoint, run the way the root `Dockerfile`'s
+        // `CMD` runs it: Bun since #4 (Node until then), from the root of the
+        // standalone tree.
+        cmd: ["bun", "server.js"],
+        cwd: STANDALONE,
+        env: {
+          ...(process.env as Record<string, string>),
+          NODE_ENV: "production",
+          PORT: String(port),
+          HOSTNAME: "127.0.0.1",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
     const origin = `http://127.0.0.1:${port}`;
-    const server = Bun.spawn({
-      // The artifact's own entrypoint, run the way the root `Dockerfile`'s
-      // `CMD` runs it: Bun since #4 (Node until then), from the root of the
-      // standalone tree.
-      cmd: ["bun", "server.js"],
-      cwd: STANDALONE,
-      env: {
-        ...(process.env as Record<string, string>),
-        NODE_ENV: "production",
-        PORT: String(port),
-        HOSTNAME: "127.0.0.1",
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    void new Response(server.stdout as ReadableStream).text();
-    void new Response(server.stderr as ReadableStream).text();
-    await waitForHttp(`${origin}/`);
     return { origin, server };
   })();
   return pending;

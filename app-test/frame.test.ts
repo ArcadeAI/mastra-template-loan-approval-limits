@@ -33,7 +33,8 @@ import { tmpdir } from "node:os";
 import type { Subprocess } from "bun";
 
 import { browserRequired, missingBrowserMessage, resolveChrome } from "./chrome.ts";
-import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHttp } from "./cdp.ts";
+import { browserTarget, Cdp, evaluate, serveOnFreePort, startChrome, stopProcess, waitFor } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 
 const WEB = join(import.meta.dir, "..");
 const chromeResolution = resolveChrome();
@@ -91,74 +92,62 @@ async function withBrowser(
   let cdp: Cdp | undefined;
   let profile: string | undefined;
   try {
-    const webPort = freePort();
-    const debugPort = freePort();
-    const origin = `http://127.0.0.1:${webPort}`;
-    const environment: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      NODE_ENV: "development",
-      PORT: String(webPort),
-      // The app mounts the control plane since #4; a throwaway one, not
-      // a governance.db in the repo.
-      GOVERNANCE_DB_PATH: ":memory:",
-      // The app's origin, which is also its identity provider's issuer since
-      // #6 (it replaced `PUBLIC_URL`).
-      APP_PUBLIC_HOST: new URL(origin).host,
-      // The app holds the loan book since #5 (until then this pointed the
-      // loan API's own host variable at a port nothing listened on). A
-      // throwaway one: it may not default to `./loans.db`, which is the
-      // developer's own.
-      LOANS_DB_PATH: ":memory:",
-      // And the identity provider since #6: not `./idp.db` either.
-      IDP_DB_PATH: ":memory:",
-      ...env,
+    const environment = (webPort: number): Record<string, string> => {
+      const environment: Record<string, string> = {
+        ...(process.env as Record<string, string>),
+        NODE_ENV: "development",
+        PORT: String(webPort),
+        // The app mounts the control plane since #4; a throwaway one, not
+        // a governance.db in the repo.
+        GOVERNANCE_DB_PATH: ":memory:",
+        // The app's origin, which is also its identity provider's issuer since
+        // #6 (it replaced `PUBLIC_URL`).
+        APP_PUBLIC_HOST: `127.0.0.1:${webPort}`,
+        // The app holds the loan book since #5 (until then this pointed the
+        // loan API's own host variable at a port nothing listened on). A
+        // throwaway one: it may not default to `./loans.db`, which is the
+        // developer's own.
+        LOANS_DB_PATH: ":memory:",
+        // And the identity provider since #6: not `./idp.db` either.
+        IDP_DB_PATH: ":memory:",
+        ...env,
+      };
+      for (const name of ["GOVERNANCE_STREAM"]) delete environment[name];
+      for (const [name, value] of Object.entries(env)) {
+        if (value === "") delete environment[name];
+      }
+      return environment;
     };
-    for (const name of ["GOVERNANCE_STREAM"]) delete environment[name];
-    for (const [name, value] of Object.entries(env)) {
-      if (value === "") delete environment[name];
-    }
 
-    next = Bun.spawn({
-      // `--bun`: the app runs on Bun since #4, because the control plane it
-      // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
-      cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
-      cwd: WEB,
-      env: environment,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    void new Response(next.stdout as ReadableStream).text();
-    void new Response(next.stderr as ReadableStream).text();
-    await waitForHttp(`${origin}/`);
+    // Each child gets its port inside `serveOnFreePort` / `startChrome`, which
+    // start it again on a new one if another process took it first (#9).
+    const web = await serveOnFreePort((webPort) =>
+      spawnChild({
+        // `--bun`: the app runs on Bun since #4, because the control plane it
+        // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+        cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
+        cwd: WEB,
+        env: environment(webPort),
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
+    next = web.child;
+    const origin = `http://127.0.0.1:${web.port}`;
 
     profile = mkdtempSync(join(tmpdir(), "cg-frame-chrome-"));
-    chrome = Bun.spawn({
-      cmd: [
-        chromeResolution.path as string,
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        `--user-data-dir=${profile}`,
-        `--remote-debugging-port=${debugPort}`,
-        "about:blank",
-      ],
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    void new Response(chrome.stdout as ReadableStream).text();
-    void new Response(chrome.stderr as ReadableStream).text();
-    await waitFor(
-      `Chrome DevTools on ${debugPort}`,
-      async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok;
-        } catch {
-          return false;
-        }
-      },
-      30_000,
-    );
+    const browser = await startChrome((debugPort) => [
+      chromeResolution.path as string,
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      `--user-data-dir=${profile}`,
+      `--remote-debugging-port=${debugPort}`,
+      "about:blank",
+    ]);
+    chrome = browser.child;
+    const debugPort = browser.port;
 
     cdp = new Cdp((await browserTarget(debugPort)).webSocketDebuggerUrl);
     await cdp.command("Page.enable");

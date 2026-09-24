@@ -24,6 +24,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
 import { authOptions, RATE_LIMIT, SIGN_IN_PATH } from "../../lib/identity/provider/auth.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -38,15 +40,6 @@ interface Rule {
 
 let child: Subprocess;
 let baseUrl: string;
-
-/** A port the OS says is free — same reasoning as `flow.test.ts::freePort`. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") throw new Error("Bun.serve({ port: 0 }) reported no port");
-  return port;
-}
 
 /**
  * One unauthenticated request per rate-limited path, each landing on the route
@@ -89,42 +82,36 @@ async function allowedBeforeRefusal(path: string, cap: number): Promise<number> 
 }
 
 beforeAll(async () => {
-  const port = freePort();
-  baseUrl = `http://127.0.0.1:${port}`;
-
-  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
-    env: {
-      ...(Object.fromEntries(
-        Object.entries(process.env).filter(([, value]) => value !== undefined),
-      ) as Record<string, string>),
-      // The limiter is on only here. Every Dockerfile sets this; no other test
-      // does, which is why nothing caught #166.
-      NODE_ENV: "production",
-      PORT: String(port),
-      IDP_DB_PATH: join(dir, "idp.db"),
-      APP_PUBLIC_HOST: new URL(baseUrl).host,
-      IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
-      // Made here, held in this child's environment, never written anywhere
-      // and gone when the run ends — the database it signs for is a temporary
-      // directory removed below.
-      BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
-    },
-    stdout: "ignore",
-    stderr: "pipe",
+  // On a port chosen inside `serveOnFreePort`, which starts the provider again
+  // on a new one if another process took it first (#9).
+  const booted = await serveOnFreePort(
+    (port) =>
+      spawnChild(["bun", join(ROOT, "scripts", "identity.ts")], {
+        env: {
+          ...(Object.fromEntries(
+            Object.entries(process.env).filter(([, value]) => value !== undefined),
+          ) as Record<string, string>),
+          // The limiter is on only here. Every Dockerfile sets this; no other test
+          // does, which is why nothing caught #166.
+          NODE_ENV: "production",
+          PORT: String(port),
+          IDP_DB_PATH: join(dir, "idp.db"),
+          APP_PUBLIC_HOST: `127.0.0.1:${port}`,
+          IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
+          // Made here, held in this child's environment, never written anywhere
+          // and gone when the run ends — the database it signs for is a temporary
+          // directory removed below.
+          BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
+        },
+        stdout: "ignore",
+        stderr: "pipe",
+      }),
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/identity/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`idp did not come up:\n${(error as Error).message}`);
   });
-
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`idp did not come up:\n${await new Response(child.stderr as ReadableStream).text()}`);
-    }
-    await Bun.sleep(50);
-  }
+  child = booted.child;
+  baseUrl = `http://127.0.0.1:${booted.port}`;
 });
 
 afterAll(() => {

@@ -34,14 +34,15 @@
  * finds one. Since #152 a missing browser is a failure on CI rather than a
  * silent skip.
  */
-import { spawn, type Subprocess } from "bun";
+import type { Subprocess } from "bun";
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { browserRequired, missingBrowserMessage, resolveChrome } from "./chrome.ts";
-import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHttp } from "./cdp.ts";
+import { browserTarget, Cdp, evaluate, serveOnFreePort, startChrome, stopProcess, waitFor } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 import { chunk, chunkName, joinChunks, openSealed, seal } from "../lib/identity/seal.ts";
 import { SESSION_COOKIE, type Session } from "../lib/identity/session.ts";
 import { appIdentityEnv } from "./app-identity.ts";
@@ -70,83 +71,70 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
     try {
       // The real control plane with a stand-in Arcade that works by *calling
       // the real pre-hook*, and the app as its own real identity provider (#6).
-      const webPort = freePort();
-      const debugPort = freePort();
-      const origin = `http://127.0.0.1:${webPort}`;
-      const [appIdentity, harness] = await Promise.all([appIdentityEnv(origin, scratch), startHarness()]);
-      control = harness;
+      control = await startHarness();
+      const harness = control;
 
-      next = spawn({
-        // `--bun`: the app runs on Bun since #4, because the control plane it
-        // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
-        cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
-        cwd: WEB,
-        env: {
-          ...process.env,
-          NODE_ENV: "development",
-          PORT: String(webPort),
-          // The app mounts the control plane since #4; a throwaway one, not
-          // a governance.db in the repo.
-          GOVERNANCE_DB_PATH: ":memory:",
-          // The app holds the loan book since #5; a throwaway one, not a
-          // loans.db in the repo.
-          LOANS_DB_PATH: ":memory:",
-          // The key the sealed sessions below are sealed under. A mismatch here
-          // is indistinguishable from "not signed in", which is exactly the
-          // state this test is trying to tell apart from a real identity.
-          SESSION_SECRET,
-          // The app is its own identity provider since #6: its own throwaway
-          // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
-          ...appIdentity.env,
-          // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
-          // defaults to the app's own listener; this test's control plane is elsewhere.
-          CONTROL_PLANE_HOST: control.hooksHost,
-          APPROVALS_STORE_TOKEN: control.config.approvalsStoreToken,
-          ARCADE_API_URL: control.config.arcadeApiUrl,
-          ARCADE_API_KEY: control.config.arcadeApiKey,
-          ARCADE_APPROVALS_TOOLKIT: control.config.approvalsToolkit,
-          PERSONA_LOAN_OFFICER_EMAIL: PEOPLE.dana.email,
-          PERSONA_CREDIT_ANALYST_EMAIL: PEOPLE.sam.email,
-          PERSONA_VP_CREDIT_EMAIL: PEOPLE.riley.email,
-          PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: PEOPLE.morgan.email,
-          ANTHROPIC_API_KEY: "not-used-by-this-suite",
-        },
-        stdout: "pipe",
-        stderr: "pipe",
+      // Each child gets its port inside `serveOnFreePort` / `startChrome`, which
+      // start it again on a new one if another process took it first (#9). The
+      // app's identity is minted per attempt: its issuer is the app's origin.
+      const web = await serveOnFreePort(async (webPort) => {
+        const appIdentity = await appIdentityEnv(`http://127.0.0.1:${webPort}`, join(scratch, String(webPort)));
+        return spawnChild({
+          // `--bun`: the app runs on Bun since #4, because the control plane it
+          // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+          cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
+          cwd: WEB,
+          env: {
+            ...process.env,
+            NODE_ENV: "development",
+            PORT: String(webPort),
+            // The app mounts the control plane since #4; a throwaway one, not
+            // a governance.db in the repo.
+            GOVERNANCE_DB_PATH: ":memory:",
+            // The app holds the loan book since #5; a throwaway one, not a
+            // loans.db in the repo.
+            LOANS_DB_PATH: ":memory:",
+            // The key the sealed sessions below are sealed under. A mismatch here
+            // is indistinguishable from "not signed in", which is exactly the
+            // state this test is trying to tell apart from a real identity.
+            SESSION_SECRET,
+            // The app is its own identity provider since #6: its own throwaway
+            // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
+            ...appIdentity.env,
+            // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+            // defaults to the app's own listener; this test's control plane is elsewhere.
+            CONTROL_PLANE_HOST: harness.hooksHost,
+            APPROVALS_STORE_TOKEN: harness.config.approvalsStoreToken,
+            ARCADE_API_URL: harness.config.arcadeApiUrl,
+            ARCADE_API_KEY: harness.config.arcadeApiKey,
+            ARCADE_APPROVALS_TOOLKIT: harness.config.approvalsToolkit,
+            PERSONA_LOAN_OFFICER_EMAIL: PEOPLE.dana.email,
+            PERSONA_CREDIT_ANALYST_EMAIL: PEOPLE.sam.email,
+            PERSONA_VP_CREDIT_EMAIL: PEOPLE.riley.email,
+            PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: PEOPLE.morgan.email,
+            ANTHROPIC_API_KEY: "not-used-by-this-suite",
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        });
       });
-      void new Response(next.stdout as ReadableStream).text();
-      void new Response(next.stderr as ReadableStream).text();
-      await waitForHttp(`${origin}/`);
+      next = web.child;
+      const origin = `http://127.0.0.1:${web.port}`;
 
       profile = mkdtempSync(join(tmpdir(), "cg-approval-identity-chrome-"));
-      chrome = spawn({
-        cmd: [
-          CHROME,
-          "--headless=new",
-          "--no-sandbox",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          "--window-size=1440,900",
-          `--user-data-dir=${profile}`,
-          `--remote-debugging-port=${debugPort}`,
-          "about:blank",
-        ],
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      void new Response(chrome.stdout as ReadableStream).text();
-      void new Response(chrome.stderr as ReadableStream).text();
-      await waitFor(
-        `Chrome DevTools on ${debugPort}`,
-        async () => {
-          try {
-            return (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok;
-          } catch {
-            return false;
-          }
-        },
-        30_000,
-      );
+      const browser = await startChrome((debugPort) => [
+        CHROME,
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--window-size=1440,900",
+        `--user-data-dir=${profile}`,
+        `--remote-debugging-port=${debugPort}`,
+        "about:blank",
+      ]);
+      chrome = browser.child;
+      const debugPort = browser.port;
 
       cdp = new Cdp((await browserTarget(debugPort)).webSocketDebuggerUrl);
       await cdp.command("Page.enable");

@@ -26,6 +26,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { DANA, GATEWAY_ID, startAgentHarness, type AgentHarness } from "./agent-harness.ts";
 import { BEHAVIOURAL } from "./behaviour.ts";
+import { spawnChild } from "./child.ts";
 import { startArcadeStandIn, type ArcadeStandIn } from "./identity-harness.ts";
 import { scriptedModel } from "./model.ts";
 import { AGENT_ID, INSTRUCTIONS } from "../lib/agent/agent.ts";
@@ -425,7 +426,7 @@ describe("the entry Studio loads under Node", () => {
   });
 
   test("Node imports it and finds the agent", async () => {
-    const node = Bun.spawn(
+    const node = spawnChild(
       [
         "node",
         // Stated, because type stripping is only on by default from Node 22.18,

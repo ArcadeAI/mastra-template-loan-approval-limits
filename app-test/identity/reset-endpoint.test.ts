@@ -22,6 +22,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
 import { loadPeople } from "../../lib/identity/provider/db.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -54,17 +56,6 @@ interface ResetBody {
   not_reset: Record<string, string>;
 }
 
-/** A port the OS says is free, rather than a guess. `conftest.py::_free_port`. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
 interface Instance {
   child: Subprocess;
   baseUrl: string;
@@ -74,8 +65,6 @@ interface Instance {
 const started: Instance[] = [];
 
 async function boot(overrides: Record<string, string>): Promise<Instance> {
-  const port = freePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
   const dbPath = join(tmpdir(), `cg-idp-reset-${crypto.randomUUID()}`, "idp.db");
   const logPath = join(dirname(dbPath), "stdout.log");
   mkdirSync(dirname(dbPath), { recursive: true });
@@ -89,34 +78,29 @@ async function boot(overrides: Record<string, string>): Promise<Instance> {
     ),
   ) as Record<string, string>;
 
-  const child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
-    env: {
-      ...inherited,
-      PORT: String(port),
-      IDP_DB_PATH: dbPath,
-      APP_PUBLIC_HOST: new URL(baseUrl).host,
-      IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
-      BETTER_AUTH_SECRET: SECRET,
-      ...overrides,
-    },
-    stdout: Bun.file(logPath),
-    stderr: "pipe",
+  // On a port chosen inside `serveOnFreePort`, which starts the provider again
+  // on a new one if another process took it first (#9).
+  const booted = await serveOnFreePort(
+    (port) =>
+      spawnChild(["bun", join(ROOT, "scripts", "identity.ts")], {
+        env: {
+          ...inherited,
+          PORT: String(port),
+          IDP_DB_PATH: dbPath,
+          APP_PUBLIC_HOST: `127.0.0.1:${port}`,
+          IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
+          BETTER_AUTH_SECRET: SECRET,
+          ...overrides,
+        },
+        stdout: Bun.file(logPath),
+        stderr: "pipe",
+      }),
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/identity/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`idp did not come up:\n${(error as Error).message}`);
   });
-
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `idp did not come up:\n${await new Response(child.stderr as ReadableStream).text()}`,
-      );
-    }
-    await Bun.sleep(50);
-  }
+  const child = booted.child;
+  const baseUrl = `http://127.0.0.1:${booted.port}`;
 
   const instance = { child, baseUrl, dbPath };
   started.push(instance);

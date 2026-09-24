@@ -51,7 +51,8 @@ import type { Subprocess } from "bun";
 import { aGovernanceEventSequence } from "@cg/policy-schema";
 
 import { GOVERNANCE_EVENT_NAME } from "../lib/governance/subscribe.ts";
-import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHttp } from "./cdp.ts";
+import { browserTarget, Cdp, evaluate, serveOnFreePort, startChrome, stopProcess, waitFor } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 import { resolveChrome } from "./chrome.ts";
 
 /** The two screens #158 asks for, and the only two this reports on. */
@@ -396,9 +397,9 @@ export async function measurePanelChrome(options: MeasureOptions = {}): Promise<
   const chromePath = resolveChrome().path;
   if (chromePath === null) throw new Error("no Chrome or Chromium executable; set CG_CHROME_BIN");
 
-  const hooksPort = freePort();
-  const debugPort = freePort();
-  const hooks = startStubControlPlane(hooksPort);
+  // In this process, so it binds `:0` itself and there is no port to lose (#9).
+  const hooks = startStubControlPlane(0);
+  const hooksPort = hooks.port;
 
   let chrome: Subprocess | undefined;
   let cdp: Cdp | undefined;
@@ -407,36 +408,24 @@ export async function measurePanelChrome(options: MeasureOptions = {}): Promise<
 
   try {
     profile = mkdtempSync(join(tmpdir(), "cg-panel-chrome-"));
-    chrome = Bun.spawn({
-      cmd: [
-        chromePath,
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        // The panel is `height: 100dvh` and never scrolls; a scrollbar gutter
-        // would narrow the viewport the evidence claims to be at.
-        "--hide-scrollbars",
-        `--user-data-dir=${profile}`,
-        `--remote-debugging-port=${debugPort}`,
-        "about:blank",
-      ],
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    void new Response(chrome.stdout as ReadableStream).text();
-    void new Response(chrome.stderr as ReadableStream).text();
-    await waitFor(
-      `Chrome DevTools on ${debugPort}`,
-      async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok;
-        } catch {
-          return false;
-        }
-      },
-      30_000,
-    );
+    // Chrome gets its DevTools port inside `startChrome`, and so does each Next
+    // server below inside `serveOnFreePort`: both start the child again on a
+    // new port if another process took it first (#9).
+    const browser = await startChrome((debugPort) => [
+      chromePath,
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      // The panel is `height: 100dvh` and never scrolls; a scrollbar gutter
+      // would narrow the viewport the evidence claims to be at.
+      "--hide-scrollbars",
+      `--user-data-dir=${profile}`,
+      `--remote-debugging-port=${debugPort}`,
+      "about:blank",
+    ]);
+    chrome = browser.child;
+    const debugPort = browser.port;
     cdp = new Cdp((await browserTarget(debugPort)).webSocketDebuggerUrl);
     await cdp.command("Page.enable");
     await cdp.command("Runtime.enable");
@@ -445,65 +434,51 @@ export async function measurePanelChrome(options: MeasureOptions = {}): Promise<
       const group = states.filter((state) => state.resetToken === withToken);
       if (group.length === 0) continue;
 
-      const webPort = freePort();
-      const origin = `http://127.0.0.1:${webPort}`;
       let next: Subprocess | undefined;
-      // Drained into a buffer rather than into `void`, so a server that never
-      // answers can say why. A boot failure that prints "timed out waiting for
-      // HTTP" and nothing else is a morning of guessing.
-      const log: string[] = [];
-      const drain = async (stream: ReadableStream<Uint8Array>) => {
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) return;
-          log.push(decoder.decode(value, { stream: true }));
-        }
-      };
       try {
-        next = Bun.spawn({
-          // `--bun`: the app runs on Bun since #4, because the control plane it
-          // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
-          cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
-          cwd: webDir,
-          env: {
-            ...process.env,
-            NODE_ENV: "development",
-            PORT: String(webPort),
-            // The app mounts the control plane since #4; a throwaway one, not
-            // a governance.db in the repo.
-            GOVERNANCE_DB_PATH: ":memory:",
-            // The app holds the loan book since #5; a throwaway one, not a
-            // loans.db in the repo.
-            LOANS_DB_PATH: ":memory:",
-            // And the identity provider since #6: not `./idp.db` either.
-            IDP_DB_PATH: ":memory:",
-            // The live stream, pointed at the stub. Without this the page
-            // resolves to the replay and there is no health strip to measure.
-            GOVERNANCE_STREAM: "hooks",
-            APP_PUBLIC_HOST: `127.0.0.1:${hooksPort}`,
-            // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
-            // defaults to the app's own listener; this test's control plane is elsewhere.
-            CONTROL_PLANE_HOST: `127.0.0.1:${hooksPort}`,
-            // A throwaway string that authorizes nothing: the only service it
-            // would ever be presented to is the stub above, which ignores it.
-            // Set or unset is the whole difference between the last two states.
-            RESET_TOKEN: withToken ? "panel-chrome-measurement-not-a-credential" : "",
-          },
-          stdout: "pipe",
-          stderr: "pipe",
+        // A server that never answers says why: `serveOnFreePort`'s error
+        // carries the child's output. A boot failure that prints "timed out
+        // waiting for HTTP" and nothing else is a morning of guessing.
+        const web = await serveOnFreePort(
+          (webPort) =>
+            spawnChild({
+              // `--bun`: the app runs on Bun since #4, because the control plane it
+              // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+              cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
+              cwd: webDir,
+              env: {
+                ...process.env,
+                NODE_ENV: "development",
+                PORT: String(webPort),
+                // The app mounts the control plane since #4; a throwaway one, not
+                // a governance.db in the repo.
+                GOVERNANCE_DB_PATH: ":memory:",
+                // The app holds the loan book since #5; a throwaway one, not a
+                // loans.db in the repo.
+                LOANS_DB_PATH: ":memory:",
+                // And the identity provider since #6: not `./idp.db` either.
+                IDP_DB_PATH: ":memory:",
+                // The live stream, pointed at the stub. Without this the page
+                // resolves to the replay and there is no health strip to measure.
+                GOVERNANCE_STREAM: "hooks",
+                APP_PUBLIC_HOST: `127.0.0.1:${hooksPort}`,
+                // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+                // defaults to the app's own listener; this test's control plane is elsewhere.
+                CONTROL_PLANE_HOST: `127.0.0.1:${hooksPort}`,
+                // A throwaway string that authorizes nothing: the only service it
+                // would ever be presented to is the stub above, which ignores it.
+                // Set or unset is the whole difference between the last two states.
+                RESET_TOKEN: withToken ? "panel-chrome-measurement-not-a-credential" : "",
+              },
+              stdout: "pipe",
+              stderr: "pipe",
+            }),
+          { url: (webPort) => `http://127.0.0.1:${webPort}/panel?fixture=1`, timeoutMs: 180_000 },
+        ).catch((cause: unknown) => {
+          throw new Error(`${String(cause)}\n--- next dev in ${webDir}, RESET_TOKEN ${withToken ? "set" : "unset"} ---`);
         });
-        void drain(next.stdout as ReadableStream<Uint8Array>);
-        void drain(next.stderr as ReadableStream<Uint8Array>);
-        try {
-          await waitForHttp(`${origin}/panel?fixture=1`, 180_000);
-        } catch (cause) {
-          throw new Error(
-            `${String(cause)}\n--- next dev output (${webDir}, RESET_TOKEN ${withToken ? "set" : "unset"}) ---\n` +
-              log.join("").slice(-4000),
-          );
-        }
+        next = web.child;
+        const origin = `http://127.0.0.1:${web.port}`;
 
         for (const state of group) {
           for (const viewport of viewports) {

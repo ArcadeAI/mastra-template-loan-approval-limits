@@ -10,9 +10,11 @@
 import { test } from "bun:test";
 import { join } from "node:path";
 
+import { spawnChild } from "./child.ts";
+
 test("the real conversation fixture runs in an isolated DOM worker", async () => {
   const workerPath = join(import.meta.dir, "chat-conversation-worker.tsx");
-  const worker = Bun.spawn({
+  const worker = spawnChild({
     cmd: ["bun", "test", "--isolate", workerPath],
     cwd: join(import.meta.dir, ".."),
     stdout: "pipe",

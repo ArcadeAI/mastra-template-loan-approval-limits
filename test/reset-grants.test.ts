@@ -58,6 +58,7 @@ import { join } from "node:path";
 // one that gets seeded.
 import people from "../lib/identity/provider/fixtures/people.json" with { type: "json" };
 import { childEnv } from "../app-test/child-env.ts";
+import { spawnChild } from "../app-test/child.ts";
 import { bootApp, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -84,7 +85,7 @@ const loanApp = { get baseUrl() { return `${app.origin}/bank`; } };
 
 /** The command, run the way a presenter runs it. */
 async function runResetCommand(args: string[] = []): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(["bun", join(ROOT, "scripts", "reset.ts"), ...args], {
+  const proc = spawnChild(["bun", join(ROOT, "scripts", "reset.ts"), ...args], {
     cwd: ROOT,
     env: {
       ...process.env,

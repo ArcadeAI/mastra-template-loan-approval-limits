@@ -68,7 +68,8 @@ import { chunk, chunkName, seal } from "../lib/identity/seal.ts";
 import { SESSION_COOKIE } from "../lib/identity/session.ts";
 import { DANA, SESSION_SECRET, startAgentHarness, type AgentHarness } from "./agent-harness.ts";
 import { browserRequired, missingBrowserMessage, resolveChrome } from "./chrome.ts";
-import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHttp } from "./cdp.ts";
+import { browserTarget, Cdp, evaluate, serveOnFreePort, startChrome, stopProcess, waitFor } from "./cdp.ts";
+import { freePort, spawnChild } from "./child.ts";
 
 const WEB = join(import.meta.dir, "..");
 const chromeResolution = resolveChrome();
@@ -239,85 +240,78 @@ async function measureHome(options: {
   let cdp: Cdp | undefined;
   let profile: string | undefined;
   try {
-    harness = await startAgentHarness();
-    const webPort = freePort();
-    const debugPort = freePort();
-    const origin = `http://127.0.0.1:${webPort}`;
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      NODE_ENV: "development",
-      PORT: String(webPort),
-      // The app mounts the control plane since #4; a throwaway one, not
-      // a governance.db in the repo.
-      GOVERNANCE_DB_PATH: ":memory:",
-      ARCADE_API_URL: harness.gateway.url,
-      ARCADE_API_KEY: "arcade-key-for-full-screen-browser",
-      ARCADE_GATEWAY_ID: "cg-demo-us",
-      ARCADE_LOAN_TOOLKIT: "Loan",
-      ARCADE_APPROVALS_TOOLKIT: "Approvals",
-      ANTHROPIC_API_KEY: "not-used-by-this-test",
-      MODEL_ID: "claude-sonnet-5",
-      SESSION_SECRET,
-      // The session below is sealed by hand, so nothing here signs in: the
-      // identity provider is the app's own since #6, and it gets a throwaway
-      // idp.db rather than `./idp.db`, which is the developer's.
-      IDP_DB_PATH: ":memory:",
-      IDP_CLIENT_ID: "web",
-      IDP_CLIENT_SECRET: "not-used-by-this-test",
-      APPROVALS_STORE_TOKEN: "store-token-for-agent-tests",
-      // A throwaway loan book: it may not default to `./loans.db`, which is
-      // the developer's own.
-      LOANS_DB_PATH: ":memory:",
-      IDENTITY_HOST: options.loanIdpHost ?? `localhost:${freePort()}`,
+    const agents = (harness = await startAgentHarness());
+    const loanIdpHost = options.loanIdpHost ?? `localhost:${freePort()}`;
+    const environment = (webPort: number): Record<string, string> => {
+      const env: Record<string, string> = {
+        ...(process.env as Record<string, string>),
+        NODE_ENV: "development",
+        PORT: String(webPort),
+        // The app mounts the control plane since #4; a throwaway one, not
+        // a governance.db in the repo.
+        GOVERNANCE_DB_PATH: ":memory:",
+        ARCADE_API_URL: agents.gateway.url,
+        ARCADE_API_KEY: "arcade-key-for-full-screen-browser",
+        ARCADE_GATEWAY_ID: "cg-demo-us",
+        ARCADE_LOAN_TOOLKIT: "Loan",
+        ARCADE_APPROVALS_TOOLKIT: "Approvals",
+        ANTHROPIC_API_KEY: "not-used-by-this-test",
+        MODEL_ID: "claude-sonnet-5",
+        SESSION_SECRET,
+        // The session below is sealed by hand, so nothing here signs in: the
+        // identity provider is the app's own since #6, and it gets a throwaway
+        // idp.db rather than `./idp.db`, which is the developer's.
+        IDP_DB_PATH: ":memory:",
+        IDP_CLIENT_ID: "web",
+        IDP_CLIENT_SECRET: "not-used-by-this-test",
+        APPROVALS_STORE_TOKEN: "store-token-for-agent-tests",
+        // A throwaway loan book: it may not default to `./loans.db`, which is
+        // the developer's own.
+        LOANS_DB_PATH: ":memory:",
+        IDENTITY_HOST: loanIdpHost,
+      };
+      // The app's origin since #6 — its issuer and every redirect_uri — and the
+      // panel's stream host. A case with a control plane of its own points it
+      // there, which is the one thing that case is about; nothing in it signs
+      // in, so the issuer naming that host is never followed.
+      env["APP_PUBLIC_HOST"] = options.hooksHost ?? `127.0.0.1:${webPort}`;
+      // Server-side reads of the control plane go here since #4.
+      if (options.hooksHost !== undefined) env["CONTROL_PLANE_HOST"] = options.hooksHost;
+      else delete env["CONTROL_PLANE_HOST"];
+      if (options.governanceStream === null) delete env["GOVERNANCE_STREAM"];
+      else env["GOVERNANCE_STREAM"] = options.governanceStream;
+      return env;
     };
-    // The app's origin since #6 — its issuer and every redirect_uri — and the
-    // panel's stream host. A case with a control plane of its own points it
-    // there, which is the one thing that case is about; nothing in it signs
-    // in, so the issuer naming that host is never followed.
-    env["APP_PUBLIC_HOST"] = options.hooksHost ?? new URL(origin).host;
-    // Server-side reads of the control plane go here since #4.
-    if (options.hooksHost !== undefined) env["CONTROL_PLANE_HOST"] = options.hooksHost;
-    else delete env["CONTROL_PLANE_HOST"];
-    if (options.governanceStream === null) delete env["GOVERNANCE_STREAM"];
-    else env["GOVERNANCE_STREAM"] = options.governanceStream;
 
-    next = Bun.spawn({
-      // `--bun`: the app runs on Bun since #4, because the control plane it
-      // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
-      cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
-      cwd: WEB,
-      env,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    void new Response(next.stdout as ReadableStream).text();
-    void new Response(next.stderr as ReadableStream).text();
-    await waitForHttp(`${origin}/`);
+    // Each child gets its port inside `serveOnFreePort` / `startChrome`, which
+    // start it again on a new one if another process took it first (#9).
+    const web = await serveOnFreePort((webPort) =>
+      spawnChild({
+        // `--bun`: the app runs on Bun since #4, because the control plane it
+        // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+        cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
+        cwd: WEB,
+        env: environment(webPort),
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
+    next = web.child;
+    const origin = `http://127.0.0.1:${web.port}`;
 
     profile = mkdtempSync(join(tmpdir(), "cg-full-screen-chrome-"));
-    chrome = Bun.spawn({
-      cmd: [
-        chromeResolution.path as string,
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        `--user-data-dir=${profile}`,
-        `--remote-debugging-port=${debugPort}`,
-        "about:blank",
-      ],
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    void new Response(chrome.stdout as ReadableStream).text();
-    void new Response(chrome.stderr as ReadableStream).text();
-    await waitFor(`Chrome DevTools on ${debugPort}`, async () => {
-      try {
-        return (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok;
-      } catch {
-        return false;
-      }
-    }, 30_000);
+    const browser = await startChrome((debugPort) => [
+      chromeResolution.path as string,
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      `--user-data-dir=${profile}`,
+      `--remote-debugging-port=${debugPort}`,
+      "about:blank",
+    ]);
+    chrome = browser.child;
+    const debugPort = browser.port;
 
     // A real post-#157 browser: the gateway bearer for hop 1, and the IdP
     // access token the bank's own screens are read with. Before #176 this
@@ -354,6 +348,28 @@ async function measureHome(options: {
     await cdp.command("Page.enable");
     await cdp.command("Runtime.enable");
     await cdp.command("Network.enable");
+    if (options.hooksHost !== undefined) {
+      // APP_PUBLIC_HOST names the stand-in here, so a page served on
+      // 127.0.0.1 correctly shows the origin banner (#9) — and its scrollbar.
+      // A real browser arrives through the tunnel, which forwards the public
+      // host; this does the same. Scoped to the app's own origin with Fetch
+      // rather than Network.setExtraHTTPHeaders, which would also add the
+      // header to the cross-origin EventSource to the stand-in and trigger a
+      // CORS preflight it does not answer.
+      const forwardedHost = options.hooksHost;
+      const client = cdp;
+      client.on("Fetch.requestPaused", (params) => {
+        const request = params.request as { headers: Record<string, string> };
+        void client.command("Fetch.continueRequest", {
+          requestId: params.requestId,
+          headers: [
+            ...Object.entries(request.headers).map(([name, value]) => ({ name, value })),
+            { name: "x-forwarded-host", value: forwardedHost },
+          ],
+        });
+      });
+      await client.command("Fetch.enable", { patterns: [{ urlPattern: `${origin}/*`, requestStage: "Request" }] });
+    }
     await cdp.command("Network.setCookies", { cookies });
 
     const requests: Seen[] = [];

@@ -20,6 +20,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { serveOnFreePort } from "../cdp.ts";
+import { freePort, spawnChild } from "../child.ts";
 import { loadPeople } from "../../lib/identity/provider/db.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -77,7 +79,7 @@ interface Credentials {
 let creds: Credentials;
 
 async function runScript(name: string, ...args: string[]): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(["bun", join(ROOT, "scripts", "identity", name), ...args], {
+  const proc = spawnChild(["bun", join(ROOT, "scripts", "identity", name), ...args], {
     env,
     stdout: "pipe",
     stderr: "pipe",
@@ -124,31 +126,6 @@ async function logLength(): Promise<number> {
   return (await Bun.file(logPath).text()).length;
 }
 
-/**
- * A port the OS says is free, rather than a guess.
- *
- * This used to be `8000 + Math.floor(Math.random() * 1000)`. With one test run
- * that collides rarely; with several worktrees running `bun test` at once it is
- * a birthday problem, and it surfaces as an intermittent failure in a slice
- * that changed nothing — the worst thing to hand a reviewer, because it makes
- * them distrust their own verification. Bind :0, read the port back, release
- * it. `tools/loan/tests/conftest.py::_free_port` does the same thing.
- */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  // `Server.port` is `number | undefined` in bun-types 1.4: a server listening
-  // on a unix socket has no port. This one asked for TCP `:0`, so the branch
-  // should be unreachable — but `port!` would hand `PORT=undefined` to the
-  // child and surface twenty seconds later as "idp did not come up", which
-  // says nothing about the cause. Fail here, where the cause is.
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
 /** `oauth-client --json`, with the exit status asserted rather than assumed. */
 async function runCredentialsScript(...args: string[]): Promise<Credentials> {
   const { code, out, err } = await runScript("oauth-client.ts", "--json", ...args);
@@ -166,43 +143,38 @@ async function rotateCredentials(): Promise<Credentials> {
 }
 
 beforeAll(async () => {
-  const port = freePort();
-  baseUrl = `http://127.0.0.1:${port}`;
-
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
     ),
   ) as Record<string, string>;
 
-  env = {
-    ...inherited,
-    PORT: String(port),
-    IDP_DB_PATH: dbPath,
-    APP_PUBLIC_HOST: new URL(baseUrl).host,
-    IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
-    BETTER_AUTH_SECRET: SECRET,
-  };
-
   mkdirSync(dirname(logPath), { recursive: true });
-  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
-    env,
-    stdout: Bun.file(logPath),
-    stderr: "pipe",
-  });
 
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`idp did not come up:\n${await new Response(child.stderr as ReadableStream).text()}`);
-    }
-    await Bun.sleep(50);
-  }
+  // On a port chosen inside `serveOnFreePort`, which starts the provider again
+  // on a new one if another process took it first (#9).
+  const booted = await serveOnFreePort(
+    (port) => {
+      env = {
+        ...inherited,
+        PORT: String(port),
+        IDP_DB_PATH: dbPath,
+        APP_PUBLIC_HOST: `127.0.0.1:${port}`,
+        IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
+        BETTER_AUTH_SECRET: SECRET,
+      };
+      return spawnChild(["bun", join(ROOT, "scripts", "identity.ts")], {
+        env,
+        stdout: Bun.file(logPath),
+        stderr: "pipe",
+      });
+    },
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/identity/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`idp did not come up:\n${(error as Error).message}`);
+  });
+  child = booted.child;
+  baseUrl = `http://127.0.0.1:${booted.port}`;
 
   // The service created the client on the line above, so its secret is gone —
   // hashed storage, #70. Rotate once to get one the flow can use.
@@ -1670,7 +1642,7 @@ describe("the log", () => {
 
   test("the credentials script warns when it would print localhost URLs", async () => {
     const { APP_PUBLIC_HOST: _dropped, ...withoutUrl } = env;
-    const proc = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json"], {
+    const proc = spawnChild(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json"], {
       env: withoutUrl,
       stdout: "pipe",
       stderr: "pipe",

@@ -16,6 +16,12 @@ const config: NextConfig = {
   // hydrates. Every browser test in `app-test/` opens the app that way. Next 15
   // only warned. The production server (`server.js`) ignores this option.
   allowedDevOrigins: ["127.0.0.1"],
+  // No generated agent rules (#9). Next 16's `next dev` writes `AGENTS.md` and
+  // `CLAUDE.md` at the root whenever it detects a coding agent in its
+  // environment (`AI_AGENT`, `CLAUDECODE` and others). They are gitignored,
+  // but a forker's agent would still read instructions nobody wrote for this
+  // project. `app-test/agent-rules.test.ts` boots `next dev` as an agent would.
+  agentRules: false,
   // The build's type check leaves out the tests, which the Docker builder cannot
   // resolve. The reason is in tsconfig.build.json (#190).
   typescript: { tsconfigPath: "tsconfig.build.json" },

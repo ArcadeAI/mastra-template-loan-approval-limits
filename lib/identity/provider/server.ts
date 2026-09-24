@@ -25,7 +25,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 import { authorizationCodeId, codeState, type CodeState } from "./authorization-code.ts";
-import { createAuth, CONSENT_PAGE, ID_TOKEN_ALG, JWKS_PATH, LOGIN_PAGE, type Auth } from "./auth.ts";
+import { createAuth, CONSENT_PAGE, ID_TOKEN_ALG, JWKS_PATH, LOGIN_PAGE, signingKeysOpen, staleSigningKey, type Auth } from "./auth.ts";
 import {
   ARCADE_PROVIDER_ID,
   CLIENT_SECRET_STATE_MESSAGE,
@@ -466,6 +466,10 @@ export async function openIdentityProvider(config: IdpConfig = readConfig()): Pr
   let auth: Auth;
   let clients: OAuthClientCredentials[];
   try {
+    // Before anything else touches the database: a signing key this secret
+    // cannot open is a boot that must not happen, never a silent re-key (#9).
+    if (!(await signingKeysOpen(db, config.secret))) throw new Error(staleSigningKey(config.dbPath));
+
     auth = createAuth({ db, baseURL: config.baseURL, secret: config.secret });
 
     // A replayed authorization code must refuse without taking the first

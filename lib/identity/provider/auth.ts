@@ -107,6 +107,41 @@ export function decryptLegacyClientSecret(secret: string, stored: string): Promi
 }
 
 /**
+ * Whether every ID-token signing key in `idp.db` opens under `secret` (#9).
+ *
+ * The JWT plugin encrypts each private key at rest under `BETTER_AUTH_SECRET`
+ * and decrypts it lazily, on the first signature. A database written under
+ * another secret (the published development one, before `setup-arcade` filled
+ * a real one in) therefore boots green and fails at the first sign-in, where
+ * no hook fires. So the provider asks at boot, with the plugin's own call, and
+ * refuses rather than minting a replacement: a new key would silently
+ * invalidate every token and key set anybody holds. The cipher is
+ * authenticated, so a rejection is a real answer and not a guess at the format.
+ */
+export async function signingKeysOpen(db: Database, secret: string): Promise<boolean> {
+  const rows = db.query(`select "privateKey" from "jwks"`).all() as Array<{ privateKey: string }>;
+  for (const { privateKey } of rows) {
+    try {
+      await symmetricDecrypt({ key: secret, data: JSON.parse(privateKey) as string });
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** What the provider, `oauth-client` and `/health` say when {@link signingKeysOpen} is false. */
+export function staleSigningKey(dbPath: string): string {
+  return (
+    `${dbPath} holds an ID-token signing key encrypted under a different BETTER_AUTH_SECRET, so this ` +
+    `secret cannot open it, and nothing was re-keyed. It is local development data: stop the app, ` +
+    `delete ${dbPath}, and start again. If Arcade already holds this app's OAuth clients, they change ` +
+    `with it, so run \`bun run setup-arcade\` after deleting it and before registering anything. ` +
+    `Or restore the BETTER_AUTH_SECRET it was written with.`
+  );
+}
+
+/**
  * Puts the person's email into the ID token.
  *
  * Better Auth blanks every standard profile claim in the ID token on purpose

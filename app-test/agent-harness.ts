@@ -24,14 +24,15 @@
  * worktree owns a block of ten and the reviewer's owns a different block, so
  * nothing here may pick a number.
  */
-import { spawn, type Subprocess } from "bun";
+import type { Subprocess } from "bun";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createGatewayStandIn, type GatewayStandIn } from "../scripts/gateway-stand-in.ts";
 import { readIdentitySurface, type IdentitySurface } from "../lib/config.ts";
-import { freePort } from "./identity-harness.ts";
+import { serveOnFreePort } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 import { readPort } from "./harness.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
@@ -181,18 +182,24 @@ export async function startAgentHarness(
   // The stub IdP binds the port named in IDENTITY_HOST, not PORT — see the
   // comment at the top of that script. So the port is chosen here and handed to
   // both it and the loan API, which is what makes them agree.
-  const idpPort = freePort();
+  //
+  // Chosen inside `serveOnFreePort`, which starts the stub again on a new port
+  // if another process took this one first (#9). Ready is the stub's own boot
+  // line naming that port.
+  const { child: idp, port: idpPort } = await serveOnFreePort(
+    (port) =>
+      spawnChild({
+        cmd: ["bun", join(REPO_ROOT, "scripts", "dev-idp.ts")],
+        cwd: REPO_ROOT,
+        env: { ...process.env, IDENTITY_HOST: `localhost:${port}`, NODE_ENV: "test" },
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    { ready: async (port, output) => output().includes(`listening on :${port}`), timeoutMs: 20_000 },
+  );
   const idpHost = `localhost:${idpPort}`;
-  const idp = spawn({
-    cmd: ["bun", join(REPO_ROOT, "scripts", "dev-idp.ts")],
-    cwd: REPO_ROOT,
-    env: { ...process.env, IDENTITY_HOST: idpHost, NODE_ENV: "test" },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  await readPort(idp as Subprocess<"ignore", "pipe", "pipe">);
 
-  const hooks = spawn({
+  const hooks = spawnChild({
     cmd: ["bun", join(REPO_ROOT, "scripts", "control-plane.ts")],
     cwd: REPO_ROOT,
     env: {
@@ -213,7 +220,7 @@ export async function startAgentHarness(
   const { port: hooksPort } = await readPort(hooks as Subprocess<"ignore", "pipe", "pipe">);
   const hooksHost = `localhost:${hooksPort}`;
 
-  const loanApp = spawn({
+  const loanApp = spawnChild({
     // The app's loan module on a port of its own, under `/bank` as the app
     // serves it (#5).
     cmd: ["bun", join(REPO_ROOT, "scripts", "loans.ts")],

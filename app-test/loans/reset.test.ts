@@ -20,6 +20,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { LoanRecord } from "../../lib/loans/db.ts";
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
 
 const RESET_TOKEN = "loan-app-reset-token-for-tests";
 const DANA = "alice@example.test";
@@ -36,17 +38,6 @@ type ResetBody = {
   not_reset: Record<string, string>;
 };
 
-/** A port the OS says is free, rather than a guess. `conftest.py::_free_port`. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
 interface Instance {
   child: Subprocess;
   baseUrl: string;
@@ -57,37 +48,29 @@ let idp: Server<unknown>;
 const started: Instance[] = [];
 
 async function boot(env: Record<string, string>): Promise<Instance> {
-  const port = freePort();
-  // The runner lays the module out the way the app does, under /bank (#5).
-  const baseUrl = `http://127.0.0.1:${port}/bank`;
   const dbPath = join(tmpdir(), `cg-loan-app-${crypto.randomUUID()}`, "loans.db");
 
-  const child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
-    env: {
-      ...process.env,
-      PORT: String(port),
-      LOANS_DB_PATH: dbPath,
-      IDENTITY_HOST: `localhost:${idp.port}`,
-      ...env,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
+  // On a port chosen inside `serveOnFreePort`, which starts the module again on
+  // a new one if another process took it first (#9).
+  const { child, port } = await serveOnFreePort(
+    (port) =>
+      spawnChild(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
+        env: {
+          ...process.env,
+          PORT: String(port),
+          LOANS_DB_PATH: dbPath,
+          IDENTITY_HOST: `localhost:${idp.port}`,
+          ...env,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/bank/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`loan-app did not come up:\n${(error as Error).message}`);
   });
-
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `loan-app did not come up:\n${await new Response(child.stderr as ReadableStream).text()}`,
-      );
-    }
-    await Bun.sleep(50);
-  }
+  // The runner lays the module out the way the app does, under /bank (#5).
+  const baseUrl = `http://127.0.0.1:${port}/bank`;
 
   const instance = { child, baseUrl, dbPath };
   started.push(instance);

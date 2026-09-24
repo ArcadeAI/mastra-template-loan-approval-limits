@@ -29,6 +29,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
+import { serveOnFreePort } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
+
 const WEB_ROOT = join(import.meta.dir, "..");
 const REPO_ROOT = WEB_ROOT;
 
@@ -40,21 +43,6 @@ async function manifestAt(dir: string): Promise<Manifest> {
   return (await Bun.file(join(dir, "package.json")).json()) as Manifest;
 }
 
-/**
- * A port the OS says is free, rather than a guess — the same trick as
- * `apps/loan-app/test/api.test.ts` and `tools/loan/tests/conftest.py`. Several
- * worktrees run `bun test` at once, so a random port is a birthday problem.
- */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
 let child: Subprocess | undefined;
 let project: string | undefined;
 
@@ -64,7 +52,6 @@ afterAll(() => {
 });
 
 test("the packaged dev script binds the PORT in the service's own .env.local", async () => {
-  const port = freePort();
   const web = await manifestAt(WEB_ROOT);
   const dev = web.scripts?.dev;
   expect(dev).toBeString();
@@ -94,9 +81,6 @@ test("the packaged dev script binds the PORT in the service's own .env.local", a
     join(project, "package.json"),
     `${JSON.stringify({ name: "cg-web-dev-port-fixture", private: true, scripts: { dev } }, null, 2)}\n`,
   );
-
-  // The only mention of a port anywhere in the fixture.
-  writeFileSync(join(project, ".env.local"), `PORT=${port}\n`);
 
   // Next, React and the rest, resolved the way the real service resolves them.
   symlinkSync(join(WEB_ROOT, "node_modules"), join(project, "node_modules"));
@@ -129,44 +113,29 @@ test("the packaged dev script binds the PORT in the service's own .env.local", a
     Object.entries(process.env).filter(([key]) => key !== "PORT" && key !== "NODE_ENV"),
   );
 
-  child = Bun.spawn(["bun", "run", "--cwd", project, "dev"], {
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const deadline = Date.now() + 60_000;
-  let status: number | undefined;
-  const ready = (): boolean => status !== undefined && status < 500;
-  while (!ready()) {
-    try {
-      status = (await fetch(`http://127.0.0.1:${port}/`)).status;
-    } catch {
-      // Not listening yet.
-    }
-    if (ready()) break;
-    if (Date.now() > deadline) break;
-    await Bun.sleep(100);
-  }
-
-  // The child's output is the only thing that says *why* nothing answered —
+  // The port is chosen inside `serveOnFreePort`, which writes it and starts
+  // the server again on a new one if another process took it first (#9). The
+  // child's output is the only thing that says *why* nothing answered —
   // "bound 3000 instead" and "Next failed to start" look identical from
-  // outside. Kill it first: the pipes stay open while it runs, so draining a
-  // live dev server hangs until the test times out and reports nothing.
-  if (!ready()) {
-    child.kill();
-    await child.exited;
-    const [out, err] = await Promise.all([
-      new Response(child.stdout as ReadableStream).text(),
-      new Response(child.stderr as ReadableStream).text(),
-    ]);
-    throw new Error(
-      `\`${dev as string}\` did not answer on ${port}, the PORT in its .env.local.\n` +
-        `stdout:\n${out}\nstderr:\n${err}`,
-    );
-  }
+  // outside — and the error a failed boot throws carries it.
+  const dir = project;
+  const booted = await serveOnFreePort(
+    (port) => {
+      // The only mention of a port anywhere in the fixture.
+      writeFileSync(join(dir, ".env.local"), `PORT=${port}\n`);
+      return spawnChild(["bun", "run", "--cwd", dir, "dev"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+    },
+    { timeoutMs: 60_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`\`${dev as string}\` did not answer on the PORT in its .env.local.\n${(error as Error).message}`);
+  });
+  child = booted.child;
 
-  expect(status).toBeLessThan(500);
+  expect((await fetch(`http://127.0.0.1:${booted.port}/`)).status).toBeLessThan(500);
 }, 120_000);
 
 /**

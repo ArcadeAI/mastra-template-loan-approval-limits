@@ -65,15 +65,17 @@
  * from a list the **gateway** answered, not struck through by anything here.
  */
 import type { CSSProperties } from "react";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import { configurationProblems, readIdentitySurface } from "../lib/config.ts";
+import { originMismatch } from "../lib/origin.ts";
 import { readSessionFromCookies } from "../lib/identity/session.ts";
 import { approvalStreamUrl } from "../lib/governance/stream-url.ts";
 import { homeSurface } from "../lib/home/surface.ts";
 import { readLoanBook } from "../lib/loan-context/read.ts";
 import { PersonaToolList } from "../components/identity/PersonaToolList.tsx";
 import { ConfigurationBanner } from "../components/identity/ConfigurationBanner.tsx";
+import { OriginBanner } from "../components/identity/OriginBanner.tsx";
 import { SessionChrome } from "../components/identity/SessionChrome.tsx";
 import { BankPane } from "../components/bank/BankPane.tsx";
 
@@ -121,6 +123,7 @@ export default async function Home() {
   ]);
 
   const problems = configurationProblems(config);
+  const mismatch = originMismatch(await headers());
 
   return (
     <>
@@ -131,6 +134,10 @@ export default async function Home() {
           one renders a perfectly normal page and fails at the point of use. It
           used to ride in on the sign-in panel; the panel is gone and it is
           not. */}
+      {/* #9: the one host this app's sessions live on, when the browser is
+          on another. Before the configuration banner, because on the wrong
+          host nothing below it is true. */}
+      <OriginBanner mismatch={mismatch} />
       <ConfigurationBanner problems={problems} />
       <BankPane
         signedInAs={session?.email ?? null}

@@ -26,14 +26,15 @@
  * on a developer machine with no browser at all, and says where it looked when
  * it does.
  */
-import { spawn, type Subprocess } from "bun";
+import type { Subprocess } from "bun";
 import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { browserRequired, missingBrowserMessage, resolveChrome } from "./chrome.ts";
-import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHttp } from "./cdp.ts";
+import { browserTarget, Cdp, evaluate, serveOnFreePort, startChrome, stopProcess, waitFor } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 import { chunk, chunkName, joinChunks, openSealed, seal } from "../lib/identity/seal.ts";
 import { LOAN_POLL_INTERVAL_MS } from "../lib/loan-context/loans.ts";
 import { SESSION_COOKIE, type Session } from "../lib/identity/session.ts";
@@ -75,84 +76,70 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       workspace = join(tmpdir(), `cg-loan-board-${crypto.randomUUID()}`);
       mkdirSync(workspace, { recursive: true });
 
-      const webPort = freePort();
-      const debugPort = freePort();
-      const origin = `http://127.0.0.1:${webPort}`;
-      // The app is its own identity provider since #6: its own throwaway
-      // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
-      const appIdentity = await appIdentityEnv(origin, join(workspace, "identity"));
+      // Each child gets its port inside `serveOnFreePort` / `startChrome`, which
+      // start it again on a new one if another process took it first (#9).
+      const dir = workspace;
+      const web = await serveOnFreePort(async (webPort) => {
+        // The app is its own identity provider since #6: its own throwaway
+        // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
+        // Minted per attempt, because the issuer is the origin.
+        const appIdentity = await appIdentityEnv(`http://127.0.0.1:${webPort}`, join(dir, "identity", String(webPort)));
+        return spawnChild({
+          // `--bun`: the app runs on Bun since #4, because the control plane it
+          // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+          cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
+          cwd: WEB,
+          env: {
+            ...process.env,
+            NODE_ENV: "development",
+            PORT: String(webPort),
+            // The app mounts the control plane since #4; a throwaway one, not
+            // a governance.db in the repo.
+            GOVERNANCE_DB_PATH: ":memory:",
+            SESSION_SECRET,
+            ...appIdentity.env,
+            // The app's loan module: its own `loans.db` in this test's
+            // workspace, and bearers checked at the app's own identity
+            // provider, over its local listener — the default, stated because
+            // the ambient environment may carry another.
+            LOANS_DB_PATH: join(dir, "loans.db"),
+            IDENTITY_HOST: `localhost:${webPort}`,
+            // So the decision line can name the person rather than the address.
+            PERSONA_LOAN_OFFICER_EMAIL: PEOPLE.dana.email,
+            PERSONA_CREDIT_ANALYST_EMAIL: PEOPLE.sam.email,
+            PERSONA_VP_CREDIT_EMAIL: PEOPLE.riley.email,
+            PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: PEOPLE.morgan.email,
+            // The gateway is not configured on purpose: nothing about the loan
+            // cards depends on hop 1 since #157, and a page that still needed it
+            // would fail here rather than quietly keep working.
+            ANTHROPIC_API_KEY: "not-used-by-this-suite",
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+      });
+      next = web.child;
+      const origin = `http://127.0.0.1:${web.port}`;
       // The loan book is the app's own module since #5: Charlie's approvals
       // below go to the app's `/bank/…`, the same route `tools/loan` calls.
-      const loanAppHost = `127.0.0.1:${webPort}`;
-
-      next = spawn({
-        // `--bun`: the app runs on Bun since #4, because the control plane it
-        // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
-        cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
-        cwd: WEB,
-        env: {
-          ...process.env,
-          NODE_ENV: "development",
-          PORT: String(webPort),
-          // The app mounts the control plane since #4; a throwaway one, not
-          // a governance.db in the repo.
-          GOVERNANCE_DB_PATH: ":memory:",
-          SESSION_SECRET,
-          ...appIdentity.env,
-          // The app's loan module: its own `loans.db` in this test's
-          // workspace, and bearers checked at the app's own identity
-          // provider, over its local listener — the default, stated because
-          // the ambient environment may carry another.
-          LOANS_DB_PATH: join(workspace, "loans.db"),
-          IDENTITY_HOST: `localhost:${webPort}`,
-          // So the decision line can name the person rather than the address.
-          PERSONA_LOAN_OFFICER_EMAIL: PEOPLE.dana.email,
-          PERSONA_CREDIT_ANALYST_EMAIL: PEOPLE.sam.email,
-          PERSONA_VP_CREDIT_EMAIL: PEOPLE.riley.email,
-          PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: PEOPLE.morgan.email,
-          // The gateway is not configured on purpose: nothing about the loan
-          // cards depends on hop 1 since #157, and a page that still needed it
-          // would fail here rather than quietly keep working.
-          ANTHROPIC_API_KEY: "not-used-by-this-suite",
-        },
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      void new Response(next.stdout as ReadableStream).text();
-      void new Response(next.stderr as ReadableStream).text();
-      await waitForHttp(`${origin}/`);
+      const loanAppHost = `127.0.0.1:${web.port}`;
 
       profile = mkdtempSync(join(tmpdir(), "cg-loan-board-chrome-"));
-      chrome = spawn({
-        cmd: [
-          CHROME,
-          "--headless=new",
-          "--no-sandbox",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          // 1920x1080: the board is sized for a projector and this is the
-          // measurement the PR screenshot is taken at.
-          "--window-size=1920,1080",
-          `--user-data-dir=${profile}`,
-          `--remote-debugging-port=${debugPort}`,
-          "about:blank",
-        ],
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      void new Response(chrome.stdout as ReadableStream).text();
-      void new Response(chrome.stderr as ReadableStream).text();
-      await waitFor(
-        `Chrome DevTools on ${debugPort}`,
-        async () => {
-          try {
-            return (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok;
-          } catch {
-            return false;
-          }
-        },
-        30_000,
-      );
+      const browser = await startChrome((debugPort) => [
+        CHROME,
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        // 1920x1080: the board is sized for a projector and this is the
+        // measurement the PR screenshot is taken at.
+        "--window-size=1920,1080",
+        `--user-data-dir=${profile}`,
+        `--remote-debugging-port=${debugPort}`,
+        "about:blank",
+      ]);
+      chrome = browser.child;
+      const debugPort = browser.port;
 
       // Alice's browser, holding the cookie a real sign-in produced — a real
       // authorization-code flow against the real `apps/idp`, with a real

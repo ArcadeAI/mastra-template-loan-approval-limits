@@ -1074,12 +1074,16 @@ describe("the fork seam", () => {
     // this list until #5, when it stopped reading the loan book over HTTP.
     // Since #6: the app's own config (its origin, `appPublicHost`), the
     // panel's stream (the browser's address for `/hooks/events`) and the
-    // identity provider's issuer.
+    // identity provider's issuer. Since #9: the origin trap, which compares
+    // the host a page was served on with it and names it on the home page's
+    // banner and in `bun run dev`'s first line. It fetches nothing.
     expect(reaching.sort()).toEqual([
+      "components/identity/OriginBanner.tsx",
       "lib/config.ts",
       "lib/control-plane/config.ts",
       "lib/governance/stream-url.ts",
       "lib/identity/provider/config.ts",
+      "lib/origin.ts",
     ]);
   });
 
