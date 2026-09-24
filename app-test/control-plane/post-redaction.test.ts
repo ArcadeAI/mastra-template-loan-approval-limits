@@ -88,13 +88,14 @@ async function postHook(
   user_id: string,
   output: unknown,
   name = "GetLoan",
+  toolkit = "Loan",
 ): Promise<{ code: string; output?: Record<string, unknown> }> {
   const response = await fetch(`${base}/post`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${SECRET}` },
     body: JSON.stringify({
       execution_id: `tc_post_${++execution}`,
-      tool: { name, toolkit: "Loan", version: "1.0.0" },
+      tool: { name, toolkit, version: "1.0.0" },
       inputs: { loan_id: "LN-2291" },
       success: true,
       output,
@@ -317,7 +318,37 @@ describe("the rest of the loan book", () => {
   });
 
   test("a tool no rule names is passed through untouched", async () => {
-    const { code, output } = await postHook(DANA, [LOAN], "SearchLoans");
+    // `Loan.SearchLoans` until #4, when both rules came to name every Loan
+    // tool; the unnamed tool is now one from the other toolkit.
+    const { code, output } = await postHook(DANA, [LOAN], "RequestApproval", "Approvals");
+    expect(code).toBe("OK");
+    expect(output).toBeUndefined();
+  });
+
+  /**
+   * The demo's #184, closed here on #4. `ApproveLoan` and `DenyLoan` answer
+   * with the same whole loan record `GetLoan` does — the loan module's
+   * `recordDecision` returns `getLoan` — so a rule keyed on `GetLoan` alone
+   * left the account number, the tax id and the injected note in every approve
+   * and every deny while act 3 looked finished. Asserted on the record the
+   * seed file holds, not on a hand-typed one.
+   */
+  test.each(["ApproveLoan", "DenyLoan"])(
+    "%s returns the whole record, and it is masked and stripped exactly as GetLoan's is",
+    async (name) => {
+      const { code, output } = await postHook(DANA, LOAN, name);
+      expect(code).toBe("OK");
+      expect(output?.bank_account_number).toBe("[REDACTED]");
+      expect(output?.tax_id).toBe("[REDACTED]");
+      expect(output?.underwriter_notes).toBe(LEGITIMATE_NOTE);
+      expect(JSON.stringify(output)).not.toContain(LOAN.bank_account_number);
+      expect(JSON.stringify(output)).not.toContain(LOAN.tax_id);
+    },
+  );
+
+  test("SearchLoans is named too, and has nothing to remove: it never reads the sensitive columns", async () => {
+    const projected = [{ loan_id: LOAN.loan_id, borrower_name: LOAN["borrower_name"], amount: LOAN["amount"] }];
+    const { code, output } = await postHook(DANA, { count: 1, loans: projected }, "SearchLoans");
     expect(code).toBe("OK");
     expect(output).toBeUndefined();
   });

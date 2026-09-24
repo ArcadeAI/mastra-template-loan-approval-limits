@@ -365,8 +365,10 @@ describe("/post — acts 3 and 4", () => {
   });
 
   test("a tool no output rule names passes through unchanged, and the row says so", () => {
+    // Since #4 both output rules name every Loan tool (`"*"`), so the unnamed
+    // tool is one from the other toolkit. It was `Loan.SearchLoans` until then.
     const { response, events } = handlePost(
-      { ...postBody(DANA), tool: { name: "SearchLoans", toolkit: "Loan", version: "1.0.0" } },
+      { ...postBody(DANA), tool: { name: "RequestApproval", toolkit: "Approvals", version: "1.0.0" } },
       ready(),
       ctx,
     );
@@ -375,7 +377,7 @@ describe("/post — acts 3 and 4", () => {
     expect(events[0]).toMatchObject({
       hook: "post",
       user_id: DANA,
-      tool: "Loan.SearchLoans",
+      tool: "Approvals.RequestApproval",
       decision: "allow",
       rule_id: null,
     });
