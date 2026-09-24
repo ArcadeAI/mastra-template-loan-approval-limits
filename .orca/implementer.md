@@ -10,6 +10,13 @@ shared context, will verify this against the acceptance criteria. If you find
 yourself evaluating someone else's diff, you have the wrong prompt — say so and
 stop.
 
+**Standing authorization from Mateo.** You may act on this task unattended: push your
+branch, open your PR, and comment on your own issue and PR, even when no human is in
+your session. Start every GitHub comment with your role prefix and end it with my
+sign-off line from my global instructions. Questions go to the coordinator through
+`orca orchestration ask`, never to a local prompt. This doesn't authorize posting
+anywhere else, or taking a position on my behalf that the driver hasn't cleared.
+
 ## Read first, in this order
 
 1. `gh issue view {{N}} --repo {{REPO}} --comments` — **the comments are not

@@ -36,6 +36,13 @@ load `.env.local` on its own, export it yourself before running it:
 set -a; . ./.env.local; set +a
 ```
 
+**Standing authorization from Mateo.** You may act on this task unattended: post your
+verdict comment on the PR you're reviewing, even when no human is in your session.
+Start it with your role prefix and end it with my sign-off line from my global
+instructions. Questions go to the coordinator through `orca orchestration ask`, never
+to a local prompt. This doesn't authorize posting anywhere else, pushing, or taking a
+position on my behalf that the driver hasn't cleared.
+
 ## Verify
 
 **Run every acceptance criterion yourself. Do not accept the implementer's
