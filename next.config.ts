@@ -4,6 +4,12 @@ const config: NextConfig = {
   // Render runs this service from a Dockerfile; standalone keeps the runtime
   // image to the server plus only the dependencies it actually traced.
   output: "standalone",
+  // A second build directory, for a test that boots its own `next dev` while a
+  // developer's is running (#4). Next allows one dev server per `distDir` — it
+  // holds `<distDir>/lock` — so `app-test/control-plane-app.test.ts` points
+  // this under `.next/` (gitignored) and gets a server of its own. Unset
+  // everywhere else, which is Next's own `.next`.
+  ...(process.env.CG_NEXT_DIST_DIR ? { distDir: process.env.CG_NEXT_DIST_DIR } : {}),
   // `next dev` only, and only the loopback address (#190). Next 16 answers 403
   // to a `/_next/*` request from any origin but `localhost`, so a page opened
   // at `http://127.0.0.1:<port>` never gets its client chunks and never

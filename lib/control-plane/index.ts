@@ -54,7 +54,6 @@ import {
   openGovernance,
   type MigrationReport,
 } from "./policy-store.ts";
-import { orExitConfig } from "./public-host.ts";
 import { createControlPlane, SERVICE, type ControlPlane } from "./server.ts";
 
 export interface BootedControlPlane {
@@ -80,7 +79,10 @@ export function bootControlPlane(options: BootOptions = {}): BootedControlPlane 
   // A cross-service address that cannot resolve is a startup failure, not a
   // surprise later — see `public-host.ts`. Every other configuration error still
   // propagates as it did.
-  const config = orExitConfig(SERVICE, () => readConfig(env));
+  // Throws on a configuration it refuses, `PublicHostError` included. The
+  // standalone runner checks first and exits `EX_CONFIG` the way the service
+  // did; the app records the failure and says so on `/health` (`instance.ts`).
+  const config = readConfig(env);
   const where = (options.where ?? (() => "mounted in the app"))(config);
   // A disk that predates this build is brought forward before anything else
   // happens, and says so exactly once — on the boot that did it (#103). The same

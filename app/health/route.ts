@@ -32,10 +32,22 @@
  * read this. The refusal lives in the body (`"status":"degraded"`), on the home
  * page, and in the 503 every identity route and the chat route answer.
  * That is what `readIdentitySurface` is for: the same environment, read without
- * the guard that belongs to a credential this endpoint does not use.
+ * the guard that belongs to a credential this endpoint does not use. *
+ * **Since #4 this is the control plane's `/health` too**, because the control
+ * plane is a module of this app and `/health` is the path its hook contract
+ * names (`HOOK_ENDPOINT_PATHS.healthCheck`). One response, per DESIGN.md
+ * §Readiness: `policy`, `fixture_drift`, `injection_detection` and `warnings`
+ * are the control plane's own fields, lifted to the top level as `cg-hooks`
+ * reported them, and they count towards `status` — a policy that will not
+ * compile, or a disk whose policy is not the shipped fixture, is `degraded`
+ * exactly as it was on `cg-hooks`. `reset` is one value now, because one
+ * process holds one `RESET_TOKEN`. Everything else `cg-hooks` said about
+ * itself (row counts, the migration report, stream clients, the contract
+ * version) is under `control_plane`, with its own roll-up in
+ * `control_plane.status`, which is what the panel's strip reads.
  */
 import { deploymentReadiness, readIdentitySurface } from "../../lib/config.ts";
-import { resetToken } from "../../lib/governance/control-plane.ts";
+import { bootedControlPlane, controlPlaneFailure } from "../../lib/control-plane/instance.ts";
 import { panelStreamHealth } from "../../lib/governance/stream-url.ts";
 
 export const dynamic = "force-dynamic";
@@ -47,22 +59,66 @@ export function GET() {
   const { status: deployment, ...capabilities } = deploymentReadiness(readIdentitySurface());
   const panel_stream = panelStreamHealth(process.env);
 
-  // `status` first, because it is the field anybody actually reads and the one
-  // the other three services answer. `ok` only when every capability is
-  // configured *and* the panel is watching something — and still HTTP 200, so
-  // Render brings the instance up and a human can read the fields that say
-  // which one. #86 and #88 each added a field to this expression; a deployment
-  // that satisfies one half and not the other is `degraded`.
-  const status = deployment === "ok" && panel_stream !== "unconfigured" ? "ok" : "degraded";
+  // The control plane's own report (#4). Read in-process: it is this process's
+  // policy cache and this process's `governance.db`.
+  const {
+    status: controlPlaneStatus,
+    policy,
+    injection_detection,
+    fixture_drift,
+    reset,
+    warnings,
+    ...controlPlane
+  } = controlPlaneReport();
 
-  // Since #106: whether the panel's Reset control is drawn at all. Reported and
-  // deliberately NOT folded into `status` — a deployment nobody is presenting
-  // from is right to leave `RESET_TOKEN` unset, and calling that degraded would
-  // teach a reader to ignore the word. It is here because the alternative is
-  // the one thing this project keeps refusing: a control that is absent, and no
-  // surface that says so. "The Reset button is missing" then has an answer
-  // other than reading the source.
-  const reset = resetToken() === "" ? "disabled" : "enabled";
+  // `status` first, because it is the field anybody actually reads. `ok` only
+  // when every capability is configured, the panel is watching something, and
+  // the control plane is `healthy` (a compiled policy that matches the shipped
+  // fixture) — and still HTTP 200, so Render brings the instance up and a
+  // human can read the fields that say which one. #86, #88 and #4 each added a
+  // term to this expression; a deployment that satisfies some and not all is
+  // `degraded`.
+  const status =
+    deployment === "ok" && panel_stream !== "unconfigured" && controlPlaneStatus === "healthy"
+      ? "ok"
+      : "degraded";
 
-  return Response.json({ status, service: "web", ...capabilities, panel_stream, reset });
+  // Since #106: whether the panel's Reset control is drawn at all, and since #4
+  // whether `POST /admin/reset` exists — the same `RESET_TOKEN` decides both.
+  // Reported and deliberately NOT folded into `status`: a deployment nobody is
+  // presenting from is right to leave `RESET_TOKEN` unset, and calling that
+  // degraded would teach a reader to ignore the word. It is here because the
+  // alternative is the one thing this project keeps refusing: a control that
+  // is absent, and no surface that says so.
+  return Response.json({
+    status,
+    service: "web",
+    ...capabilities,
+    panel_stream,
+    policy,
+    fixture_drift,
+    injection_detection,
+    reset,
+    warnings,
+    control_plane: { status: controlPlaneStatus, ...controlPlane },
+  });
+}
+
+/**
+ * The control plane's `/health` fields, or — when it did not boot — the same
+ * fields saying so. Never throws: this endpoint answers 200 whatever it finds,
+ * and a boot failure is exactly the thing a human opens it to read.
+ */
+function controlPlaneReport() {
+  const failure = controlPlaneFailure();
+  if (failure === null) return bootedControlPlane().plane.health();
+  return {
+    status: "degraded" as const,
+    policy: { status: "failed", revision: null, error: failure },
+    injection_detection: null,
+    fixture_drift: null,
+    reset: "disabled" as const,
+    warnings: [`the control plane did not boot and every /access, /pre and /post call is being refused: ${failure}`],
+    error: failure,
+  };
 }
