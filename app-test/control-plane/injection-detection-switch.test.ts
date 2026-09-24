@@ -150,7 +150,7 @@ describe("the setting the demo path runs on", () => {
     // The whole point of "off-by-default-safe". A rehearsal that forgets the
     // variable, a Render service whose env was never edited, a fresh clone:
     // all of them run the control.
-    expect(readConfig({ LOAN_APP_PUBLIC_HOST: "localhost:1" }).injectionDetection).toBe("armed");
+    expect(readConfig({ APP_PUBLIC_HOST: "localhost:1" }).injectionDetection).toBe("armed");
   });
 
   test.each([
@@ -160,7 +160,7 @@ describe("the setting the demo path runs on", () => {
     ["Off", "disarmed"],
     ["  off  ", "disarmed"],
   ])("INJECTION_DETECTION=%s reads as %s", (raw, expected) => {
-    const config = readConfig({ LOAN_APP_PUBLIC_HOST: "localhost:1", INJECTION_DETECTION: raw });
+    const config = readConfig({ APP_PUBLIC_HOST: "localhost:1", INJECTION_DETECTION: raw });
     expect(config.injectionDetection).toBe(expected as ScannerSetting);
   });
 
@@ -169,7 +169,7 @@ describe("the setting the demo path runs on", () => {
     // was supposed to show the control run; read as disarmed, a typo strips the
     // protection off a demo that was supposed to have it.
     expect(() =>
-      readConfig({ LOAN_APP_PUBLIC_HOST: "localhost:1", INJECTION_DETECTION: "no" }),
+      readConfig({ APP_PUBLIC_HOST: "localhost:1", INJECTION_DETECTION: "no" }),
     ).toThrow(/INJECTION_DETECTION is "no"/);
   });
 });

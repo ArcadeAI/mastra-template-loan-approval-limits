@@ -176,7 +176,10 @@ async function main(): Promise<number> {
   const port = freePort();
   const base = `http://localhost:${port}`;
   const gatewayPort = new URL(harness.gateway.url).port;
-  const idpPort = new URL(harness.config.identity.idpIssuer).port;
+  // The agent harness's dev identity stand-in, which the container's loan
+  // module validates bearers against. The container's own identity provider
+  // (#6) is not what this drives: the bearers here are the stand-in's.
+  const idpPort = new URL(`http://${harness.idpHost}`).port;
 
   try {
     docker([
@@ -199,12 +202,15 @@ async function main(): Promise<number> {
         ANTHROPIC_API_KEY: liveKey || "standalone-verify-has-no-key",
         MODEL_ID: harness.config.agent.modelId,
         SESSION_SECRET,
-        PUBLIC_URL: base,
-        IDP_ISSUER: `http://host.docker.internal:${idpPort}`,
+        // The container's own origin since #6: its identity provider's issuer
+        // too, which replaced PUBLIC_URL and IDP_ISSUER.
+        APP_PUBLIC_HOST: `localhost:${port}`,
+        IDENTITY_HOST: `host.docker.internal:${idpPort}`,
+        // Required under NODE_ENV=production since #6; a throwaway.
+        BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
         IDP_CLIENT_ID: harness.config.identity.idpClientId,
         IDP_CLIENT_SECRET: harness.config.identity.idpClientSecret,
         APPROVALS_STORE_TOKEN: "standalone-verify-store-token",
-        HOOKS_PUBLIC_HOST: harness.hooksHost,
         // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
         // defaults to the app's own listener; this test's control plane is elsewhere.
         CONTROL_PLANE_HOST: harness.hooksHost,

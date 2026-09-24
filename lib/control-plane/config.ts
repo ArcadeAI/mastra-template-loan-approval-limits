@@ -146,14 +146,14 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     throw new Error("APPROVALS_STORE_TOKEN is required in production");
   }
 
-  // Checked here and returned nowhere, deliberately. `render.yaml` sets
-  // `LOAN_APP_PUBLIC_HOST` on this service and nothing reads it — #16's
-  // redaction runs on the payload Arcade posts, not on a fetch of its own —
-  // but the value is wrong from the
-  // moment it is set, and #59 is the record of what that costs when it is
-  // only discovered at the first call. This is the single place the service
+  // Checked here and returned nowhere, deliberately. `APP_PUBLIC_HOST` (#6)
+  // is the app's own public host, and the control plane reads nothing
+  // through it — #16's redaction runs on the payload Arcade posts, not on a
+  // fetch of its own — but a value that is wrong is wrong from the moment it
+  // is set, and #59 is the record of what that costs when it is only
+  // discovered at the first call. This is the single place the control plane
   // reads its environment, so it is the place to say so.
-  assertPublicHost("LOAN_APP_PUBLIC_HOST", env.LOAN_APP_PUBLIC_HOST);
+  assertPublicHost("APP_PUBLIC_HOST", env.APP_PUBLIC_HOST);
 
   // This validates the complete public contract before the service opens its
   // database. In particular, a deprecated name-based variable cannot be

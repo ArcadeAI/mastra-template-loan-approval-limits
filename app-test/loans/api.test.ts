@@ -112,7 +112,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       LOANS_DB_PATH: dbPath,
-      IDP_PUBLIC_HOST: `localhost:${idp.port}`,
+      IDENTITY_HOST: `localhost:${idp.port}`,
     },
     stdout: "pipe",
     stderr: "pipe",

@@ -84,8 +84,8 @@ class TestDefinition:
             for t in app._catalog
         }
         assert secrets == {
-            "RequestApproval": ["APPROVALS_STORE_TOKEN", "HOOKS_PUBLIC_HOST", "WEB_PUBLIC_HOST"],
-            "Decide": ["APPROVALS_STORE_TOKEN", "HOOKS_PUBLIC_HOST"],
+            "RequestApproval": ["APPROVALS_STORE_TOKEN", "APP_PUBLIC_HOST"],
+            "Decide": ["APPROVALS_STORE_TOKEN", "APP_PUBLIC_HOST"],
         }
 
     def test_describes_every_tool_and_every_argument(self) -> None:

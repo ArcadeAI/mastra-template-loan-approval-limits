@@ -3,7 +3,7 @@
 import pytest
 from arcade_core.errors import ToolExecutionError
 
-from loan import LoanStatus, app, approve_loan, deny_loan, get_loan, search_loans
+from loan import IDP_PROVIDER_ID, LoanStatus, app, approve_loan, deny_loan, get_loan, search_loans
 from tests.conftest import DANA, RILEY
 
 
@@ -17,9 +17,9 @@ class TestDefinition:
     def test_every_tool_requires_the_idp_token_and_the_api_host(self) -> None:
         for tool in app._catalog:
             auth = tool.definition.requirements.authorization
-            assert auth is not None and auth.id == "cg-idp", tool.definition.name
+            assert auth is not None and auth.id == IDP_PROVIDER_ID == "app-identity", tool.definition.name
             secrets = [s.key for s in tool.definition.requirements.secrets or []]
-            assert secrets == ["LOAN_APP_PUBLIC_HOST"], tool.definition.name
+            assert secrets == ["APP_PUBLIC_HOST"], tool.definition.name
 
     def test_describes_every_tool_and_every_argument(self) -> None:
         for tool in app._catalog:

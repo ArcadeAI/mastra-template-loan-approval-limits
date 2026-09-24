@@ -24,8 +24,8 @@ from arcade_mcp_server.metadata import Behavior, Operation, ToolMetadata
 
 __all__ = [
     "API_BASE_PATH",
+    "APP_HOST_SECRET",
     "IDP_PROVIDER_ID",
-    "LOAN_APP_HOST_SECRET",
     "app",
     "approve_loan",
     "deny_loan",
@@ -50,17 +50,23 @@ app = MCPApp(
     ),
 )
 
-# The Arcade auth provider id that #13 registers `apps/idp` under. The scopes
-# are the least that make `/oauth2/userinfo` return an email, which is how the
-# API attributes the call. They are not a gate: a scope refusal happens before
-# any hook fires and would be invisible to the control plane.
-IDP_PROVIDER_ID = "cg-idp"
+# The Arcade auth provider id the app's identity module is registered under
+# (hop 2). Fixed, not configurable: `OAuth2(id=...)` is read at import, so the
+# README tells a developer to register the provider under exactly this id
+# (DESIGN.md → Toolkit configuration). It was `cg-idp`, the demo's service
+# name, until #6. Renaming it is this one line and the README's instruction.
+# The scopes are the least that make `/oauth2/userinfo` return an email, which
+# is how the API attributes the call. They are not a gate: a scope refusal
+# happens before any hook fires and would be invisible to the control plane.
+IDP_PROVIDER_ID = "app-identity"
 IDP_SCOPES = ["openid", "email"]
 
 # HOST-form, like every service address in this repo (see `.env.example`).
 # Delivered to the deployed toolkit as an Arcade secret, because that is the
-# one configuration channel a deployed toolkit has.
-LOAN_APP_HOST_SECRET = "LOAN_APP_PUBLIC_HOST"
+# one configuration channel a deployed toolkit has. The app's own host since
+# #6: the loan API is a module of the app, and one secret names the app for
+# both toolkits.
+APP_HOST_SECRET = "APP_PUBLIC_HOST"
 
 # Where the loan API sits on that host. Since #5 the loan API is a module of
 # the app (`lib/loans/`), served under `/bank` because the app's board page is
@@ -69,7 +75,7 @@ LOAN_APP_HOST_SECRET = "LOAN_APP_PUBLIC_HOST"
 API_BASE_PATH = "/bank"
 
 _requires_auth = OAuth2(id=IDP_PROVIDER_ID, scopes=IDP_SCOPES)
-_requires_secrets = [LOAN_APP_HOST_SECRET]
+_requires_secrets = [APP_HOST_SECRET]
 
 # The previous MCP surface carried `readOnlyHint`, `destructiveHint`,
 # `idempotentHint` and `openWorldHint` on each tool. `arcade-mcp`'s
@@ -115,7 +121,7 @@ async def _call(
     json: dict[str, Any] | None = None,
 ) -> Any:
     """One request to the API, on behalf of whoever holds the token."""
-    url = _base_url(context.get_secret(LOAN_APP_HOST_SECRET)) + API_BASE_PATH + path
+    url = _base_url(context.get_secret(APP_HOST_SECRET)) + API_BASE_PATH + path
     headers = {"Authorization": f"Bearer {context.get_auth_token_or_empty()}"}
 
     async with httpx.AsyncClient(timeout=10.0) as client:

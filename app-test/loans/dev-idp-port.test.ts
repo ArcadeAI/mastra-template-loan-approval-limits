@@ -8,7 +8,7 @@
  * loads the root `.env.local`, whose `PORT` is the app's — the same trap with
  * a different owner. Until #56 it took `PORT` from that file — the loan API's
  * port. In a worktree
- * owning 4410-4419 both processes wanted 4412, and `IDP_PUBLIC_HOST` pointed
+ * owning 4410-4419 both processes wanted 4412, and `IDENTITY_HOST` pointed
  * at 4413 where nothing was listening. Sibling of `app-test/dev-port.test.ts`
  * (#50): same family of silent misbinding, different cause — that one was a
  * shell expanding `${PORT:-3000}` before anything read the file, this one read
@@ -16,7 +16,7 @@
  *
  * The first test therefore runs the *packaged* script, verbatim, from the root
  * manifest, in a throwaway tree whose `.env.local` carries a `PORT` and an
- * `IDP_PUBLIC_HOST` that disagree. Only one of them can be the one it binds.
+ * `IDENTITY_HOST` that disagree. Only one of them can be the one it binds.
  * Before #5 there were two manifests in that chain, the root's and
  * `apps/loan-app`'s; the service's is gone, and so is the one expectation that
  * read a script out of it.
@@ -63,13 +63,13 @@ function freePort(): number {
  * entirely — a real dev server's environment is the one without it, so
  * `NODE_ENV` is not passed. And the whole question is which of the fixture
  * `.env.local`'s two values the stub picks, so neither `PORT` nor
- * `IDP_PUBLIC_HOST` may reach it from the caller: Bun lets a variable already
+ * `IDENTITY_HOST` may reach it from the caller: Bun lets a variable already
  * in the environment win over the file. Measured on #50.
  *
  * An allowlist, not a list of exclusions, since round 1 of #5's review: the
  * first cut dropped `PORT` and `NODE_ENV` only, and a shell that had exported
  * the worktree's own `.env.local` (`set -a; . ./.env.local`) handed the stub
- * `IDP_PUBLIC_HOST=localhost:4443`, so it bound that and the test timed out on
+ * `IDENTITY_HOST=localhost:4443`, so it bound that and the test timed out on
  * the fixture's port. Every `*_PUBLIC_HOST`, `CG_PORT_*` or anything else a
  * future fixture writes is excluded the same way, by not being on this list.
  */
@@ -92,7 +92,7 @@ afterAll(() => {
   if (project !== undefined) rmSync(project, { recursive: true, force: true });
 });
 
-test("the packaged dev:idp-stub script binds IDP_PUBLIC_HOST's port, not PORT", async () => {
+test("the packaged dev:idp-stub script binds IDENTITY_HOST's port, not PORT", async () => {
   const idpPort = freePort();
   const loanPort = freePort();
   expect(idpPort).not.toBe(loanPort);
@@ -120,7 +120,7 @@ test("the packaged dev:idp-stub script binds IDP_PUBLIC_HOST's port, not PORT", 
   // the app's, the way `scripts/orca-setup.sh` writes the root `.env.local`.
   writeFileSync(
     join(project, ".env.local"),
-    `PORT=${loanPort}\nIDP_PUBLIC_HOST=localhost:${idpPort}\n`,
+    `PORT=${loanPort}\nIDENTITY_HOST=localhost:${idpPort}\n`,
   );
 
   child = Bun.spawn(["bun", "run", "--cwd", project, "dev:idp-stub"], {
@@ -154,7 +154,7 @@ test("the packaged dev:idp-stub script binds IDP_PUBLIC_HOST's port, not PORT", 
       new Response(child.stderr as ReadableStream).text(),
     ]);
     throw new Error(
-      `\`${stubScript as string}\` did not answer on ${idpPort}, the port in IDP_PUBLIC_HOST.\n` +
+      `\`${stubScript as string}\` did not answer on ${idpPort}, the port in IDENTITY_HOST.\n` +
         `stdout:\n${out}\nstderr:\n${err}`,
     );
   }
@@ -166,17 +166,23 @@ test("the packaged dev:idp-stub script binds IDP_PUBLIC_HOST's port, not PORT", 
   await expect(fetch(`http://127.0.0.1:${loanPort}/health`)).rejects.toThrow();
 }, 60_000);
 
-test("a missing IDP_PUBLIC_HOST falls back to the same default the loan API uses", () => {
-  expect(resolveStubPort({})).toBe(8083);
-  expect(resolveStubPort({ IDP_PUBLIC_HOST: "  " })).toBe(8083);
+/**
+ * Unset, the loan API validates against the app itself, `localhost:$PORT`,
+ * which serves the real identity provider since #6. That is the one port the
+ * stub must never take (#56), so there is no default to fall back to: until #6
+ * this asserted 8083, where `apps/idp` listened.
+ */
+test("a missing IDENTITY_HOST is refused, because the loan API's default is the app itself", () => {
+  expect(() => resolveStubPort({})).toThrow(/IDENTITY_HOST is not set/);
+  expect(() => resolveStubPort({ IDENTITY_HOST: "  " })).toThrow(/IDENTITY_HOST is not set/);
 });
 
-test("the port is read out of the host, in any of the forms IDP_PUBLIC_HOST takes", () => {
-  expect(resolveStubPort({ IDP_PUBLIC_HOST: "localhost:4413" })).toBe(4413);
-  expect(resolveStubPort({ IDP_PUBLIC_HOST: " localhost:4413 " })).toBe(4413);
-  expect(resolveStubPort({ IDP_PUBLIC_HOST: "127.0.0.1:4413" })).toBe(4413);
-  expect(resolveStubPort({ IDP_PUBLIC_HOST: "http://localhost:4413" })).toBe(4413);
-  expect(resolveStubPort({ IDP_PUBLIC_HOST: "[::1]:4413" })).toBe(4413);
+test("the port is read out of the host, in any of the forms IDENTITY_HOST takes", () => {
+  expect(resolveStubPort({ IDENTITY_HOST: "localhost:4413" })).toBe(4413);
+  expect(resolveStubPort({ IDENTITY_HOST: " localhost:4413 " })).toBe(4413);
+  expect(resolveStubPort({ IDENTITY_HOST: "127.0.0.1:4413" })).toBe(4413);
+  expect(resolveStubPort({ IDENTITY_HOST: "http://localhost:4413" })).toBe(4413);
+  expect(resolveStubPort({ IDENTITY_HOST: "[::1]:4413" })).toBe(4413);
 });
 
 /**
@@ -186,17 +192,17 @@ test("the port is read out of the host, in any of the forms IDP_PUBLIC_HOST take
  * wearing a different hat.
  */
 test("a host with no port is refused rather than defaulted", () => {
-  expect(() => resolveStubPort({ IDP_PUBLIC_HOST: "cg-idp.example.test" })).toThrow(
+  expect(() => resolveStubPort({ IDENTITY_HOST: "cg-idp.example.test" })).toThrow(
     /names no port/,
   );
-  expect(() => resolveStubPort({ IDP_PUBLIC_HOST: "https://cg-idp.example.test" })).toThrow(
+  expect(() => resolveStubPort({ IDENTITY_HOST: "https://cg-idp.example.test" })).toThrow(
     /names no port/,
   );
 });
 
 test("the stub exits EX_CONFIG, and binds nothing, when the host names no port", async () => {
   const refused = Bun.spawn(["bun", STUB], {
-    env: devEnv({ IDP_PUBLIC_HOST: "cg-idp.example.test" }),
+    env: devEnv({ IDENTITY_HOST: "cg-idp.example.test" }),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -207,5 +213,5 @@ test("the stub exits EX_CONFIG, and binds nothing, when the host names no port",
   // Exit status, not just the message: a script that printed this and then
   // served anyway would pass a stderr-only assertion.
   expect(status).toBe(78);
-  expect(stderr).toContain("IDP_PUBLIC_HOST=cg-idp.example.test");
+  expect(stderr).toContain("IDENTITY_HOST=cg-idp.example.test");
 }, 30_000);

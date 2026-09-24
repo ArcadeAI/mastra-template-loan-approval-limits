@@ -67,7 +67,7 @@ async function boot(env: Record<string, string>): Promise<Instance> {
       ...process.env,
       PORT: String(port),
       LOANS_DB_PATH: dbPath,
-      IDP_PUBLIC_HOST: `localhost:${idp.port}`,
+      IDENTITY_HOST: `localhost:${idp.port}`,
       ...env,
     },
     stdout: "pipe",

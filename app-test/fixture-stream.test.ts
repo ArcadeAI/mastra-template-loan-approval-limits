@@ -174,23 +174,23 @@ describe("which stream the panel is pointed at", () => {
   });
 
   test("a configured hook host alone is not enough to switch away from the fixture", () => {
-    expect(resolvePanelStream({ HOOKS_PUBLIC_HOST: "localhost:8081" }).mode).toBe("fixture");
+    expect(resolvePanelStream({ APP_PUBLIC_HOST: "localhost:8081" }).mode).toBe("fixture");
   });
 
   test("GOVERNANCE_STREAM=hooks points at the hook server, and carries the host for the badge", () => {
     expect(
-      resolvePanelStream({ GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: "localhost:8081" }),
+      resolvePanelStream({ GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: "localhost:8081" }),
     ).toEqual({ url: "http://localhost:8081/hooks/events", mode: "hooks", host: "localhost:8081" });
   });
 
   test("a deployed host gets https, a local one gets http", () => {
     const deployed = resolvePanelStream({
       GOVERNANCE_STREAM: "hooks",
-      HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com",
+      APP_PUBLIC_HOST: "cg-hooks.onrender.com",
     });
     const local = resolvePanelStream({
       GOVERNANCE_STREAM: "hooks",
-      HOOKS_PUBLIC_HOST: "127.0.0.1:4421",
+      APP_PUBLIC_HOST: "127.0.0.1:4421",
     });
 
     expect(watching(deployed).url).toBe("https://cg-hooks.onrender.com/hooks/events");
@@ -200,14 +200,14 @@ describe("which stream the panel is pointed at", () => {
   test("asking for hooks without a host is unconfigured, not a quiet replay", () => {
     for (const env of [
       { GOVERNANCE_STREAM: "hooks" },
-      { GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: "  " },
+      { GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: "  " },
       { ...DEPLOYED, GOVERNANCE_STREAM: "hooks" },
     ]) {
       const stream = resolvePanelStream(env);
       expect(stream.mode).toBe("unconfigured");
       // The sentence names the variable, because whoever reads it is about to
       // go and set it.
-      expect(stream).toHaveProperty("problem", expect.stringContaining("HOOKS_PUBLIC_HOST"));
+      expect(stream).toHaveProperty("problem", expect.stringContaining("APP_PUBLIC_HOST"));
     }
   });
 
@@ -216,8 +216,8 @@ describe("which stream the panel is pointed at", () => {
     // no GOVERNANCE_STREAM, which used to be indistinguishable from a demo.
     for (const env of [
       DEPLOYED,
-      { ...DEPLOYED, HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com" },
-      { RENDER: "true", HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com" },
+      { ...DEPLOYED, APP_PUBLIC_HOST: "cg-hooks.onrender.com" },
+      { RENDER: "true", APP_PUBLIC_HOST: "cg-hooks.onrender.com" },
     ]) {
       const stream = resolvePanelStream(env);
       expect(stream.mode).toBe("unconfigured");
@@ -253,13 +253,13 @@ describe("which stream the panel is pointed at", () => {
   });
 
   test("what /health reports is the page's own resolution, not a second opinion", () => {
-    expect(panelStreamHealth({ GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com" })).toBe("live");
+    expect(panelStreamHealth({ GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: "cg-hooks.onrender.com" })).toBe("live");
     expect(panelStreamHealth({ GOVERNANCE_STREAM: "fixture" })).toBe("fixture");
     expect(panelStreamHealth({ NODE_ENV: "production" })).toBe("unconfigured");
     // A bare service name throws on the page (#67) — loudly, at a developer.
     // /health must still answer, because Render drops an instance whose health
     // check fails and takes the endpoint that explains why with it.
-    expect(panelStreamHealth({ GOVERNANCE_STREAM: "hooks", HOOKS_PUBLIC_HOST: "cg-hooks" })).toBe(
+    expect(panelStreamHealth({ GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: "cg-hooks" })).toBe(
       "unconfigured",
     );
   });

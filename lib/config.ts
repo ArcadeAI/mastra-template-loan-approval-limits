@@ -34,7 +34,12 @@ import { readPersonaEmailOverrides } from "@cg/policy-schema/contract/persona-em
  * part of the value rather than something a consumer adds.
  */
 export interface IdentityConfig {
-  /** `IDP_ISSUER` — `apps/idp`'s public origin, no trailing slash. */
+  /**
+   * The identity provider's public origin and OAuth issuer, no trailing slash:
+   * `appOrigin`, since #6 folded `apps/idp` into the app. It was `IDP_ISSUER`.
+   * Only a browser is ever sent here; this server reaches the provider
+   * in-process (`lib/identity/link.ts`).
+   */
   idpIssuer: string;
   /** Client C: this service's own registration at the IdP, separate from the two Arcade holds. */
   idpClientId: string;
@@ -43,8 +48,20 @@ export interface IdentityConfig {
   idpScopes: string;
   /** Seals the session cookie. No fallback — see `lib/identity/seal.ts`. */
   sessionSecret: string;
-  /** This service's own public origin, no trailing slash. Every redirect_uri is built from it. */
+  /**
+   * This app's own public origin, no trailing slash. Every redirect_uri is
+   * built from it. `appOrigin` since #6; it was `PUBLIC_URL`, and it cannot
+   * differ from `idpIssuer` any more — see `appPublicHost`.
+   */
   publicUrl: string;
+  /**
+   * Whether `APP_PUBLIC_HOST` is set, rather than `idpIssuer` and `publicUrl`
+   * being the localhost fallback. The sign-in and the verifier refuse to run
+   * on the fallback: a deployment that forgot the variable would otherwise
+   * register `http://localhost:3000/...` redirect URIs and name a localhost
+   * issuer, and the failure would land at Arcade, where no hook fires.
+   */
+  publicHostConfigured: boolean;
   /** `ARCADE_GATEWAY_ID` — `cg-demo-us`, the User Source gateway hop 1 authorizes against. */
   gatewayId: string;
   /**
@@ -107,17 +124,17 @@ export interface AgentConfig {
 
 export interface WebConfig {
   /**
-   * The control plane's public address: `HOOKS_PUBLIC_HOST`, the host the
-   * deployed approvals toolkit and the panel's browser reach it at. The app
-   * itself since #4 (`lib/control-plane/`). Validated here; this server never
-   * reads the control plane through it (see `controlPlaneHost`).
+   * The control plane's public address: `APP_PUBLIC_HOST` since #6, the host
+   * the deployed approvals toolkit and the panel's browser reach it at. The
+   * app itself since #4 (`lib/control-plane/`). Validated here; this server
+   * never reads the control plane through it (see `controlPlaneHost`).
    */
   hooksHost: string;
   /**
    * Where **this server** reads the control plane: the panel's status strip,
    * the Reset button, the approval page and the resume path. Since #4 that is
    * the app's own local listener, `localhost:$PORT`, so a server-side read
-   * never leaves the machine through the public tunnel `HOOKS_PUBLIC_HOST`
+   * never leaves the machine through the public tunnel `APP_PUBLIC_HOST`
    * names. `CONTROL_PLANE_HOST` overrides it, which the test harnesses do when
    * they point the app at `scripts/control-plane.ts` on a port of its own.
    */
@@ -196,14 +213,15 @@ export function readIdentitySurface(
       approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT?.trim() || "Approvals",
     },
     identity: {
-      idpIssuer: trimUrl(env.IDP_ISSUER),
+      idpIssuer: appOrigin(env),
       idpClientId: env.IDP_CLIENT_ID?.trim() ?? "",
       idpClientSecret: env.IDP_CLIENT_SECRET?.trim() ?? "",
       // `openid` for an ID token, `email` because the address is the join key
       // across Arcade, the OAuth subject and the loan book (DESIGN.md rule 3).
       idpScopes: env.IDP_SCOPES?.trim() || "openid email",
       sessionSecret: env.SESSION_SECRET?.trim() ?? "",
-      publicUrl: trimUrl(env.PUBLIC_URL),
+      publicUrl: appOrigin(env),
+      publicHostConfigured: !appPublicHostIsFallback(env),
       gatewayId: env.ARCADE_GATEWAY_ID?.trim() ?? "",
       cloudUrl: trimUrl(env.ARCADE_CLOUD_URL) || "https://cloud.arcade.dev",
     },
@@ -230,9 +248,8 @@ export function readWebConfig(env: Record<string, string | undefined> = process.
     // story. The panel reads this in a server component and hands it to the
     // browser, so a host nothing can resolve fails in a visitor's DevTools.
     // The app's own address since #4: the control plane is a module of this
-    // app, so its default is the app's default, `WEB_PUBLIC_HOST`'s in
-    // `.env.example`. It was `localhost:8081`, where `apps/hooks` listened.
-    hooksHost: publicHost("HOOKS_PUBLIC_HOST", env.HOOKS_PUBLIC_HOST, "localhost:3000"),
+    // app. One variable for it since #6, `APP_PUBLIC_HOST`.
+    hooksHost: appPublicHost(env),
     controlPlaneHost: publicHost(
       "CONTROL_PLANE_HOST",
       env.CONTROL_PLANE_HOST,
@@ -376,10 +393,9 @@ export function signinProblems(config: IdentitySurface): string[] {
   const { identity } = config;
   const secret = sessionSecretProblem(identity.sessionSecret);
   return [
-    ...(identity.idpIssuer ? [] : ["IDP_ISSUER is not set"]),
+    ...(identity.publicHostConfigured ? [] : ["APP_PUBLIC_HOST is not set"]),
     ...(identity.idpClientId ? [] : ["IDP_CLIENT_ID is not set"]),
     ...(identity.idpClientSecret ? [] : ["IDP_CLIENT_SECRET is not set"]),
-    ...(identity.publicUrl ? [] : ["PUBLIC_URL is not set"]),
     ...(secret ? [secret] : []),
   ];
 }
@@ -402,7 +418,7 @@ export function gatewayProblems(config: IdentitySurface): string[] {
 export function verifierProblems(config: IdentitySurface): string[] {
   const secret = sessionSecretProblem(config.identity.sessionSecret);
   return [
-    ...(config.identity.publicUrl ? [] : ["PUBLIC_URL is not set"]),
+    ...(config.identity.publicHostConfigured ? [] : ["APP_PUBLIC_HOST is not set"]),
     ...(config.arcadeApiKey ? [] : ["ARCADE_API_KEY is not set"]),
     ...(config.identity.cloudUrl ? [] : ["ARCADE_CLOUD_URL is not set"]),
     ...(secret ? [secret] : []),
@@ -431,14 +447,54 @@ export function agentProblems(config: IdentitySurface): string[] {
 /**
  * Whether cookies this service writes carry `Secure`.
  *
- * Derived from `PUBLIC_URL` rather than configured: a browser silently drops a
- * `Secure` cookie that arrives over plain http, so a local run on
+ * Derived from the app's origin rather than configured: a browser silently
+ * drops a `Secure` cookie that arrives over plain http, so a local run on
  * `http://localhost:4400` with `Secure` set looks like a sign-in that succeeds
- * and then forgets. Unset `PUBLIC_URL` means an unconfigured service, which
- * cannot sign anyone in anyway — treat it as the deployed case.
+ * and then forgets. The origin is http exactly when `APP_PUBLIC_HOST` is
+ * localhost or 127.0.0.1 (`baseUrl`), unset included.
  */
 export function cookiesAreSecure(config: IdentitySurface): boolean {
   return !config.identity.publicUrl.startsWith("http://");
+}
+
+/**
+ * `APP_PUBLIC_HOST`: the one host Arcade Cloud reaches this app at (#6).
+ *
+ * The ngrok host in a real run, and the one Arcade tool secret besides the
+ * store token: `tools/loan` and `tools/approvals` read it too. It replaced
+ * one host variable per service — the loan API's, the control plane's and the
+ * web UI's, three services that are now one app — and the identity module's
+ * `IDP_PUBLIC_URL`, the sign-in's `IDP_ISSUER` and the app's `PUBLIC_URL`,
+ * which have to be the same origin once the identity provider is part of the
+ * app: Better Auth's session cookie, the app's sealed one and the custom
+ * verifier all live on it.
+ *
+ * HOST-form like every address here. Unset, it is this process's own port on
+ * localhost, which is what a local run without a tunnel wants.
+ *
+ * **Addressed to the outside world only.** A server-side read of the app's own
+ * modules never goes through it: the tunnel would carry the app's own traffic
+ * out and back in. Those reads go in-process, or to `CONTROL_PLANE_HOST` and
+ * `IDENTITY_HOST`, which are local. `app-test/server-side-readers.test.ts`
+ * fails if one targets this host.
+ */
+export function appPublicHost(env: Record<string, string | undefined> = process.env): string {
+  return publicHost("APP_PUBLIC_HOST", env.APP_PUBLIC_HOST, `localhost:${env.PORT?.trim() || "3000"}`);
+}
+
+/** Whether `APP_PUBLIC_HOST` is unset, so {@link appPublicHost} is the localhost fallback. */
+export function appPublicHostIsFallback(env: Record<string, string | undefined> = process.env): boolean {
+  return !env.APP_PUBLIC_HOST?.trim();
+}
+
+/**
+ * `APP_PUBLIC_HOST` with its scheme, and no trailing slash: the app's public
+ * origin, the identity module's OAuth issuer and the base of every
+ * `redirect_uri` this app registers. http for localhost and 127.0.0.1, https
+ * for everything else (see {@link baseUrl}).
+ */
+export function appOrigin(env: Record<string, string | undefined> = process.env): string {
+  return baseUrl(appPublicHost(env));
 }
 
 /** HOST-form to URL: http for a local address, https everywhere else. */

@@ -178,7 +178,7 @@ export async function startAgentHarness(
   const workspace = join(tmpdir(), `cg-agent-${crypto.randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
 
-  // The stub IdP binds the port named in IDP_PUBLIC_HOST, not PORT — see the
+  // The stub IdP binds the port named in IDENTITY_HOST, not PORT — see the
   // comment at the top of that script. So the port is chosen here and handed to
   // both it and the loan API, which is what makes them agree.
   const idpPort = freePort();
@@ -186,7 +186,7 @@ export async function startAgentHarness(
   const idp = spawn({
     cmd: ["bun", join(REPO_ROOT, "scripts", "dev-idp.ts")],
     cwd: REPO_ROOT,
-    env: { ...process.env, IDP_PUBLIC_HOST: idpHost, NODE_ENV: "test" },
+    env: { ...process.env, IDENTITY_HOST: idpHost, NODE_ENV: "test" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -203,7 +203,7 @@ export async function startAgentHarness(
       APPROVALS_STORE_TOKEN: STORE_TOKEN,
       ARCADE_LOAN_TOOLKIT: LOAN_TOOLKIT,
       ARCADE_APPROVALS_TOOLKIT: APPROVALS_TOOLKIT,
-      LOAN_APP_PUBLIC_HOST: "localhost:1",
+      APP_PUBLIC_HOST: "localhost:1",
       NODE_ENV: "test",
       ...options.hooksEnv,
     },
@@ -222,7 +222,7 @@ export async function startAgentHarness(
       ...process.env,
       PORT: "0",
       LOANS_DB_PATH: join(workspace, "loans.db"),
-      IDP_PUBLIC_HOST: idpHost,
+      IDENTITY_HOST: idpHost,
       NODE_ENV: "test",
     },
     stdout: "pipe",
@@ -266,8 +266,7 @@ export async function startAgentHarness(
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY?.trim() || "anthropic-key-for-agent-tests",
     MODEL_ID: process.env.MODEL_ID?.trim() || "claude-sonnet-5",
     SESSION_SECRET,
-    PUBLIC_URL: "http://localhost:1",
-    IDP_ISSUER: `http://${idpHost}`,
+    APP_PUBLIC_HOST: "localhost:1",
     IDP_CLIENT_ID: "web",
     IDP_CLIENT_SECRET: "not-used-in-this-suite",
   });

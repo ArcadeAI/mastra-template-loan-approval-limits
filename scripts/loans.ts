@@ -17,7 +17,7 @@
  * port — never a literal and never a guess.
  *
  * Unlike the app, it refuses to start when the loan book will not open: there
- * is nothing else in this process to keep serving. An `IDP_PUBLIC_HOST`
+ * is nothing else in this process to keep serving. An `IDENTITY_HOST`
  * nothing can reach exits 78 (sysexits' EX_CONFIG) before the database is
  * opened and before the port is bound, the way `cg-loan-app` always did.
  */

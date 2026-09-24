@@ -3,7 +3,7 @@
  *
  * `render.yaml` used to derive every cross-service address with
  * `fromService … property: host`. Measured on 2026-09-10 (#59): Render emits
- * the **bare service name**, never the FQDN — `IDP_PUBLIC_HOST` arrived here as
+ * the **bare service name**, never the FQDN — `IDENTITY_HOST` arrived here as
  * `cg-idp-or5b`. Consumers prepend a scheme and nothing else, so the request
  * went to `https://cg-idp-or5b/oauth2/userinfo`, DNS failed, `fetch` threw, and
  * this service reported that the identity provider could not be reached. That

@@ -85,8 +85,8 @@ describe("the seed", () => {
     expect(byName["Michael"]).toMatchObject({ role: "chief_credit_officer", clearance: 5_000_000 });
   });
 
-  test("uses the same fallback emails as apps/idp, the join key", async () => {
-    const people = (await import("../../apps/idp/src/fixtures/people.json")).default.people;
+  test("uses the same fallback emails as the identity provider, the join key", async () => {
+    const people = (await import("../../lib/identity/provider/fixtures/people.json")).default.people;
     const ours = loadSeed(OPTIONS).subjects.map((s) => s.user_id).sort();
     expect(ours).toEqual(people.map((p) => p.email).sort());
   });

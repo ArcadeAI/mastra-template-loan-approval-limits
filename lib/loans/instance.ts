@@ -15,7 +15,16 @@
  *
  * Configured by the environment, exactly as the service was:
  * `LOANS_DB_PATH` (default `./loans.db`, in the directory the app runs from),
- * `IDP_PUBLIC_HOST` and `RESET_TOKEN`.
+ * `IDENTITY_HOST` and `RESET_TOKEN`.
+ *
+ * `IDENTITY_HOST` is where bearers are validated, at `/oauth2/userinfo`. It
+ * was the identity provider's public host until #6 folded the provider into
+ * the app; now it is **local**, and unset it is the app's own listener,
+ * `localhost:$PORT`, the same rule as `CONTROL_PLANE_HOST`. A validation is a
+ * server-side read of the app's own module, and it must not leave the machine
+ * through `APP_PUBLIC_HOST`'s tunnel (#4's finding, criterion 7 on #6). Over
+ * HTTP rather than in-process on purpose: the loan module imports nothing
+ * from the app, and its boundary test says so.
  */
 import { openLoanBook } from "./db.ts";
 import { publicHost } from "./public-host.ts";
@@ -41,7 +50,7 @@ export function loanModuleConfig(env: Record<string, string | undefined> = proce
   return {
     dbPath: env.LOANS_DB_PATH?.trim() || "./loans.db",
     resetToken: env.RESET_TOKEN?.trim() ?? "",
-    idpHost: publicHost("IDP_PUBLIC_HOST", env.IDP_PUBLIC_HOST, "localhost:8083"),
+    idpHost: publicHost("IDENTITY_HOST", env.IDENTITY_HOST, `localhost:${env.PORT?.trim() || "3000"}`),
   };
 }
 

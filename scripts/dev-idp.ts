@@ -2,12 +2,14 @@
  * A stand-in identity provider for local development. NOT the real one.
  *
  * The loan module (`lib/loans/`) validates every bearer token by asking the issuer's
- * `/oauth2/userinfo` who it belongs to. The real issuer is `apps/idp` (#36);
- * until it is running locally, this serves that one endpoint so the API can be
- * driven by hand:
+ * `/oauth2/userinfo` who it belongs to. The real issuer is the app's own
+ * identity module since #6, which the app serves on its own port; this serves
+ * that one endpoint for the loan module on a port of its own (`bun run loans`),
+ * so its API can be driven by hand without the app:
  *
- *     bun run dev:idp-stub                  # binds the port in IDP_PUBLIC_HOST
- *     curl -H 'Authorization: Bearer dev:alice@example.test' "$LOAN_APP_PUBLIC_HOST/bank/loans"
+ *     IDENTITY_HOST=localhost:4403 bun run dev:idp-stub   # binds 4403
+ *     IDENTITY_HOST=localhost:4403 PORT=4402 bun run loans
+ *     curl -H 'Authorization: Bearer dev:alice@example.test' "localhost:4402/bank/loans"
  *
  * A token is `dev:<email>`; the email after the prefix is who you are. That
  * is the whole protocol, so this must never run anywhere but a laptop. It
@@ -16,11 +18,11 @@
  * until #5 folded that service into the app.
  */
 
-/** What `lib/loans/instance.ts` falls back to when `IDP_PUBLIC_HOST` is unset. */
-const DEFAULT_IDP_HOST = "localhost:8083";
+/** An example value, for the error messages. Never a fallback — see `resolveStubPort`. */
+const EXAMPLE_IDP_HOST = "localhost:4403";
 
 /**
- * The port comes from `IDP_PUBLIC_HOST` — the address the loan API is pointed
+ * The port comes from `IDENTITY_HOST` — the address the loan API is pointed
  * at for userinfo — and deliberately not from `PORT`.
  *
  * `PORT` here belongs to somebody else. Since #5 this script runs from the
@@ -30,22 +32,34 @@ const DEFAULT_IDP_HOST = "localhost:8083";
  * right file for the wrong service, and the `PORT` in it was the loan API's. Until #56 it read `PORT` out of that file and
  * bound the loan API's port — measured in a worktree owning 4410-4419, both
  * processes wanted 4412, whichever started second lost, and nothing was
- * listening on 4413 where `IDP_PUBLIC_HOST` pointed. It failed silently: the
+ * listening on 4413 where `IDENTITY_HOST` pointed. It failed silently: the
  * stub announced a port and answered on it, just not the one anybody was
  * calling.
  *
  * Reading the host the API already asks for makes the two agree by
  * construction — there is no second value left to keep in step, in a worktree
- * or anywhere else. Move `IDP_PUBLIC_HOST` and both sides follow.
+ * or anywhere else. Move `IDENTITY_HOST` and both sides follow.
  *
  * `env` is a parameter so the resolution can be tested without a subprocess;
  * the running stub passes `process.env`, which Bun has already merged
  * `.env.local` into.
  */
 export function resolveStubPort(env: Record<string, string | undefined> = process.env): number {
-  const host = env.IDP_PUBLIC_HOST?.trim() || DEFAULT_IDP_HOST;
+  const host = env.IDENTITY_HOST?.trim() ?? "";
 
-  // `IDP_PUBLIC_HOST` is host-form by convention (`.env.example` documents it
+  // Unset, the loan module validates against the app itself (`localhost:$PORT`),
+  // which serves the real identity provider since #6. There is no port of the
+  // stub's own to fall back to, and taking the app's would be the #56 collision
+  // again, so it says so rather than binding something.
+  if (host === "") {
+    throw new Error(
+      `IDENTITY_HOST is not set, so the loan module validates tokens against the app itself, which ` +
+        `serves the real identity provider. Set IDENTITY_HOST to a free local port (e.g. ` +
+        `${EXAMPLE_IDP_HOST}) for both this stub and \`bun run loans\` to use it instead.`,
+    );
+  }
+
+  // `IDENTITY_HOST` is host-form by convention (`.env.example` documents it
   // that way), but a scheme is accepted rather than parsed as one: `new
   // URL("localhost:4413")` reads `localhost` as the *scheme* and hands back an
   // empty port, which would refuse a perfectly good value.
@@ -56,7 +70,7 @@ export function resolveStubPort(env: Record<string, string | undefined> = proces
     ({ port } = new URL(hasScheme ? host : `http://${host}`));
   } catch {
     throw new Error(
-      `IDP_PUBLIC_HOST=${host} is not a host — expected something like ${DEFAULT_IDP_HOST}.`,
+      `IDENTITY_HOST=${host} is not a host — expected something like ${EXAMPLE_IDP_HOST}.`,
     );
   }
 
@@ -66,8 +80,8 @@ export function resolveStubPort(env: Record<string, string | undefined> = proces
   // this function exists to end.
   if (port === "") {
     throw new Error(
-      `IDP_PUBLIC_HOST=${host} names no port, so there is nothing here for the stub to bind. ` +
-        `It wants a local host:port, e.g. ${DEFAULT_IDP_HOST}.`,
+      `IDENTITY_HOST=${host} names no port, so there is nothing here for the stub to bind. ` +
+        `It wants a local host:port, e.g. ${EXAMPLE_IDP_HOST}.`,
     );
   }
 
@@ -105,7 +119,7 @@ if (import.meta.main) {
   const server = Bun.serve({ port, fetch: userinfo });
 
   console.log(
-    `[dev-idp] listening on :${server.port} — the port in IDP_PUBLIC_HOST. ` +
+    `[dev-idp] listening on :${server.port} — the port in IDENTITY_HOST. ` +
       "Tokens are `dev:<email>`. Not for anything real.",
   );
 }

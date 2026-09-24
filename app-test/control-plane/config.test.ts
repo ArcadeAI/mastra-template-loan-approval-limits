@@ -6,7 +6,7 @@ import { loadSeed } from "../../lib/control-plane/policy-store.ts";
 describe("persona email configuration", () => {
   test("maps the role variables into the seeded persona keys", () => {
     const config = readConfig({
-      LOAN_APP_PUBLIC_HOST: "localhost:1",
+      APP_PUBLIC_HOST: "localhost:1",
       PERSONA_LOAN_OFFICER_EMAIL: "  Alice@Example.com ",
       PERSONA_CREDIT_ANALYST_EMAIL: "bob@example.com",
       PERSONA_VP_CREDIT_EMAIL: "charlie@example.com",
@@ -25,7 +25,7 @@ describe("persona email configuration", () => {
   test("rejects a deprecated name variable before governance.db can seed fixtures", () => {
     expect(() =>
       readConfig({
-        LOAN_APP_PUBLIC_HOST: "localhost:1",
+        APP_PUBLIC_HOST: "localhost:1",
         PERSONA_DANA_EMAIL: "dana@example.com",
       }),
     ).toThrow(/PERSONA_DANA_EMAIL.*PERSONA_LOAN_OFFICER_EMAIL/);
@@ -34,7 +34,7 @@ describe("persona email configuration", () => {
   test("rejects an unknown persona email variable instead of ignoring a typo", () => {
     expect(() =>
       readConfig({
-        LOAN_APP_PUBLIC_HOST: "localhost:1",
+        APP_PUBLIC_HOST: "localhost:1",
         PERSONA_LOAN_OFFCER_EMAIL: "dana@example.com",
       }),
     ).toThrow(/PERSONA_LOAN_OFFCER_EMAIL/);

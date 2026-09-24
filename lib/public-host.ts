@@ -4,13 +4,13 @@
  *
  * `render.yaml` used to derive every cross-service address with
  * `fromService … property: host`. Measured on 2026-09-10 (#59): Render emits
- * the **bare service name**, never the FQDN — `IDP_PUBLIC_HOST` arrived on
+ * the **bare service name**, never the FQDN — `IDENTITY_HOST` arrived on
  * `cg-loan-app` as `cg-idp-or5b`. Consumers prepend a scheme and nothing else,
  * so the request went to `https://cg-idp-or5b/oauth2/userinfo`, DNS failed, and
  * the caller reported a network error that read as "the dependency is down"
  * when the dependency was healthy and the URL was malformed.
  *
- * This service holds `HOOKS_PUBLIC_HOST`, and it is the worst of the three to
+ * This app holds `APP_PUBLIC_HOST` (#6), and it is the worst of the three to
  * get wrong: the panel opens `GET /events` from the *browser*, so a bare name
  * fails in somebody else's DevTools console rather than in a server log.
  *
