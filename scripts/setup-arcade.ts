@@ -184,6 +184,7 @@ const admin = new ArcadeAdmin(apiUrl, apiKey, dryRun, out);
 if (dryRun) {
   const keys = Object.keys(planned).filter((key) => (fileEnv[key]?.trim() ?? "") === "" && !setElsewhere(key));
   out(`\n.env${envExists ? "" : " (created from .env.example)"}: would fill ${[...keys, "IDP_CLIENT_ID", "IDP_CLIENT_SECRET"].join(", ")}`);
+  out("  and IDP_OAUTH_REDIRECT_URIS_ARCADE, with the callback Arcade generates for the provider");
   out(`idp.db: would mint the OAuth clients ${CLIENT_KEYS.join(", ")} (a client that already exists keeps its id)`);
   out(`\nRequests, in order (${apiUrl}):`);
   const registration: Registration = {
