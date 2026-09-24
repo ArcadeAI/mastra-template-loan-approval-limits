@@ -174,8 +174,11 @@ const planned: Record<string, string> = {
   // than the fixture replay a blank value means under `next dev`.
   GOVERNANCE_STREAM: "hooks",
 };
-// The identity module reads these from the environment when it mints.
+// The identity module reads these from the environment when it mints. The
+// host is always this run's: an `.env.local` naming localhost must not make
+// it mint for another issuer.
 for (const [key, value] of Object.entries(planned)) if (effective(key) === "") process.env[key] = value;
+process.env.APP_PUBLIC_HOST = host;
 
 const admin = new ArcadeAdmin(apiUrl, apiKey, dryRun, out);
 
