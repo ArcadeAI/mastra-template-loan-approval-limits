@@ -197,6 +197,30 @@ describe("identity", () => {
   });
 });
 
+/**
+ * Added on #5, for its criterion 4 as the driver amended it: a body naming an
+ * actor is refused (above), and an actor named anywhere else in the request —
+ * the query string, a header — is not refused but ignored, and the decision is
+ * recorded as the bearer's owner.
+ */
+describe("an actor named outside the body is ignored, and the token's owner is recorded", () => {
+  test("?actor=, ?decided_by= and X-Actor all name Charlie; Alice's token is what is recorded", async () => {
+    const response = await fetch(
+      `${baseUrl}/loans/LN-2295/approve?actor=${encodeURIComponent(RILEY)}&decided_by=${encodeURIComponent(RILEY)}`,
+      as("tok-dana", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-actor": RILEY },
+        body: JSON.stringify({ amount: 4_200 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const loan = (await response.json()) as LoanRecord;
+    expect(loan.decisions.at(-1)).toMatchObject({ amount: 4_200, decided_by: DANA });
+    expect(loan.decisions.map((d) => d.decided_by)).not.toContain(RILEY);
+  });
+});
+
 describe("the identity provider is not asked twice for the same token", () => {
   test("a screen polling /loans costs one userinfo call, not one per poll", async () => {
     const before = userinfoCalls;
