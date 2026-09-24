@@ -15,9 +15,12 @@
  *
  * Every port is taken from the OS with `:0` and read back. This worktree owns a
  * block of ten and a reviewer's owns a different block, so nothing here may
- * pick a number.
+ * pick a number. Since #9 the port is taken inside `retryOnPortRace`, and a
+ * child that lost it to another process is started again on a new one.
  */
 import type { Subprocess } from "bun";
+
+import { captureOutput, lostPortRace, retryOnPortRace, spawnChild, waitForChild } from "./child.ts";
 
 interface CdpResponse<T = unknown> {
   id: number;
@@ -78,14 +81,6 @@ export class Cdp {
   }
 }
 
-export function freePort(): number {
-  const server = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const port = server.port;
-  server.stop(true);
-  if (typeof port !== "number") throw new Error("OS did not assign a port");
-  return port;
-}
-
 export async function waitFor(description: string, predicate: () => Promise<boolean>, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
@@ -115,6 +110,100 @@ export async function stopProcess(child: Subprocess | undefined): Promise<void> 
   if (child === undefined) return;
   child.kill();
   await child.exited.catch(() => undefined);
+}
+
+/** A child started by {@link serveOnFreePort} or {@link startChrome}, and the port it holds. */
+export interface Booted {
+  child: Subprocess;
+  port: number;
+  /** Everything the child has written to stdout and stderr so far. */
+  output: () => string;
+}
+
+/**
+ * Starts a server on a free port and waits until it answers HTTP (#9). `start`
+ * spawns the child for the port it is given, with `spawnChild` and stdout and
+ * stderr piped, which are captured here; it may first prepare what depends on
+ * the port, such as an app's own identity provider. `ready` replaces the
+ * default readiness, any answer under 500 from `url`, and is handed the
+ * child's output so far.
+ *
+ * A child that exits before it is ready fails the wait at once with its
+ * output. So does one that says `EADDRINUSE` and keeps running, as a launcher
+ * whose server died under it can: it is stopped here. Either way a lost race is
+ * killed, awaited, and started again on a new port, so a lost attempt leaves
+ * nothing running.
+ */
+export function serveOnFreePort(
+  start: (port: number) => Subprocess | Promise<Subprocess>,
+  {
+    url = (port) => `http://127.0.0.1:${port}/`,
+    ready,
+    timeoutMs = 60_000,
+  }: {
+    url?: (port: number) => string;
+    ready?: (port: number, output: () => string) => Promise<boolean>;
+    timeoutMs?: number;
+  } = {},
+): Promise<Booted> {
+  const answers = ready ?? (async (port: number) => (await fetch(url(port))).status < 500);
+  return retryOnPortRace(async (port) => {
+    const child = await start(port);
+    const output = captureOutput(child);
+    try {
+      await waitForChild(
+        child,
+        async () => {
+          if (lostPortRace(output())) {
+            child.kill();
+            return false;
+          }
+          return answers(port, output);
+        },
+        { description: ready === undefined ? `HTTP ${url(port)}` : `the child on ${port}`, output, timeoutMs },
+      );
+    } catch (error) {
+      child.kill();
+      await child.exited;
+      throw error;
+    }
+    return { child, port, output };
+  });
+}
+
+/**
+ * Starts headless Chrome with its DevTools on a free port (#9). `command` is the
+ * browser's command line for that port.
+ *
+ * Chrome does not exit when the port is taken: it logs `bind() failed: Address
+ * already in use`, listens on `[::1]` instead, and `127.0.0.1:<port>/json` is
+ * then answered by whoever took it. So readiness is Chrome's own
+ * `DevTools listening on ws://127.0.0.1:<port>/`, and a bind failure before it
+ * stops this Chrome so the attempt fails as a lost race and is retried.
+ */
+export function startChrome(command: (debugPort: number) => string[], timeoutMs = 30_000): Promise<Booted> {
+  return retryOnPortRace(async (port) => {
+    const child = spawnChild({ cmd: command(port), stdout: "pipe", stderr: "pipe" });
+    const output = captureOutput(child);
+    try {
+      await waitForChild(
+        child,
+        async () => {
+          if (output().includes(`DevTools listening on ws://127.0.0.1:${port}/`)) {
+            return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok;
+          }
+          if (lostPortRace(output())) child.kill();
+          return false;
+        },
+        { description: `Chrome DevTools on ${port}`, output, timeoutMs },
+      );
+    } catch (error) {
+      child.kill();
+      await child.exited;
+      throw error;
+    }
+    return { child, port, output };
+  });
 }
 
 export async function browserTarget(debugPort: number): Promise<{ webSocketDebuggerUrl: string }> {

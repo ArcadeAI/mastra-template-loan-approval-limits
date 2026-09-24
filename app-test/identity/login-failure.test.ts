@@ -35,6 +35,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
 import { loadPeople } from "../../lib/identity/provider/db.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -51,15 +53,6 @@ const dana = people.find((person) => person.persona === "dana")!;
 let child: Subprocess;
 let baseUrl: string;
 
-/** A port the OS says is free — same reasoning as `flow.test.ts::freePort`. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") throw new Error("Bun.serve({ port: 0 }) reported no port");
-  return port;
-}
-
 /** The login form, posted the way a browser posts it. */
 function submitLogin(email: string, password: string): Promise<Response> {
   return fetch(`${baseUrl}/login`, {
@@ -71,38 +64,32 @@ function submitLogin(email: string, password: string): Promise<Response> {
 }
 
 beforeAll(async () => {
-  const port = freePort();
-  baseUrl = `http://127.0.0.1:${port}`;
-
-  child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
-    env: {
-      ...(Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
-        ),
-      ) as Record<string, string>),
-      PORT: String(port),
-      IDP_DB_PATH: dbPath,
-      APP_PUBLIC_HOST: new URL(baseUrl).host,
-      IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
-      BETTER_AUTH_SECRET: "test-secret-".padEnd(48, "x"),
-    },
-    stdout: Bun.file(logPath),
-    stderr: "pipe",
+  // On a port chosen inside `serveOnFreePort`, which starts the provider again
+  // on a new one if another process took it first (#9).
+  const booted = await serveOnFreePort(
+    (port) =>
+      spawnChild(["bun", join(ROOT, "scripts", "identity.ts")], {
+        env: {
+          ...(Object.fromEntries(
+            Object.entries(process.env).filter(
+              ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+            ),
+          ) as Record<string, string>),
+          PORT: String(port),
+          IDP_DB_PATH: dbPath,
+          APP_PUBLIC_HOST: `127.0.0.1:${port}`,
+          IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
+          BETTER_AUTH_SECRET: "test-secret-".padEnd(48, "x"),
+        },
+        stdout: Bun.file(logPath),
+        stderr: "pipe",
+      }),
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/identity/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`idp did not come up:\n${(error as Error).message}`);
   });
-
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`idp did not come up:\n${await new Response(child.stderr as ReadableStream).text()}`);
-    }
-    await Bun.sleep(50);
-  }
+  child = booted.child;
+  baseUrl = `http://127.0.0.1:${booted.port}`;
 });
 
 afterAll(() => {

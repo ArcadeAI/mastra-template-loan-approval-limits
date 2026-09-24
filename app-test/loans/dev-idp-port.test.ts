@@ -28,6 +28,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { resolveStubPort } from "../../scripts/dev-idp.ts";
+import { serveOnFreePort } from "../cdp.ts";
+import { freePort, spawnChild } from "../child.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 const STUB = join(REPO_ROOT, "scripts", "dev-idp.ts");
@@ -38,21 +40,6 @@ interface Manifest {
 
 async function manifestAt(dir: string): Promise<Manifest> {
   return (await Bun.file(join(dir, "package.json")).json()) as Manifest;
-}
-
-/**
- * A port the OS says is free, rather than a guess — the same trick as
- * `test/api.test.ts` and `tools/loan/tests/conftest.py::_free_port`. Several
- * worktrees run `bun test` at once, so a random port is a birthday problem.
- */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
 }
 
 /**
@@ -93,9 +80,8 @@ afterAll(() => {
 });
 
 test("the packaged dev:idp-stub script binds IDENTITY_HOST's port, not PORT", async () => {
-  const idpPort = freePort();
+  // Nothing listens on the app's port: the stub must leave it alone.
   const loanPort = freePort();
-  expect(idpPort).not.toBe(loanPort);
 
   const root = await manifestAt(REPO_ROOT);
   const stubScript = root.scripts?.["dev:idp-stub"];
@@ -116,49 +102,36 @@ test("the packaged dev:idp-stub script binds IDENTITY_HOST's port, not PORT", as
   );
   cpSync(STUB, join(project, "scripts", "dev-idp.ts"));
 
-  // The only two ports in the fixture, and they disagree on purpose: `PORT` is
-  // the app's, the way `scripts/orca-setup.sh` writes the root `.env.local`.
-  writeFileSync(
-    join(project, ".env.local"),
-    `PORT=${loanPort}\nIDENTITY_HOST=localhost:${idpPort}\n`,
-  );
-
-  child = Bun.spawn(["bun", "run", "--cwd", project, "dev:idp-stub"], {
-    env: devEnv(),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const deadline = Date.now() + 30_000;
-  let body: { status?: string; service?: string } | undefined;
-  while (body === undefined) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${idpPort}/health`);
-      if (response.ok) body = (await response.json()) as { status?: string; service?: string };
-    } catch {
-      // Not listening yet.
-    }
-    if (body !== undefined) break;
-    if (Date.now() > deadline) break;
-    await Bun.sleep(50);
-  }
-
+  // The stub's port is chosen inside `serveOnFreePort`, which writes it and
+  // starts the stub again on a new one if another process took it first (#9).
   // The child's own output is the only thing that says *why* nothing answered
   // — "bound the loan port instead" and "crashed on startup" look identical
-  // from out here. Kill it first: the pipes stay open while it runs.
-  if (body === undefined) {
-    child.kill();
-    await child.exited;
-    const [out, err] = await Promise.all([
-      new Response(child.stdout as ReadableStream).text(),
-      new Response(child.stderr as ReadableStream).text(),
-    ]);
+  // from out here — and the error a failed boot throws carries it.
+  const dir = project;
+  const booted = await serveOnFreePort(
+    (idpPort) => {
+      // The only two ports in the fixture, and they disagree on purpose: `PORT` is
+      // the app's, the way `scripts/orca-setup.sh` writes the root `.env.local`.
+      writeFileSync(join(dir, ".env.local"), `PORT=${loanPort}\nIDENTITY_HOST=localhost:${idpPort}\n`);
+      return spawnChild(["bun", "run", "--cwd", dir, "dev:idp-stub"], {
+        env: devEnv(),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+    },
+    { ready: async (idpPort) => (await fetch(`http://127.0.0.1:${idpPort}/health`)).ok, timeoutMs: 30_000 },
+  ).catch((error: unknown) => {
     throw new Error(
-      `\`${stubScript as string}\` did not answer on ${idpPort}, the port in IDENTITY_HOST.\n` +
-        `stdout:\n${out}\nstderr:\n${err}`,
+      `\`${stubScript as string}\` did not answer on the port in IDENTITY_HOST.\n${(error as Error).message}`,
     );
-  }
+  });
+  child = booted.child;
+  expect(booted.port).not.toBe(loanPort);
 
+  const body = (await (await fetch(`http://127.0.0.1:${booted.port}/health`)).json()) as {
+    status?: string;
+    service?: string;
+  };
   expect(body).toEqual({ status: "ok", service: "dev-idp" });
 
   // And the other half of the bug: the app's port is still free, so `bun run
@@ -201,7 +174,7 @@ test("a host with no port is refused rather than defaulted", () => {
 });
 
 test("the stub exits EX_CONFIG, and binds nothing, when the host names no port", async () => {
-  const refused = Bun.spawn(["bun", STUB], {
+  const refused = spawnChild(["bun", STUB], {
     env: devEnv({ IDENTITY_HOST: "cg-idp.example.test" }),
     stdout: "pipe",
     stderr: "pipe",

@@ -28,6 +28,7 @@ import type { Subprocess } from "bun";
 
 import { readConfig } from "../../lib/control-plane/config.ts";
 import { assertPublicHost, PublicHostError } from "../../lib/control-plane/public-host.ts";
+import { spawnChild } from "../child.ts";
 
 /**
  * The root suite runs many async test files at once, and several of them boot
@@ -177,7 +178,7 @@ test.each(["cg-loan-app", "[::2]", "cg-loan-app:bad", "foo:bar"])(
     const dir = mkdtempSync(join(tmpdir(), "cg-public-host-"));
 
     try {
-      const child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "control-plane.ts")], {
+      const child = spawnChild(["bun", join(import.meta.dir, "..", "..", "scripts", "control-plane.ts")], {
         env: {
           ...process.env,
           PORT: "0",
@@ -210,7 +211,7 @@ test.each(["cg-loan-app.onrender.com", "localhost:8082", "127.0.0.1:1234", "[::1
     const stdoutPath = join(dir, "stdout.log");
     const stderrPath = join(dir, "stderr.log");
 
-    const child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "control-plane.ts")], {
+    const child = spawnChild(["bun", join(import.meta.dir, "..", "..", "scripts", "control-plane.ts")], {
       env: {
         ...process.env,
         PORT: "0",
@@ -245,7 +246,7 @@ test("an unrelated configuration error still fails, and not as EX_CONFIG", async
   const dir = mkdtempSync(join(tmpdir(), "cg-public-host-"));
 
   try {
-    const child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "control-plane.ts")], {
+    const child = spawnChild(["bun", join(import.meta.dir, "..", "..", "scripts", "control-plane.ts")], {
       env: {
         ...process.env,
         PORT: "0",

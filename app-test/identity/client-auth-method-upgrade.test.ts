@@ -24,6 +24,9 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
+
 const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-auth-method-${crypto.randomUUID()}`, "idp.db");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
@@ -66,17 +69,6 @@ function baseEnv(port: number): Record<string, string> {
   };
 }
 
-/** See `test/flow.test.ts::freePort` — bind `:0` and read it back, never guess. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
 /**
  * Boots the service on its own free port and returns its base URL plus
  * everything it wrote to stderr once it is up. Stderr, because the line that
@@ -85,38 +77,37 @@ function freePort(): number {
  * anyone knowing to look.
  */
 async function boot(): Promise<{ baseUrl: string; stderr: () => Promise<string> }> {
-  const port = freePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  env = baseEnv(port);
-
-  const child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
+  // On a port chosen inside `serveOnFreePort`, which starts the service again
+  // on a new one if another process took it first (#9). stdout is not piped,
+  // so what `serveOnFreePort` captures is stderr alone.
+  const booted = await serveOnFreePort(
+    (port) => {
+      env = baseEnv(port);
+      return spawnChild(["bun", join(ROOT, "scripts", "identity.ts")], {
+        env,
+        stdout: "ignore",
+        stderr: "pipe",
+      });
+    },
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/identity/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`idp did not come up:\n${(error as Error).message}`);
   });
+  const { child } = booted;
+  const baseUrl = `http://127.0.0.1:${booted.port}`;
   running = child;
-
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/identity/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) throw new Error("idp did not come up");
-    await Bun.sleep(50);
-  }
 
   let captured: string | null = null;
   return {
     baseUrl,
     stderr: async () => {
-      // Read once: the stream cannot be consumed twice, and killing the child
-      // is what ends it.
+      // Read once, after the child is killed: that is what ends the stream.
       if (captured === null) {
         child.kill();
         await child.exited;
-        captured = await new Response(child.stderr as ReadableStream).text();
+        // Give the pipe a moment to deliver the child's last words.
+        await Bun.sleep(50);
+        captured = booted.output();
         if (running === child) running = null;
       }
       return captured;
@@ -195,7 +186,7 @@ beforeAll(async () => {
   // Boot once to create the disk and the client, then rotate for a readable
   // secret — the operational path a human takes on a fresh deploy (#70).
   const first = await boot();
-  const rotate = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"], {
+  const rotate = spawnChild(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"], {
     env,
     stdout: "pipe",
     stderr: "pipe",

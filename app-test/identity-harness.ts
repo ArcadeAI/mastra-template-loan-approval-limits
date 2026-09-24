@@ -31,7 +31,6 @@
  * Every port is `:0` and read back. This worktree owns a block of ten and the
  * reviewer's owns a different block, so nothing here may pick a number.
  */
-import { spawn, type Subprocess } from "bun";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -46,6 +45,7 @@ import {
   verify,
 } from "../lib/identity/handlers.ts";
 import { childEnv } from "./child-env.ts";
+import { freePort, spawnChild } from "./child.ts";
 import { forgetGatewayClients } from "../lib/identity/gateway.ts";
 import { linkIdentity } from "../lib/identity/link.ts";
 import { readConfig as readIdpConfig } from "../lib/identity/provider/config.ts";
@@ -67,15 +67,6 @@ export type PersonaKey = keyof typeof PEOPLE;
 export const SESSION_SECRET = "identity-suite-session-secret-0123456789";
 export const ARCADE_API_KEY = "identity-suite-arcade-key";
 export const GATEWAY_ID = "cg-demo-us";
-
-/** A port the OS says is free. Never a guess — `tools/loan/tests/conftest.py::_free_port` does the same. */
-export function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  return port;
-}
 
 // ---------------------------------------------------------------------------
 // A browser, minus the browser
@@ -1019,7 +1010,7 @@ export async function startIdentityHarness(
   // operational path a human takes on a fresh deploy is the one taken here:
   // rotate once, under the same client id, to obtain a readable one. The
   // script opens the same `idp.db`, as it would beside the running app.
-  const rotate = spawn(
+  const rotate = spawnChild(
     ["bun", join(REPO_ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--client", "web", "--rotate"],
     { env: idpEnv, stdout: "pipe", stderr: "pipe" },
   );
@@ -1036,7 +1027,7 @@ export async function startIdentityHarness(
   if (!clientC?.client_secret) throw new Error(`no readable secret for client C in:\n${rotateOut}`);
 
   if (options.userSource) {
-    const minted = spawn(
+    const minted = spawnChild(
       ["bun", join(REPO_ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--client", USER_SOURCE_CLIENT, "--rotate"],
       { env: idpEnv, stdout: "pipe", stderr: "pipe" },
     );

@@ -24,6 +24,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
 import { loadPeople } from "../../lib/identity/provider/db.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -33,15 +35,6 @@ const USER_SOURCE_URI = "http://127.0.0.1:9/user-source-callback";
 
 const people = loadPeople({});
 const dana = people.find((person) => person.persona === "dana")!;
-
-/** See `test/flow.test.ts::freePort` — bind `:0` and read it back, never guess. */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") throw new Error("Bun.serve({ port: 0 }) reported no port");
-  return port;
-}
 
 function basicAuth(id: string, secret: string): string {
   const half = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
@@ -92,9 +85,6 @@ class Service {
   }
 
   async boot(): Promise<void> {
-    const port = freePort();
-    this.baseUrl = `http://127.0.0.1:${port}`;
-
     const inherited = Object.fromEntries(
       Object.entries(process.env).filter(
         ([key, value]) =>
@@ -102,37 +92,33 @@ class Service {
       ),
     ) as Record<string, string>;
 
-    this.env = {
-      ...inherited,
-      PORT: String(port),
-      IDP_DB_PATH: this.dbPath,
-      APP_PUBLIC_HOST: new URL(this.baseUrl).host,
-      IDP_OAUTH_REDIRECT_URIS: ARCADE_URI,
-      BETTER_AUTH_SECRET: SECRET,
-      ...this.extra,
-    };
-
     mkdirSync(dirname(this.dbPath), { recursive: true });
-    this.child = Bun.spawn(["bun", join(ROOT, "scripts", "identity.ts")], {
-      env: this.env,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
 
-    const deadline = Date.now() + 20_000;
-    for (;;) {
-      try {
-        if ((await fetch(`${this.baseUrl}/identity/health`)).ok) return;
-      } catch {
-        // Not listening yet.
-      }
-      if (Date.now() > deadline) {
-        throw new Error(
-          `idp did not come up:\n${await new Response(this.child.stderr as ReadableStream).text()}`,
-        );
-      }
-      await Bun.sleep(50);
-    }
+    // On a port chosen inside `serveOnFreePort`, which starts the provider again
+    // on a new one if another process took it first (#9).
+    const booted = await serveOnFreePort(
+      (port) => {
+        this.env = {
+          ...inherited,
+          PORT: String(port),
+          IDP_DB_PATH: this.dbPath,
+          APP_PUBLIC_HOST: `127.0.0.1:${port}`,
+          IDP_OAUTH_REDIRECT_URIS: ARCADE_URI,
+          BETTER_AUTH_SECRET: SECRET,
+          ...this.extra,
+        };
+        return spawnChild(["bun", join(ROOT, "scripts", "identity.ts")], {
+          env: this.env,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+      },
+      { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/identity/health`)).ok, timeoutMs: 20_000 },
+    ).catch((error: unknown) => {
+      throw new Error(`idp did not come up:\n${(error as Error).message}`);
+    });
+    this.child = booted.child;
+    this.baseUrl = `http://127.0.0.1:${booted.port}`;
   }
 
   stop(): void {
@@ -151,7 +137,7 @@ class Service {
 
   /** `oauth-client --json …`, with the exit status asserted rather than assumed. */
   async oauthClient(...args: string[]): Promise<{ code: number; json: Record<string, unknown>; err: string }> {
-    const run = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", ...args], {
+    const run = spawnChild(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", ...args], {
       env: this.env,
       stdout: "pipe",
       stderr: "pipe",
@@ -376,7 +362,7 @@ describe("with IDP_OAUTH_CLIENTS naming a second client", () => {
   test("--rotate without --client refuses rather than guess which registration it costs", async () => {
     const before = two.storedSecrets();
 
-    const run = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"], {
+    const run = spawnChild(["bun", join(ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--rotate"], {
       env: two.env,
       stdout: "pipe",
       stderr: "pipe",
@@ -432,7 +418,7 @@ describe("with IDP_OAUTH_CLIENTS unset", () => {
     const pairBefore = two.storedSecrets();
 
     for (const service of [one, two]) {
-      const run = Bun.spawn(["bun", join(ROOT, "scripts", "identity", "reset.ts")], {
+      const run = spawnChild(["bun", join(ROOT, "scripts", "identity", "reset.ts")], {
         env: service.env,
         stdout: "pipe",
         stderr: "pipe",

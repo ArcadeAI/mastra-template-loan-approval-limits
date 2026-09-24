@@ -26,12 +26,13 @@
  * nothing here has spoken to `api.arcade.dev`. #13 registers the gateway and
  * the provider; until then the live round trip has no test in this repo.
  */
-import { spawn, type Subprocess } from "bun";
+import type { Subprocess } from "bun";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readWebConfig, type WebConfig } from "../lib/config.ts";
 import { createArcadeStandIn } from "../scripts/arcade-stand-in.ts";
+import { spawnChild } from "./child.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
@@ -175,7 +176,7 @@ export interface Hooks {
 export async function startHooks(
   env: Record<string, string> = {},
 ): Promise<Hooks> {
-  const child = spawn({
+  const child = spawnChild({
     cmd: ["bun", join(REPO_ROOT, "scripts", "control-plane.ts")],
     cwd: REPO_ROOT,
     env: {

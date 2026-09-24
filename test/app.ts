@@ -11,13 +11,15 @@
  *
  * Its own `distDir` (`CG_NEXT_DIST_DIR`, as `app-test/control-plane-app.test.ts`
  * does), so it does not fight another `next dev` over `.next`. A port the OS
- * handed out, never a guess.
+ * handed out, never a guess, and handed out again if somebody else took it (#9).
  */
 import type { Subprocess } from "bun";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { serveOnFreePort, type Booted } from "../app-test/cdp.ts";
+import { spawnChild } from "../app-test/child.ts";
 import { childEnv } from "../app-test/child-env.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -33,75 +35,69 @@ export interface App {
   stop(): Promise<void>;
 }
 
-/** A port the OS says is free, rather than a guess. `conftest.py::_free_port`. */
-export function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  if (typeof port !== "number") throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  return port;
-}
-
 export async function bootApp(env: Record<string, string>): Promise<App> {
-  const port = freePort();
-  const host = `127.0.0.1:${port}`;
-  const origin = `http://${host}`;
   const data = mkdtempSync(join(tmpdir(), "cg-reset-app-"));
-  const distDir = `.next/cg-reset-${port}`;
+  const distDirs: string[] = [];
+  const cleanup = () => {
+    rmSync(data, { recursive: true, force: true });
+    for (const distDir of distDirs) rmSync(join(ROOT, distDir), { recursive: true, force: true });
+  };
 
   // An allowlist, not the developer's shell minus some of it (`child-env.ts`):
   // a PERSONA_* or an IDP_* from a local run would make these tests about
   // their environment, and a host or database path would point the app
   // somewhere else.
-  let output = "";
-  const child = Bun.spawn(["bun", "scripts/next.ts", "dev"], {
-    cwd: ROOT,
-    env: childEnv({
-      NODE_ENV: "development",
-      PORT: String(port),
-      CG_NEXT_DIST_DIR: distDir,
-      NEXT_TELEMETRY_DISABLED: "1",
-      APP_PUBLIC_HOST: host,
-      GOVERNANCE_DB_PATH: join(data, "governance.db"),
-      LOANS_DB_PATH: join(data, "loans.db"),
-      IDP_DB_PATH: join(data, "idp.db"),
-      ...env,
-    }),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  for (const stream of [child.stdout, child.stderr]) {
-    void (async () => {
-      const decoder = new TextDecoder();
-      for await (const chunk of stream as ReadableStream<Uint8Array>) output += decoder.decode(chunk, { stream: true });
-    })();
+  //
+  // The port is chosen inside `serveOnFreePort`, which starts the app again on
+  // a new one if another process took it first (#9); each attempt gets its own
+  // databases and `distDir`. Up means every module answered, not just the
+  // page: the three `/health` routes are what the reset tests read back.
+  let booted: Booted;
+  try {
+    booted = await serveOnFreePort(
+      (port) => {
+        const dir = join(data, String(port));
+        mkdirSync(dir);
+        const distDir = `.next/cg-reset-${port}`;
+        distDirs.push(distDir);
+        return spawnChild(["bun", "scripts/next.ts", "dev"], {
+          cwd: ROOT,
+          env: childEnv({
+            NODE_ENV: "development",
+            PORT: String(port),
+            CG_NEXT_DIST_DIR: distDir,
+            NEXT_TELEMETRY_DISABLED: "1",
+            APP_PUBLIC_HOST: `127.0.0.1:${port}`,
+            GOVERNANCE_DB_PATH: join(dir, "governance.db"),
+            LOANS_DB_PATH: join(dir, "loans.db"),
+            IDP_DB_PATH: join(dir, "idp.db"),
+            ...env,
+          }),
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+      },
+      {
+        ready: async (port) => {
+          const answers = await Promise.all(
+            ["/hooks/health", "/bank/health", "/identity/health"].map((path) => fetch(`http://127.0.0.1:${port}${path}`)),
+          );
+          return answers.every((answer) => answer.ok);
+        },
+        timeoutMs: BOOT_MS,
+      },
+    );
+  } catch (error) {
+    cleanup();
+    throw new Error(`the app did not come up: ${(error as Error).message}`, { cause: error });
   }
 
+  const { child, port, output } = booted;
+  const host = `127.0.0.1:${port}`;
   const stop = async () => {
     child.kill();
     await child.exited;
-    rmSync(data, { recursive: true, force: true });
-    rmSync(join(ROOT, distDir), { recursive: true, force: true });
+    cleanup();
   };
-
-  // Up means every module answered, not just the page: the three `/health`
-  // routes are what the reset tests read back.
-  const deadline = Date.now() + BOOT_MS;
-  for (;;) {
-    try {
-      const answers = await Promise.all(
-        ["/hooks/health", "/bank/health", "/identity/health"].map((path) => fetch(`${origin}${path}`)),
-      );
-      if (answers.every((answer) => answer.ok)) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) {
-      await stop();
-      throw new Error(`the app did not come up:\n${output}`);
-    }
-    await Bun.sleep(250);
-  }
-
-  return { origin, host, child, output: () => output, stop };
+  return { origin: `http://${host}`, host, child, output, stop };
 }

@@ -53,8 +53,8 @@ import {
   startAgentHarness,
   type AgentHarness,
 } from "../app-test/agent-harness.ts";
+import { retryOnPortRace } from "../app-test/child.ts";
 import { decodeEvents, type ChatEvent } from "../lib/agent/events.ts";
-import { freePort } from "../app-test/identity-harness.ts";
 import { writeSession, type Session } from "../lib/identity/session.ts";
 
 /**
@@ -173,8 +173,6 @@ async function main(): Promise<number> {
   }
 
   const harness = await startAgentHarness();
-  const port = freePort();
-  const base = `http://localhost:${port}`;
   const gatewayPort = new URL(harness.gateway.url).port;
   // The agent harness's dev identity stand-in, which the container's loan
   // module validates bearers against. The container's own identity provider
@@ -182,41 +180,57 @@ async function main(): Promise<number> {
   const idpPort = new URL(`http://${harness.idpHost}`).port;
 
   try {
-    docker([
-      "run",
-      "-d",
-      "--name",
-      CONTAINER,
-      "--add-host",
-      "host.docker.internal:host-gateway",
-      "-p",
-      `${port}:${port}`,
-      ...envFlags({
-        PORT: String(port),
-        HOSTNAME: "0.0.0.0",
-        ARCADE_API_URL: `http://host.docker.internal:${gatewayPort}`,
-        ARCADE_API_KEY: harness.config.arcadeApiKey,
-        ARCADE_GATEWAY_ID: harness.config.identity.gatewayId,
-        ARCADE_LOAN_TOOLKIT: harness.config.agent.toolkits[0] ?? "Loan",
-        ARCADE_APPROVALS_TOOLKIT: harness.config.agent.toolkits[1] ?? "Approvals",
-        ANTHROPIC_API_KEY: liveKey || "standalone-verify-has-no-key",
-        MODEL_ID: harness.config.agent.modelId,
-        SESSION_SECRET,
-        // The container's own origin since #6: its identity provider's issuer
-        // too, which replaced PUBLIC_URL and IDP_ISSUER.
-        APP_PUBLIC_HOST: `localhost:${port}`,
-        IDENTITY_HOST: `host.docker.internal:${idpPort}`,
-        // Required under NODE_ENV=production since #6; a throwaway.
-        BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
-        IDP_CLIENT_ID: harness.config.identity.idpClientId,
-        IDP_CLIENT_SECRET: harness.config.identity.idpClientSecret,
-        APPROVALS_STORE_TOKEN: "standalone-verify-store-token",
-        // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
-        // defaults to the app's own listener; this test's control plane is elsewhere.
-        CONTROL_PLANE_HOST: harness.hooksHost,
-      }),
-      IMAGE,
-    ]);
+    // The published port is chosen inside `retryOnPortRace`, which runs the
+    // container again on a new one if another process took it first (#9). A
+    // container that could not bind is created all the same, so it is removed
+    // before the next attempt reuses its name. Docker says "port is already
+    // allocated" when the taker is another container.
+    const port = await retryOnPortRace(async (port) => {
+      try {
+        docker([
+          "run",
+          "-d",
+          "--name",
+          CONTAINER,
+          "--add-host",
+          "host.docker.internal:host-gateway",
+          "-p",
+          `${port}:${port}`,
+          ...envFlags({
+            PORT: String(port),
+            HOSTNAME: "0.0.0.0",
+            ARCADE_API_URL: `http://host.docker.internal:${gatewayPort}`,
+            ARCADE_API_KEY: harness.config.arcadeApiKey,
+            ARCADE_GATEWAY_ID: harness.config.identity.gatewayId,
+            ARCADE_LOAN_TOOLKIT: harness.config.agent.toolkits[0] ?? "Loan",
+            ARCADE_APPROVALS_TOOLKIT: harness.config.agent.toolkits[1] ?? "Approvals",
+            ANTHROPIC_API_KEY: liveKey || "standalone-verify-has-no-key",
+            MODEL_ID: harness.config.agent.modelId,
+            SESSION_SECRET,
+            // The container's own origin since #6: its identity provider's issuer
+            // too, which replaced PUBLIC_URL and IDP_ISSUER.
+            APP_PUBLIC_HOST: `localhost:${port}`,
+            IDENTITY_HOST: `host.docker.internal:${idpPort}`,
+            // Required under NODE_ENV=production since #6; a throwaway.
+            BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
+            IDP_CLIENT_ID: harness.config.identity.idpClientId,
+            IDP_CLIENT_SECRET: harness.config.identity.idpClientSecret,
+            APPROVALS_STORE_TOKEN: "standalone-verify-store-token",
+            // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+            // defaults to the app's own listener; this test's control plane is elsewhere.
+            CONTROL_PLANE_HOST: harness.hooksHost,
+          }),
+          IMAGE,
+        ]);
+      } catch (error) {
+        docker(["rm", "-f", CONTAINER], { allowFailure: true });
+        const message = (error as Error).message;
+        if (/port is already allocated/i.test(message)) throw new Error(`EADDRINUSE: ${message}`, { cause: error });
+        throw error;
+      }
+      return port;
+    });
+    const base = `http://localhost:${port}`;
 
     const health = await waitForHealth(base);
     record("the standalone image boots and /health answers", true, health.slice(0, 220));

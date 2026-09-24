@@ -27,14 +27,15 @@
  * rather than a rendering. `approval-identity-browser.test.ts` is where a real
  * Chrome presses a real button.
  */
-import { spawn, type Subprocess } from "bun";
+import type { Subprocess } from "bun";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { appIdentityEnv } from "./app-identity.ts";
-import { freePort, stopProcess, waitForHttp } from "./cdp.ts";
+import { serveOnFreePort, stopProcess } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 import { Browser, SESSION_SECRET, signInAs } from "./identity-harness.ts";
 import { RILEY, startHarness, type Harness } from "./harness.ts";
 
@@ -48,50 +49,54 @@ let next: Subprocess | undefined;
 let origin: string;
 
 beforeAll(async () => {
-  // Reserved before anything starts, because the app's identity provider has
-  // to be told to accept this origin's callback and to name it as its issuer:
-  // Better Auth checks the redirect URI against the registered list.
-  const webPort = freePort();
-  origin = `http://localhost:${webPort}`;
-  identity = { webUrl: origin, idpUrl: origin };
+  control = await startHarness();
 
-  const [appIdentity, harness] = await Promise.all([appIdentityEnv(origin, scratch), startHarness()]);
-  control = harness;
-
-  next = spawn({
-    // `--bun`: the app runs on Bun since #4, because the control plane it
-    // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
-    cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
-    cwd: WEB,
-    env: {
-      ...process.env,
-      NODE_ENV: "development",
-      PORT: String(webPort),
-      // The app mounts the control plane since #4; a throwaway one, not
-      // a governance.db in the repo.
-      GOVERNANCE_DB_PATH: ":memory:",
-      // The app holds the loan book since #5; a throwaway one, not a
-      // loans.db in the repo.
-      LOANS_DB_PATH: ":memory:",
-      SESSION_SECRET,
-      // The app is its own identity provider since #6: its own throwaway
-      // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
-      ...appIdentity.env,
-      // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
-      // defaults to the app's own listener; this test's control plane is elsewhere.
-      CONTROL_PLANE_HOST: control.hooksHost,
-      APPROVALS_STORE_TOKEN: control.config.approvalsStoreToken,
-      ARCADE_API_URL: control.config.arcadeApiUrl,
-      ARCADE_API_KEY: control.config.arcadeApiKey,
-      ARCADE_APPROVALS_TOOLKIT: control.config.approvalsToolkit,
-      ANTHROPIC_API_KEY: "not-used-by-this-suite",
+  // The port is chosen before the app's identity is minted, because its
+  // identity provider has to be told to accept this origin's callback and to
+  // name it as its issuer: Better Auth checks the redirect URI against the
+  // registered list. So both happen inside `serveOnFreePort`, which does them
+  // again on a new port if another process took this one first (#9; CI lost
+  // this race once, on port 44609).
+  const web = await serveOnFreePort(
+    async (webPort) => {
+      const appIdentity = await appIdentityEnv(`http://localhost:${webPort}`, join(scratch, String(webPort)));
+      return spawnChild({
+        // `--bun`: the app runs on Bun since #4, because the control plane it
+        // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+        cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
+        cwd: WEB,
+        env: {
+          ...process.env,
+          NODE_ENV: "development",
+          PORT: String(webPort),
+          // The app mounts the control plane since #4; a throwaway one, not
+          // a governance.db in the repo.
+          GOVERNANCE_DB_PATH: ":memory:",
+          // The app holds the loan book since #5; a throwaway one, not a
+          // loans.db in the repo.
+          LOANS_DB_PATH: ":memory:",
+          SESSION_SECRET,
+          // The app is its own identity provider since #6: its own throwaway
+          // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
+          ...appIdentity.env,
+          // The app's server-side reads go to CONTROL_PLANE_HOST (#4), which
+          // defaults to the app's own listener; this test's control plane is elsewhere.
+          CONTROL_PLANE_HOST: control.hooksHost,
+          APPROVALS_STORE_TOKEN: control.config.approvalsStoreToken,
+          ARCADE_API_URL: control.config.arcadeApiUrl,
+          ARCADE_API_KEY: control.config.arcadeApiKey,
+          ARCADE_APPROVALS_TOOLKIT: control.config.approvalsToolkit,
+          ANTHROPIC_API_KEY: "not-used-by-this-suite",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
     },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  void new Response(next.stdout as ReadableStream).text();
-  void new Response(next.stderr as ReadableStream).text();
-  await waitForHttp(`${origin}/`);
+    { url: (webPort) => `http://localhost:${webPort}/` },
+  );
+  next = web.child;
+  origin = `http://localhost:${web.port}`;
+  identity = { webUrl: origin, idpUrl: origin };
 }, 300_000);
 
 afterAll(async () => {

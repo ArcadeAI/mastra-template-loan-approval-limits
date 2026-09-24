@@ -15,13 +15,14 @@
  * only `bun test` could reach it.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { spawn, type Subprocess } from "bun";
+import type { Subprocess } from "bun";
 import { join } from "node:path";
 
 import { ApprovalRecord } from "@cg/policy-schema";
 
 import { readWebConfig, type WebConfig } from "../lib/config.ts";
 import { submitDecision } from "../lib/decide.ts";
+import { spawnChild } from "./child.ts";
 import {
   DANA,
   HOOK_SECRET,
@@ -45,7 +46,7 @@ beforeAll(async () => {
   // No PORT in the environment on purpose: the script must bind :0 and print
   // what it got, which is the contract the README's three-terminal run leans
   // on when a reader has not exported one.
-  standIn = spawn({
+  standIn = spawnChild({
     cmd: ["bun", join(REPO, "scripts", "arcade-stand-in.ts")],
     cwd: REPO,
     env: {

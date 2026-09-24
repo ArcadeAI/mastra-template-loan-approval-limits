@@ -26,6 +26,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { spawnChild } from "../child.ts";
 import { bootApp, type App } from "../../test/app.ts";
 import { childEnv } from "../child-env.ts";
 
@@ -73,7 +74,7 @@ beforeAll(async () => {
 
   // The `arcade` client's secret is stored hashed and was never printed, so
   // mint a readable one the way a developer does, against the app's idp.db.
-  const rotate = Bun.spawn(["bun", "scripts/identity/oauth-client.ts", "--json", "--rotate"], {
+  const rotate = spawnChild(["bun", "scripts/identity/oauth-client.ts", "--json", "--rotate"], {
     cwd: REPO,
     env: childEnv({ ...env, APP_PUBLIC_HOST: app.host, NODE_ENV: "test" }),
     stdout: "pipe",

@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { spawnChild } from "../child.ts";
 import { childEnv } from "../child-env.ts";
 
 const REPO = join(import.meta.dir, "..", "..");
@@ -50,7 +51,7 @@ function environment(expect: "failed" | "ok"): Record<string, string> {
 }
 
 async function probe(expect: "failed" | "ok"): Promise<{ code: number; output: string }> {
-  const child = Bun.spawn(["bun", "test", "./app-test/identity/fails-closed.probe.ts"], {
+  const child = spawnChild(["bun", "test", "./app-test/identity/fails-closed.probe.ts"], {
     cwd: REPO,
     env: environment(expect),
     stdout: "pipe",

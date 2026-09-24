@@ -18,7 +18,9 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
-import { freePort, GATEWAY_ID, startArcadeStandIn, type ArcadeStandIn } from "./identity-harness.ts";
+import { serveOnFreePort } from "./cdp.ts";
+import { freePort, spawnChild } from "./child.ts";
+import { GATEWAY_ID, startArcadeStandIn, type ArcadeStandIn } from "./identity-harness.ts";
 import { AGENT_ID, INSTRUCTIONS } from "../lib/agent/agent.ts";
 import { STUDIO_AUTHORIZE_PATH, STUDIO_CALLBACK_PATH } from "../lib/agent/studio.ts";
 
@@ -27,50 +29,46 @@ const REPO = join(import.meta.dir, "..");
 const BOOT_TIMEOUT_MS = 120_000;
 
 let arcade: ArcadeStandIn;
-let studio: Subprocess<"ignore", "pipe", "pipe">;
+let studio: Subprocess;
 let port: number;
-let log = "";
 
 beforeAll(async () => {
   arcade = startArcadeStandIn();
-  port = freePort();
-  // `bun run studio`, the command a developer types, which is `mastra dev`.
-  studio = Bun.spawn(["bun", "run", "studio"], {
-    cwd: REPO,
-    env: {
-      PATH: process.env.PATH ?? "",
-      HOME: process.env.HOME ?? "",
-      MASTRA_SKIP_DOTENV: "1",
-      MASTRA_TELEMETRY_DISABLED: "1",
-      STUDIO_PORT: String(port),
-      // What `mastra dev` would otherwise have read from the root `.env.local`,
-      // and the reason `STUDIO_PORT` exists: Mastra's own fallback is `PORT`.
-      PORT: String(freePort()),
-      ARCADE_API_URL: arcade.url,
-      ARCADE_GATEWAY_ID: GATEWAY_ID,
-      ARCADE_LOAN_TOOLKIT: "Loan",
-      ARCADE_APPROVALS_TOOLKIT: "Approvals",
-      ANTHROPIC_API_KEY: "anthropic-key-for-studio-dev-tests",
-      ANTHROPIC_BASE_URL: `http://localhost:${freePort()}`,
+  // On a port chosen inside `serveOnFreePort`, which starts Studio again on a
+  // new one if another process took it first (#9). A Studio that exits first
+  // fails the wait at once, with its output.
+  const booted = await serveOnFreePort(
+    (studioPort) =>
+      // `bun run studio`, the command a developer types, which is `mastra dev`.
+      spawnChild(["bun", "run", "studio"], {
+        cwd: REPO,
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? "",
+          MASTRA_SKIP_DOTENV: "1",
+          MASTRA_TELEMETRY_DISABLED: "1",
+          STUDIO_PORT: String(studioPort),
+          // What `mastra dev` would otherwise have read from the root `.env.local`,
+          // and the reason `STUDIO_PORT` exists: Mastra's own fallback is `PORT`.
+          PORT: String(freePort()),
+          ARCADE_API_URL: arcade.url,
+          ARCADE_GATEWAY_ID: GATEWAY_ID,
+          ARCADE_LOAN_TOOLKIT: "Loan",
+          ARCADE_APPROVALS_TOOLKIT: "Approvals",
+          ANTHROPIC_API_KEY: "anthropic-key-for-studio-dev-tests",
+          ANTHROPIC_BASE_URL: `http://localhost:${freePort()}`,
+        },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    {
+      ready: async (studioPort) => (await fetch(`http://localhost:${studioPort}/api/agents`)).ok,
+      timeoutMs: BOOT_TIMEOUT_MS - 5_000,
     },
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  for (const stream of [studio.stdout, studio.stderr]) {
-    void (async () => {
-      for await (const chunk of stream) log += new TextDecoder().decode(chunk);
-    })();
-  }
-
-  const deadline = Date.now() + BOOT_TIMEOUT_MS - 5_000;
-  while (Date.now() < deadline) {
-    if (studio.exitCode !== null) break;
-    const up = await fetch(`http://localhost:${port}/api/agents`).catch(() => null);
-    if (up?.ok) return;
-    await Bun.sleep(500);
-  }
-  throw new Error(`mastra dev did not answer on :${port} (exit ${studio.exitCode}). Its output:\n${log}`);
+  );
+  studio = booted.child;
+  port = booted.port;
 }, BOOT_TIMEOUT_MS);
 
 afterAll(async () => {

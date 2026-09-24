@@ -39,7 +39,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
 import { join } from "node:path";
 
-import { bootApp, freePort, type App } from "./app.ts";
+import { freePort, spawnChild } from "../app-test/child.ts";
+import { bootApp, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const RESET_TOKEN = "root-reset-token-for-tests";
@@ -84,7 +85,7 @@ async function runResetCommand(
   overrides: Record<string, string> = {},
   args: string[] = [],
 ): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(["bun", join(ROOT, "scripts", "reset.ts"), ...args], {
+  const proc = spawnChild(["bun", join(ROOT, "scripts", "reset.ts"), ...args], {
     cwd: ROOT,
     env: {
       ...process.env,

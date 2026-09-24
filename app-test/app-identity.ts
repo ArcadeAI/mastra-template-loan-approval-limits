@@ -14,11 +14,11 @@
  * `BETTER_AUTH_SECRET` is freshly random per call, never committed, and gone
  * with the directory.
  */
-import { spawn } from "bun";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { childEnv } from "./child-env.ts";
+import { spawnChild } from "./child.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -42,7 +42,7 @@ export async function appIdentityEnv(origin: string, dir: string): Promise<AppId
   // An allowlisted environment (`child-env.ts`): a developer's own PERSONA_*
   // and IDP_* values are not passed through, because these tests are about the
   // fixture, as the identity harness's are.
-  const rotate = spawn(
+  const rotate = spawnChild(
     ["bun", join(REPO_ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--client", "web", "--rotate"],
     { env: childEnv({ ...base, NODE_ENV: "test" }), stdout: "pipe", stderr: "pipe" },
   );

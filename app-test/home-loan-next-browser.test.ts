@@ -42,7 +42,8 @@ import { DANA, DEV_IDP_TOKEN_PREFIX, SESSION_SECRET, startAgentHarness, type Age
 import { browserRequired, missingBrowserMessage, resolveChrome } from "./chrome.ts";
 // The CDP client moved to `cdp.ts` on #155 so `home-full-screen-browser.test.ts`
 // could drive the same browser. Lifted unchanged; nothing about it is new.
-import { browserTarget, Cdp, evaluate, freePort, stopProcess, waitFor, waitForHttp } from "./cdp.ts";
+import { browserTarget, Cdp, evaluate, serveOnFreePort, startChrome, stopProcess, waitFor } from "./cdp.ts";
+import { spawnChild } from "./child.ts";
 
 const WEB = join(import.meta.dir, "..");
 const chromeResolution = resolveChrome();
@@ -177,11 +178,8 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
     let cdp: Cdp | undefined;
     let profile: string | undefined;
     try {
-      harness = await startAgentHarness();
-      const webPort = freePort();
-      const debugPort = freePort();
-      const origin = `http://127.0.0.1:${webPort}`;
-      const env = {
+      const agents = (harness = await startAgentHarness());
+      const env = (webPort: number) => ({
         ...process.env,
         NODE_ENV: "development",
         PORT: String(webPort),
@@ -191,9 +189,9 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
         // The app's origin, and its identity provider's issuer since #6. The
         // session below is sealed by hand, so nothing here signs in, and the
         // provider gets a throwaway idp.db rather than `./idp.db`.
-        APP_PUBLIC_HOST: new URL(origin).host,
+        APP_PUBLIC_HOST: `127.0.0.1:${webPort}`,
         IDP_DB_PATH: ":memory:",
-        ARCADE_API_URL: harness.gateway.url,
+        ARCADE_API_URL: agents.gateway.url,
         ARCADE_API_KEY: "arcade-key-for-local-next-browser",
         ARCADE_GATEWAY_ID: "cg-demo-us",
         ARCADE_LOAN_TOOLKIT: "Loan",
@@ -209,53 +207,44 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
         // in-process. It opens the harness's `loans.db` — the file the
         // gateway's tool calls write through the harness's loan module — and
         // validates the bearer below against the harness's real dev IdP.
-        LOANS_DB_PATH: harness.loansDbPath,
-        IDENTITY_HOST: harness.idpHost,
-      };
-
-      next = Bun.spawn({
-        // `--bun`: the app runs on Bun since #4, because the control plane it
-        // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
-        cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
-        cwd: WEB,
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
+        LOANS_DB_PATH: agents.loansDbPath,
+        IDENTITY_HOST: agents.idpHost,
       });
-      // Drain both streams so a noisy dev server cannot block on a full pipe.
-      void new Response(next.stdout as ReadableStream).text();
-      void new Response(next.stderr as ReadableStream).text();
-      await waitForHttp(`${origin}/`);
+
+      // Each child gets its port inside `serveOnFreePort` / `startChrome`, which
+      // start it again on a new one if another process took it first (#9).
+      const web = await serveOnFreePort((webPort) =>
+        spawnChild({
+          // `--bun`: the app runs on Bun since #4, because the control plane it
+          // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+          cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
+          cwd: WEB,
+          env: env(webPort),
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
+      next = web.child;
+      const origin = `http://127.0.0.1:${web.port}`;
 
       profile = mkdtempSync(join(tmpdir(), "cg-loan-next-chrome-"));
-      chrome = Bun.spawn({
-        cmd: [
-          CHROME,
-          "--headless=new",
-          "--no-sandbox",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          `--user-data-dir=${profile}`,
-          `--remote-debugging-port=${debugPort}`,
-          // The laptop this demo is given on. Asserted below rather than
-          // assumed: headless Chrome's own default is 800x600, and #150's
-          // reviewer had to capture the 1440x900 evidence by hand because this
-          // test never said what size the screen was.
-          `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
-          "about:blank",
-        ],
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      void new Response(chrome.stdout as ReadableStream).text();
-      void new Response(chrome.stderr as ReadableStream).text();
-      await waitFor(`Chrome DevTools on ${debugPort}`, async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok;
-        } catch {
-          return false;
-        }
-      }, 30_000);
+      const browser = await startChrome((debugPort) => [
+        CHROME,
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        `--user-data-dir=${profile}`,
+        `--remote-debugging-port=${debugPort}`,
+        // The laptop this demo is given on. Asserted below rather than
+        // assumed: headless Chrome's own default is 800x600, and #150's
+        // reviewer had to capture the 1440x900 evidence by hand because this
+        // test never said what size the screen was.
+        `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
+        "about:blank",
+      ]);
+      chrome = browser.child;
+      const debugPort = browser.port;
 
       const session = {
         email: DANA,

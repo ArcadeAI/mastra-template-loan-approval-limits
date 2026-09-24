@@ -11,6 +11,7 @@ tokens — the one endpoint of `apps/idp` (#36) the API ever calls.
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -37,6 +38,56 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+# The port is released before the child binds it, so another process can take
+# it in between; CI lost that race once (#9). A boot that says EADDRINUSE is
+# retried on a new port, as `app-test/child.ts::retryOnPortRace` does.
+_BOOT_ATTEMPTS = 5
+_BOOT_TIMEOUT_S = 20.0
+# Between SIGTERM and SIGKILL, as `app-test/supervise.ts` allows.
+_STOP_GRACE_S = 3.0
+
+
+def _lost_port_race(text: str) -> bool:
+    return "EADDRINUSE" in text or "address already in use" in text.lower()
+
+
+def _drain(stream) -> list[str]:
+    """Reads a piped stream as it arrives, so a noisy child never blocks on a full pipe."""
+    chunks: list[str] = []
+
+    def pump() -> None:
+        for line in iter(stream.readline, b""):
+            chunks.append(line.decode(errors="replace"))
+
+    threading.Thread(target=pump, daemon=True).start()
+    return chunks
+
+
+def _stop(child: subprocess.Popen) -> None:
+    """Stops the child's whole process group: SIGTERM, then SIGKILL after a grace period (#9).
+
+    The child leads its own group (`start_new_session=True`), so the signal
+    reaches anything it started too, the way `app-test/supervise.ts` stops a
+    harness child.
+    """
+    # ESRCH when the group is empty. EPERM too, on macOS, when all that is left
+    # of it is the child's own unreaped zombie. Either way nothing is running.
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        child.wait(timeout=_STOP_GRACE_S)
+    except subprocess.TimeoutExpired:
+        pass
+    # Whatever is left: the child, if it ignored SIGTERM, and anything it started.
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    child.wait()
 
 
 class _Userinfo(BaseHTTPRequestHandler):
@@ -71,42 +122,71 @@ def loan_app_host(idp_port: int) -> str:
     if bun is None:
         pytest.skip("bun is not installed; the toolkit tests drive the real loan module")
 
-    port = _free_port()
     tmp = Path(tempfile.mkdtemp(prefix="cg-loan-toolkit-"))
-    env = {
-        **os.environ,
-        "PORT": str(port),
-        "LOANS_DB_PATH": str(tmp / "loans.db"),
-        "IDENTITY_HOST": f"localhost:{idp_port}",
-    }
-    child = subprocess.Popen(
-        [bun, str(LOAN_APP_ENTRYPOINT)],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
+    child, port = _boot_loan_app(bun, tmp, idp_port)
 
-    host = f"localhost:{port}"
-    deadline = time.time() + 20
-    while True:
+    yield f"localhost:{port}"
+
+    _stop(child)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _boot_loan_app(bun: str, tmp: Path, idp_port: int) -> tuple[subprocess.Popen, int]:
+    """Starts the loan module on a free port and waits for `/bank/health`.
+
+    In a session of its own, so `_stop` can take down its process group. A
+    child that lost its port says EADDRINUSE and exits (or keeps running,
+    listening nowhere); either way it is stopped and started again on a new
+    port, and a lost attempt leaves nothing running.
+    """
+    for _ in range(_BOOT_ATTEMPTS):
+        port = _free_port()
+        env = {
+            **os.environ,
+            "PORT": str(port),
+            "LOANS_DB_PATH": str(tmp / "loans.db"),
+            "IDENTITY_HOST": f"localhost:{idp_port}",
+        }
+        child = subprocess.Popen(
+            [bun, str(LOAN_APP_ENTRYPOINT)],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        stderr = _drain(child.stderr)
         try:
-            with urllib.request.urlopen(f"http://{host}/bank/health", timeout=1) as r:
+            if _wait_healthy(child, port, stderr):
+                return child, port
+        except BaseException:
+            _stop(child)
+            raise
+        _stop(child)
+    raise RuntimeError(f"loan-app lost the port race {_BOOT_ATTEMPTS} times in a row")
+
+
+def _wait_healthy(child: subprocess.Popen, port: int, stderr: list[str]) -> bool:
+    """True once the child answers; False if it lost the port race; raises otherwise."""
+    deadline = time.time() + _BOOT_TIMEOUT_S
+    while True:
+        if _lost_port_race("".join(stderr)):
+            return False
+        if child.poll() is not None:
+            # Give the pipe a moment to deliver the child's last words.
+            time.sleep(0.05)
+            output = "".join(stderr)
+            if _lost_port_race(output):
+                return False
+            raise RuntimeError(f"loan-app exited: {output}")
+        try:
+            with urllib.request.urlopen(f"http://localhost:{port}/bank/health", timeout=1) as r:
                 if r.status == 200:
-                    break
+                    return True
         except Exception:
             pass
-        if child.poll() is not None:
-            raise RuntimeError(f"loan-app exited: {child.stderr.read().decode()}")
         if time.time() > deadline:
-            child.kill()
-            raise RuntimeError("loan-app did not come up")
+            raise RuntimeError(f"loan-app did not come up: {''.join(stderr)}")
         time.sleep(0.05)
-
-    yield host
-
-    child.kill()
-    child.wait()
-    shutil.rmtree(tmp, ignore_errors=True)
 
 
 def make_context(loan_app_host: str, token: str) -> ToolContext:

@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { LoanRecord, LoanSummary } from "../../lib/loans/db.ts";
+import { serveOnFreePort } from "../cdp.ts";
+import { spawnChild } from "../child.ts";
 
 /**
  * `Response.json()` is `Promise<unknown>`, so every read off a body below has
@@ -50,31 +52,6 @@ const TOKENS: Record<string, string> = {
   "tok-writer": RILEY,
 };
 
-/**
- * A port the OS says is free, rather than a guess.
- *
- * This used to be `8000 + Math.floor(Math.random() * 1000)`. With one test run
- * that collides rarely; with several worktrees running `bun test` at once it is
- * a birthday problem, and it surfaces as an intermittent failure in a slice
- * that changed nothing — the worst thing to hand a reviewer, because it makes
- * them distrust their own verification. Bind :0, read the port back, release
- * it. `tools/loan/tests/conftest.py::_free_port` does the same thing.
- */
-function freePort(): number {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 404 }) });
-  const { port } = probe;
-  probe.stop(true);
-  // `Server.port` is `number | undefined` in bun-types 1.4: a server listening
-  // on a unix socket has no port. This one asked for TCP `:0`, so the branch
-  // should be unreachable — but `port!` would hand `PORT=undefined` to the
-  // child and surface twenty seconds later as "loan-app did not come up",
-  // which says nothing about the cause. Fail here, where the cause is.
-  if (typeof port !== "number") {
-    throw new Error(`Bun.serve({ port: 0 }) reported no port (got ${String(port)})`);
-  }
-  return port;
-}
-
 let idp: Server<unknown>;
 let child: Subprocess;
 let baseUrl: string;
@@ -103,31 +80,29 @@ beforeAll(async () => {
     },
   });
 
-  const port = freePort();
-  // The runner lays the module out the way the app does, under /bank (#5).
-  baseUrl = `http://127.0.0.1:${port}/bank`;
-
-  child = Bun.spawn(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
-    env: {
-      ...process.env,
-      PORT: String(port),
-      LOANS_DB_PATH: dbPath,
-      IDENTITY_HOST: `localhost:${idp.port}`,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
+  // On a port chosen inside `serveOnFreePort`, which starts the module again on
+  // a new one if another process took it first (#9). Never a guess: this used
+  // to be `8000 + Math.floor(Math.random() * 1000)`, a birthday problem once
+  // several worktrees run `bun test` at once.
+  const booted = await serveOnFreePort(
+    (port) =>
+      spawnChild(["bun", join(import.meta.dir, "..", "..", "scripts", "loans.ts")], {
+        env: {
+          ...process.env,
+          PORT: String(port),
+          LOANS_DB_PATH: dbPath,
+          IDENTITY_HOST: `localhost:${idp.port}`,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    { ready: async (port) => (await fetch(`http://127.0.0.1:${port}/bank/health`)).ok, timeoutMs: 20_000 },
+  ).catch((error: unknown) => {
+    throw new Error(`loan-app did not come up:\n${(error as Error).message}`);
   });
-
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/health`)).ok) break;
-    } catch {
-      // Not listening yet.
-    }
-    if (Date.now() > deadline) throw new Error("loan-app did not come up");
-    await Bun.sleep(50);
-  }
+  child = booted.child;
+  // The runner lays the module out the way the app does, under /bank (#5).
+  baseUrl = `http://127.0.0.1:${booted.port}/bank`;
 });
 
 afterAll(() => {
