@@ -1,24 +1,13 @@
 {
-  "name": "@cg/loan-app",
+  "name": "@cg/loans",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "bun --watch src/index.ts",
-    "dev:idp": "bun scripts/dev-idp.ts",
-    "start": "bun src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "build": "echo 'no build step — Bun runs TypeScript directly'"
-  },
-  "//": "`governed: true` marks this as the business system under governance: the part a forker throws away and replaces with their own domain. It must declare no @cg/* dependency, which `test/knows-nothing-about-governance.test.ts` enforces, and `packages/policy-schema`'s every-workspace sweep reads the same flag to exempt it. See #33.",
+  "//": "The app's loan module since #5, when apps/loan-app folded into lib/loans. It is a workspace member for this manifest alone and has no scripts: the app serves it under /bank, scripts/loans.ts runs it on a port of its own, and the root tsconfig typechecks it.`governed: true` marks this as the business system under governance: the part a forker throws away and replaces with their own domain. It must declare no @cg/* dependency, which `app-test/loans/knows-nothing-about-governance.test.ts` enforces, and `packages/policy-schema`'s every-workspace sweep reads the same flag to exempt it. See #33.",
   "cg": {
     "governed": true
   },
   "dependencies": {
     "zod": "4.6.5"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.4.2",
-    "typescript": "^6.0.3"
   }
 }
