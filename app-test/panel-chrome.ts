@@ -462,12 +462,17 @@ export async function measurePanelChrome(options: MeasureOptions = {}): Promise<
       };
       try {
         next = Bun.spawn({
-          cmd: ["bun", "run", "next", "dev", "--port", String(webPort)],
+          // `--bun`: the app runs on Bun since #4, because the control plane it
+          // mounts opens governance.db with bun:sqlite (`scripts/next.ts`).
+          cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
           cwd: webDir,
           env: {
             ...process.env,
             NODE_ENV: "development",
             PORT: String(webPort),
+            // The app mounts the control plane since #4; a throwaway one, not
+            // a governance.db in the repo.
+            GOVERNANCE_DB_PATH: ":memory:",
             PUBLIC_URL: origin,
             // The live stream, pointed at the stub. Without this the page
             // resolves to the replay and there is no health strip to measure.
