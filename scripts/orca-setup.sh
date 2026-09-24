@@ -94,6 +94,10 @@ if [ -z "${BASE:-}" ]; then
 fi
 
 WEB=$((BASE + 0)); HOOKS=$((BASE + 1)); LOAN=$((BASE + 2)); IDP=$((BASE + 3))
+# Mastra Studio (`bun run studio`, #8). Offset 5, clear of the four above and of
+# offset 4, which nothing uses yet. Without it Studio takes Mastra's own default,
+# 4111, and every worktree on the machine would ask for the same port.
+STUDIO=$((BASE + 5))
 
 # All four services read the same `PORT` variable, so one shared file cannot
 # carry all four values — the first service to load it would take the port
@@ -159,6 +163,10 @@ write_service_env idp "$IDP"
   echo "CG_PORT_HOOKS=$HOOKS"
   echo "CG_PORT_LOAN_APP=$LOAN"
   echo "CG_PORT_IDP=$IDP"
+  echo "CG_PORT_STUDIO=$STUDIO"
+  echo "# Mastra Studio's port. \`mastra dev\` loads this file, and \`src/mastra/index.ts\`"
+  echo "# binds STUDIO_PORT rather than PORT, which is the app's."
+  echo "STUDIO_PORT=$STUDIO"
   echo
   shared
 } > "$ENVFILE"
@@ -168,4 +176,4 @@ if command -v bun >/dev/null 2>&1; then
   bun install
 fi
 
-echo "orca-setup: ready — ports $BASE-$((BASE + BLOCK - 1)) (web $WEB, hooks $HOOKS, loan-app $LOAN, idp $IDP)"
+echo "orca-setup: ready — ports $BASE-$((BASE + BLOCK - 1)) (web $WEB, hooks $HOOKS, loan-app $LOAN, idp $IDP, studio $STUDIO)"
