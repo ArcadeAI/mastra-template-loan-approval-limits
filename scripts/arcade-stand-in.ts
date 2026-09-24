@@ -210,18 +210,23 @@ if (import.meta.main) {
 
   // Said plainly, on every boot, because a fixture that looks like the product
   // is how a demo ends up being given as evidence of the product.
+  //
+  // One write, not four (#4). A harness reads the port off the first line and
+  // asserts on the rest of the banner (`app-test/arcade-stand-in.test.ts`);
+  // four `console.log`s can reach its pipe in separate chunks, and CI once read
+  // the first line alone and failed on the missing control-plane host.
+  const usingDevSecret =
+    env.ARCADE_HOOK_SIGNING_SECRET?.trim() === undefined || env.ARCADE_HOOK_SIGNING_SECRET.trim() === "";
   console.log(
-    `[arcade-stand-in] listening on :${server.port} — this is a STAND-IN for Arcade, for ` +
-      `local demos only. It is not the product and it is not in the deployed image.`,
-  );
-  console.log(
-    `[arcade-stand-in] control plane: ${hooksHost} — every execution asks its /pre first and ` +
-      `runs nothing when the answer is not OK.`,
-  );
-  if (env.ARCADE_HOOK_SIGNING_SECRET?.trim() === undefined || env.ARCADE_HOOK_SIGNING_SECRET.trim() === "") {
-    console.log("[arcade-stand-in] using the development hook secret; the app's control plane does too.");
-  }
-  console.log(
-    `[arcade-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${server.port}`,
+    [
+      `[arcade-stand-in] listening on :${server.port} — this is a STAND-IN for Arcade, for ` +
+        `local demos only. It is not the product and it is not in the deployed image.`,
+      `[arcade-stand-in] control plane: ${hooksHost} — every execution asks its /pre first and ` +
+        `runs nothing when the answer is not OK.`,
+      ...(usingDevSecret
+        ? ["[arcade-stand-in] using the development hook secret; the app's control plane does too."]
+        : []),
+      `[arcade-stand-in] point the app at it with ARCADE_API_URL=http://localhost:${server.port}`,
+    ].join("\n"),
   );
 }
