@@ -20,7 +20,7 @@
  *      `{ isError: true, content: [{ type: "text", text: "<PREFIX><error_message>" }] }`,
  *      with the hook's `error_message` verbatim behind Arcade's fixed prefix.
  *   3. On `OK`, the tool runs — which for `tools/loan` is one HTTP call to
- *      `apps/loan-app` carrying the persona's bearer, exactly what the deployed
+ *      the loan API carrying the persona's bearer, exactly what the deployed
  *      Python toolkit does (`tools/loan/loan/__init__.py::_call`).
  *   4. `POST /post` on the same control plane with what the tool returned, and
  *      **the model is handed `override.output` when the hook sends one** (#16).
@@ -77,7 +77,7 @@
  *
  * The real gateway resolves the bearer to the User Source identity Arcade holds
  * for it. Here a bearer is a row in a table: `issueToken(email)` mints one, and
- * every `/pre` payload and every call to `apps/loan-app` is made as that
+ * every `/pre` payload and every call to the loan API is made as that
  * person. A bearer nobody minted is a `401` with the `WWW-Authenticate` header
  * the real gateway sends, because that 401 is where hop 1's discovery starts
  * and a stand-in that skipped it would hide a real failure.
@@ -127,7 +127,7 @@ export const GATEWAY_BUILTINS = ["System_ManageAuthorization", "Arcade_ListApps"
  *
  * Two targets, because the two deployed toolkits are stateless clients of two
  * different services and neither of them is Arcade. `tools/loan` calls
- * `apps/loan-app` with the persona's bearer; `tools/approvals` calls the
+ * the loan API with the persona's bearer; `tools/approvals` calls the
  * `/approvals` endpoints on `apps/hooks` with the shared store token. The
  * split is `arcade deploy`'s, not this file's — see `DESIGN.md` → Services.
  *
@@ -498,7 +498,7 @@ export interface GatewayStandInOptions {
   hooksHost: string;
   /** What `/pre` requires as its bearer. */
   hookSigningSecret: string;
-  /** `apps/loan-app`, HOST-form. The tools are stateless clients of it. */
+  /** The loan API's host (the app's, since #5), HOST-form. The tools are stateless clients of it. */
   loanAppHost: string;
   /** `tool.toolkit` as Arcade files the deployed loan toolkit. */
   loanToolkit?: string;
@@ -526,12 +526,12 @@ export interface GatewayStandInOptions {
   /** `0` lets the OS pick, which is what tests and an unset `PORT` want. */
   port?: number;
   /**
-   * How a persona's bearer becomes a bearer `apps/loan-app` accepts.
+   * How a persona's bearer becomes a bearer the loan API accepts.
    *
    * The deployed toolkit is handed the persona's `cg-idp` access token by
    * Arcade. Offline there is no such token, so this maps the persona's email to
    * whatever the loan API's identity provider will answer for — `dev:<email>`
-   * for `apps/loan-app/scripts/dev-idp.ts`, which is the established local
+   * for `scripts/dev-idp.ts`, which is the established local
    * protocol in this repo.
    */
   tokenForActor?: (email: string) => string;
@@ -602,7 +602,11 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
   const base = (host: string) =>
     host.startsWith("localhost") || host.startsWith("127.0.0.1") ? `http://${host}` : `https://${host}`;
   const hooks = base(options.hooksHost);
-  const loanApp = base(options.loanAppHost);
+  // The loan API sits under `/bank` on its host since #5, which is where
+  // `tools/loan` calls it (`API_BASE_PATH` there). Written out rather than
+  // imported: this plays the deployed toolkit, and the toolkit cannot import
+  // the app either.
+  const loanApp = `${base(options.loanAppHost)}/bank`;
 
   // Runnable only with a store token to reach `/approvals` with. Advertised
   // either way — see `approvalsStoreToken` on the options above.
@@ -931,7 +935,7 @@ export function createGatewayStandIn(options: GatewayStandInOptions): GatewaySta
       }
 
       // The tool itself. Two targets, one `/post` below: `tools/loan` is a
-      // client of `apps/loan-app` with the persona's bearer, `tools/approvals`
+      // client of the loan API with the persona's bearer, `tools/approvals`
       // is a client of the `/approvals` endpoints with the store token. Both
       // run only because `/pre` said OK, and both are asked about at `/post`.
       let payload: Record<string, unknown> | null;
@@ -1095,7 +1099,7 @@ function authorizationChallenge(authorizationUrl: string): string {
  * and nothing was listening where anybody was calling.
  *
  * That is #56's bug exactly, and this is #56's fix:
- * `apps/loan-app/scripts/dev-idp.ts` reads the port out of `IDP_PUBLIC_HOST` —
+ * `scripts/dev-idp.ts` reads the port out of `IDP_PUBLIC_HOST` —
  * the address the loan API already asks for — so the two agree by construction.
  * `ARCADE_API_URL` is the same kind of value here: it is where the app is
  * told to reach Arcade, so binding it leaves no second number to keep in step.
@@ -1144,7 +1148,7 @@ if (import.meta.main) {
   } catch (cause) {
     console.error(`[gateway-stand-in] ${cause instanceof Error ? cause.message : String(cause)}`);
     // 78 is sysexits' EX_CONFIG: the environment is wrong, not the invocation.
-    // The same code `apps/loan-app/scripts/dev-idp.ts` exits with.
+    // The same code `scripts/dev-idp.ts` exits with.
     process.exit(78);
   }
 
@@ -1158,7 +1162,8 @@ if (import.meta.main) {
     gatewayId,
     hooksHost,
     hookSigningSecret: env.ARCADE_HOOK_SIGNING_SECRET?.trim() || "cg-hooks-dev-secret-not-for-production",
-    loanAppHost: env.LOAN_APP_PUBLIC_HOST?.trim() || "localhost:8082",
+    // The app's own default since #5: the loan API is a module of the app.
+    loanAppHost: env.LOAN_APP_PUBLIC_HOST?.trim() || "localhost:3000",
     loanToolkit: env.ARCADE_LOAN_TOOLKIT?.trim() || "Loan",
     // Advertised either way; runnable only with a store token.
     approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT?.trim() || "Approvals",

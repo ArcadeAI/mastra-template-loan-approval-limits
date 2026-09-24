@@ -85,14 +85,21 @@ const started: Instance[] = [];
  * address because `apps/idp` has to be told its own public URL and the port is
  * only known once it has been picked.
  */
+/**
+ * `mount` is the path the instance serves under: empty for the services, and
+ * `/bank` for the loan module since #5, whose runner lays it out as the app
+ * does. `host` stays the bare address, because that is what the reset command
+ * is handed; `baseUrl` carries the mount, so reads below use the same paths.
+ */
 async function boot(
   name: string,
   entry: string,
   env: Record<string, string> | ((baseUrl: string) => Record<string, string>),
+  mount = "",
 ): Promise<Instance> {
   const port = freePort();
   const host = `127.0.0.1:${port}`;
-  const baseUrl = `http://${host}`;
+  const baseUrl = `http://${host}${mount}`;
   const dir = join(tmpdir(), `cg-grants-${name}-${crypto.randomUUID()}`);
   mkdirSync(dir, { recursive: true });
 
@@ -315,11 +322,16 @@ beforeAll(async () => {
       GOVERNANCE_DB_PATH: join(tmpdir(), `cg-grants-hooks-${crypto.randomUUID()}`, "governance.db"),
       PERSONA_LOAN_OFFICER_EMAIL: alice.email,
     }),
-    boot("loan-app", "apps/loan-app/src/index.ts", {
-      RESET_TOKEN,
-      LOANS_DB_PATH: join(tmpdir(), `cg-grants-loan-${crypto.randomUUID()}`, "loans.db"),
-      IDP_PUBLIC_HOST: idp.host,
-    }),
+    boot(
+      "loan-app",
+      "scripts/loans.ts",
+      {
+        RESET_TOKEN,
+        LOANS_DB_PATH: join(tmpdir(), `cg-grants-loan-${crypto.randomUUID()}`, "loans.db"),
+        IDP_PUBLIC_HOST: idp.host,
+      },
+      "/bank",
+    ),
   ]);
 
   arcadeToken = await authorizeAlice();

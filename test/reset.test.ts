@@ -25,7 +25,7 @@
  *   3. the OAuth client Arcade holds does not move, and a run that could not
  *      prove that is a failure rather than a green tick.
  *
- * `apps/loan-app` validates bearer tokens against an identity provider, and
+ * The loan module validates bearer tokens against an identity provider, and
  * the one it is pointed at here is a stand-in serving `/oauth2/userinfo` and
  * nothing else. The real `apps/idp` boots too — it has its own reset to run —
  * but joining the two would mean walking a whole authorize flow to read one
@@ -87,10 +87,21 @@ function freePort(): number {
 
 const started: Instance[] = [];
 
-async function boot(name: string, entry: string, env: Record<string, string>): Promise<Instance> {
+/**
+ * `mount` is the path the instance serves under: empty for the services, and
+ * `/bank` for the loan module since #5, whose runner lays it out as the app
+ * does. `host` stays the bare address, because that is what the reset command
+ * is handed; `baseUrl` carries the mount, so reads below use the same paths.
+ */
+async function boot(
+  name: string,
+  entry: string,
+  env: Record<string, string>,
+  mount = "",
+): Promise<Instance> {
   const port = freePort();
   const host = `127.0.0.1:${port}`;
-  const baseUrl = `http://${host}`;
+  const baseUrl = `http://${host}${mount}`;
   const dir = join(tmpdir(), `cg-reset-${name}-${crypto.randomUUID()}`);
   mkdirSync(dir, { recursive: true });
 
@@ -222,7 +233,7 @@ async function snapshot() {
 }
 
 beforeAll(async () => {
-  // The token endpoint `apps/loan-app` reads the actor off. A complete double:
+  // The token endpoint the loan module reads the actor off. A complete double:
   // that one route is the whole of its view of identity.
   userinfo = Bun.serve({
     port: 0,
@@ -248,11 +259,16 @@ beforeAll(async () => {
       GOVERNANCE_DB_PATH: join(tmpdir(), `cg-reset-hooks-${crypto.randomUUID()}`, "governance.db"),
       PERSONA_LOAN_OFFICER_EMAIL: DANA,
     }),
-    boot("loan-app", "apps/loan-app/src/index.ts", {
-      RESET_TOKEN,
-      LOANS_DB_PATH: join(tmpdir(), `cg-reset-loan-${crypto.randomUUID()}`, "loans.db"),
-      IDP_PUBLIC_HOST: `127.0.0.1:${userinfo.port}`,
-    }),
+    boot(
+      "loan-app",
+      "scripts/loans.ts",
+      {
+        RESET_TOKEN,
+        LOANS_DB_PATH: join(tmpdir(), `cg-reset-loan-${crypto.randomUUID()}`, "loans.db"),
+        IDP_PUBLIC_HOST: `127.0.0.1:${userinfo.port}`,
+      },
+      "/bank",
+    ),
   ]);
 });
 

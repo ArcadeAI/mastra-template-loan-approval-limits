@@ -1,11 +1,11 @@
-"""The loan toolkit: four tools, each a stateless client of `apps/loan-app`.
+"""The loan toolkit: four tools, each a stateless client of the app's loan module.
 
 Nothing here holds state and nothing here decides anything. Every tool takes
 the caller's OAuth token, hands it to the bank's API, and returns what the API
 returns. The API derives who is acting from that token; the tools never say.
 
 Whether a caller *may* do what they are asking is not this toolkit's question
-either — that is decided by the hooks in `apps/hooks`, on a path these tools
+either — that is decided by the control plane's hooks, on a path these tools
 cannot see. The auth requirement on each tool carries identity, not authority.
 
 The tool descriptions were written to be picked by a model without prompt
@@ -23,6 +23,7 @@ from arcade_mcp_server.auth import OAuth2
 from arcade_mcp_server.metadata import Behavior, Operation, ToolMetadata
 
 __all__ = [
+    "API_BASE_PATH",
     "IDP_PROVIDER_ID",
     "LOAN_APP_HOST_SECRET",
     "app",
@@ -60,6 +61,12 @@ IDP_SCOPES = ["openid", "email"]
 # Delivered to the deployed toolkit as an Arcade secret, because that is the
 # one configuration channel a deployed toolkit has.
 LOAN_APP_HOST_SECRET = "LOAN_APP_PUBLIC_HOST"
+
+# Where the loan API sits on that host. Since #5 the loan API is a module of
+# the app (`lib/loans/`), served under `/bank` because the app's board page is
+# `/loans`: GET /bank/loans, GET /bank/loans/{id}, POST /bank/loans/{id}/approve
+# and POST /bank/loans/{id}/deny. The secret still names the host alone.
+API_BASE_PATH = "/bank"
 
 _requires_auth = OAuth2(id=IDP_PROVIDER_ID, scopes=IDP_SCOPES)
 _requires_secrets = [LOAN_APP_HOST_SECRET]
@@ -108,7 +115,7 @@ async def _call(
     json: dict[str, Any] | None = None,
 ) -> Any:
     """One request to the API, on behalf of whoever holds the token."""
-    url = _base_url(context.get_secret(LOAN_APP_HOST_SECRET)) + path
+    url = _base_url(context.get_secret(LOAN_APP_HOST_SECRET)) + API_BASE_PATH + path
     headers = {"Authorization": f"Bearer {context.get_auth_token_or_empty()}"}
 
     async with httpx.AsyncClient(timeout=10.0) as client:

@@ -11,7 +11,9 @@
  *                                         tables from the fixture, and grants,
  *                                         approval requests and the audit log
  *                                         emptied
- *     apps/loan-app   POST /admin/reset   the loan book, LN-2291 unapproved
+ *     the app         POST /bank/admin/reset   the loan book, LN-2291 unapproved
+ *                                         (the loan module; `apps/loan-app`
+ *                                         until #5)
  *     apps/idp        POST /admin/reset   people, sessions, tokens, consents
  *                                         — `--hard` only
  *
@@ -100,7 +102,8 @@ interface ServiceSpec {
   body?: unknown;
   /**
    * Its reset endpoint. `/admin/reset` for the services; `/hooks/admin/reset`
-   * for the control plane since #4, which the app mounts under `/hooks`.
+   * for the control plane since #4, which the app mounts under `/hooks`, and
+   * `/bank/admin/reset` for the loan module since #5, mounted under `/bank`.
    */
   resetPath?: string;
 }
@@ -133,10 +136,14 @@ const BETWEEN_TAKES: ServiceSpec[] = [
     body: { mode: "demo" },
     resetPath: "/hooks/admin/reset",
   },
+  // The loan module, in the app since #5. Still labelled `loan-app`, because
+  // that is what its reset answers as and what a presenter reads in this
+  // output. `LOAN_APP_PUBLIC_HOST` is the app's host now.
   {
     label: "loan-app",
     render: "cg-loan-app",
     hostVar: { local: "LOAN_APP_PUBLIC_HOST", render: "RENDER_LOAN_APP_PUBLIC_HOST" },
+    resetPath: "/bank/admin/reset",
   },
 ];
 
