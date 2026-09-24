@@ -117,7 +117,7 @@ export async function startHarness(): Promise<Harness> {
     hooksHost: hooks.host,
     preCalls,
     async escalate(overrides = {}) {
-      const response = await store("POST", "/approvals", { ...ESCALATION, ...overrides });
+      const response = await store("POST", "/api/approvals", { ...ESCALATION, ...overrides });
       if (response.status !== 201) throw new Error(`escalate: ${response.status} ${await response.text()}`);
       return ((await response.json()) as { request: Record<string, unknown> }).request;
     },
@@ -131,7 +131,7 @@ export async function startHarness(): Promise<Harness> {
       return ((await response.json()) as { rows: Array<Record<string, unknown>> }).rows;
     },
     async read(id) {
-      const response = await store("GET", `/approvals/${id}`);
+      const response = await store("GET", `/api/approvals/${id}`);
       if (response.status === 404) return null;
       return ((await response.json()) as { request: Record<string, unknown> }).request;
     },

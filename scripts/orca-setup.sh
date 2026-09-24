@@ -112,9 +112,11 @@ WEB=$((BASE + 0)); HOOKS=$((BASE + 1)); LOAN=$((BASE + 2)); IDP=$((BASE + 3))
 # All of these are untracked — .gitignore's `.env.local` matches at any depth.
 shared() {
   cat <<ENVEOF
-# Host-form, matching .env.example: consumers add the scheme.
+# Host-form, matching .env.example: consumers add the scheme. The control
+# plane is part of the app since #4, so HOOKS_PUBLIC_HOST is the app's port.
+# CG_PORT_HOOKS stays claimed in the block and nothing binds it.
 WEB_PUBLIC_HOST=localhost:$WEB
-HOOKS_PUBLIC_HOST=localhost:$HOOKS
+HOOKS_PUBLIC_HOST=localhost:$WEB
 LOAN_APP_PUBLIC_HOST=localhost:$LOAN
 IDP_PUBLIC_HOST=localhost:$IDP
 IDP_PUBLIC_URL=http://localhost:$IDP
@@ -132,7 +134,6 @@ write_service_env() {  # $1 = app dir, $2 = its port
   } > "$dir/.env.local"
 }
 
-write_service_env hooks "$HOOKS"
 write_service_env loan-app "$LOAN"
 write_service_env idp "$IDP"
 

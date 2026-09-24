@@ -106,7 +106,11 @@ export interface AgentConfig {
 }
 
 export interface WebConfig {
-  /** `apps/hooks`, which owns `governance.db` and the approvals store. */
+  /**
+   * The control plane, which owns `governance.db` and the approvals store. The
+   * app itself since #4 (`lib/control-plane/`); a separate host only when a
+   * test points it at `scripts/control-plane.ts`.
+   */
   hooksHost: string;
   /** The shared bearer the `/approvals` endpoints require. */
   approvalsStoreToken: string;
@@ -215,7 +219,10 @@ export function readWebConfig(env: Record<string, string | undefined> = process.
     // Refuses a bare service name outright — `public-host.ts` has the measured
     // story. The panel reads this in a server component and hands it to the
     // browser, so a host nothing can resolve fails in a visitor's DevTools.
-    hooksHost: publicHost("HOOKS_PUBLIC_HOST", env.HOOKS_PUBLIC_HOST, "localhost:8081"),
+    // The app's own address since #4: the control plane is a module of this
+    // app, so its default is the app's default, `WEB_PUBLIC_HOST`'s in
+    // `.env.example`. It was `localhost:8081`, where `apps/hooks` listened.
+    hooksHost: publicHost("HOOKS_PUBLIC_HOST", env.HOOKS_PUBLIC_HOST, "localhost:3000"),
     approvalsStoreToken: storeToken || DEV_STORE_TOKEN,
     approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT?.trim() || "Approvals",
     ...readIdentitySurface(env),

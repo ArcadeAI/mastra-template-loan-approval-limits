@@ -295,7 +295,7 @@ describe("act 2, end to end", () => {
     );
 
     waiting = of(blocked.events, "waiting")[0];
-    const lookup = await store("GET", `/approvals/${waiting?.request_id ?? "missing"}`);
+    const lookup = await store("GET", `/api/approvals/${waiting?.request_id ?? "missing"}`);
     request = ((await lookup.json()) as { request: ApprovalRecord }).request;
 
     // ---- the decision, watched on the stream -------------------------------
@@ -604,7 +604,7 @@ describe("a denied approval resumes the agent with the denial", () => {
       ],
     );
     const waiting = of(blocked.events, "waiting")[0];
-    const lookup = await store("GET", `/approvals/${waiting?.request_id ?? "missing"}`);
+    const lookup = await store("GET", `/api/approvals/${waiting?.request_id ?? "missing"}`);
     request = ((await lookup.json()) as { request: ApprovalRecord }).request;
 
     const watcher = watchForNotice(request.id);
@@ -680,7 +680,7 @@ describe("the catch-up read, for a browser whose stream was down", () => {
     });
 
   test("it answers the requester with the status, and nothing else", async () => {
-    const created = await store("POST", "/approvals", {
+    const created = await store("POST", "/api/approvals", {
       requester_id: DANA,
       action: "approve_loan",
       resource_id: "LN-2292",
@@ -697,7 +697,7 @@ describe("the catch-up read, for a browser whose stream was down", () => {
     expect(pending.status).toBe(200);
     expect(await pending.json()).toEqual({ request_id: request.id, status: "pending" });
 
-    await store("POST", `/approvals/${request.id}/decision`, {
+    await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "approved",
       note: null,
       decided_by: RILEY,
@@ -710,7 +710,7 @@ describe("the catch-up read, for a browser whose stream was down", () => {
   });
 
   test("somebody else's request is a 404, the same answer an unknown id gets", async () => {
-    const created = await store("POST", "/approvals", {
+    const created = await store("POST", "/api/approvals", {
       requester_id: DANA,
       action: "approve_loan",
       resource_id: "LN-2292",
@@ -749,7 +749,7 @@ describe("the catch-up read, for a browser whose stream was down", () => {
 describe("a resume asserts nothing the store does not say", () => {
   test("a request that is still pending is a fault, not a turn", async () => {
     const cookie = await browserFor(DANA);
-    const created = await store("POST", "/approvals", {
+    const created = await store("POST", "/api/approvals", {
       requester_id: DANA,
       action: "approve_loan",
       resource_id: "LN-2292",
@@ -774,7 +774,7 @@ describe("a resume asserts nothing the store does not say", () => {
   });
 
   test("one persona cannot resume another's turn", async () => {
-    const created = await store("POST", "/approvals", {
+    const created = await store("POST", "/api/approvals", {
       requester_id: DANA,
       action: "approve_loan",
       resource_id: "LN-2292",
@@ -785,7 +785,7 @@ describe("a resume asserts nothing the store does not say", () => {
       required_clearance: 15_500,
     });
     const request = ((await created.json()) as { request: ApprovalRecord }).request;
-    await store("POST", `/approvals/${request.id}/decision`, {
+    await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "approved",
       note: null,
       decided_by: RILEY,

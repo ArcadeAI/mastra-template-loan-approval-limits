@@ -119,16 +119,16 @@ const call = (
 };
 
 const create = async (overrides: Partial<typeof ACT_TWO> = {}) => {
-  const response = await call("POST", "/approvals", { body: { ...ACT_TWO, ...overrides } });
+  const response = await call("POST", "/api/approvals", { body: { ...ACT_TWO, ...overrides } });
   const body = (await response.json()) as { request: unknown; error?: string };
   return { response, body };
 };
 
 const ENDPOINTS: ReadonlyArray<[string, string]> = [
-  ["GET", "/approvals/roster"],
-  ["GET", "/approvals/apr_000000000001"],
-  ["POST", "/approvals"],
-  ["POST", "/approvals/apr_000000000001/decision"],
+  ["GET", "/api/approvals/roster"],
+  ["GET", "/api/approvals/apr_000000000001"],
+  ["POST", "/api/approvals"],
+  ["POST", "/api/approvals/apr_000000000001/decision"],
 ];
 
 describe("authorization", () => {
@@ -146,7 +146,7 @@ describe("authorization", () => {
     // Two secrets, two audiences. A leaked store token must not be able to
     // forge a hook decision, and Arcade's secret must not be able to write an
     // approval record a human then acts on.
-    expect((await call("GET", "/approvals/roster", { token: HOOK_SECRET })).status).toBe(401);
+    expect((await call("GET", "/api/approvals/roster", { token: HOOK_SECRET })).status).toBe(401);
   });
 
   test("the approvals store token is not accepted on a hook", async () => {
@@ -159,14 +159,14 @@ describe("authorization", () => {
   });
 
   test("an unknown path under /approvals is a 404, but only after the bearer", async () => {
-    expect((await call("GET", "/approvals/a/b/c", { token: null })).status).toBe(401);
-    expect((await call("GET", "/approvals/a/b/c")).status).toBe(404);
+    expect((await call("GET", "/api/approvals/a/b/c", { token: null })).status).toBe(401);
+    expect((await call("GET", "/api/approvals/a/b/c")).status).toBe(404);
   });
 });
 
-describe("GET /approvals/roster", () => {
+describe("GET /api/approvals/roster", () => {
   test("returns every subject the control plane knows, with the fields routing needs", async () => {
-    const response = await call("GET", "/approvals/roster");
+    const response = await call("GET", "/api/approvals/roster");
     expect(response.status).toBe(200);
     const { subjects } = (await response.json()) as {
       subjects: Array<Record<string, unknown>>;
@@ -184,7 +184,7 @@ describe("GET /approvals/roster", () => {
   });
 });
 
-describe("POST /approvals", () => {
+describe("POST /api/approvals", () => {
   test("mints the id and the clock, and answers 201 with the whole record", async () => {
     const { response, body } = await create();
     expect(response.status).toBe(201);
@@ -236,16 +236,16 @@ describe("POST /approvals", () => {
   });
 
   test("refuses a malformed body", async () => {
-    const response = await call("POST", "/approvals", { body: { requester_id: DANA } });
+    const response = await call("POST", "/api/approvals", { body: { requester_id: DANA } });
     expect(response.status).toBe(400);
   });
 });
 
-describe("GET /approvals/{id}", () => {
+describe("GET /api/approvals/{id}", () => {
   test("returns the same record the create returned, field for field", async () => {
     const created = ApprovalRecord.parse((await create()).body.request);
 
-    const response = await call("GET", `/approvals/${created.id}`);
+    const response = await call("GET", `/api/approvals/${created.id}`);
     expect(response.status).toBe(200);
     const read = ApprovalRecord.parse(((await response.json()) as { request: unknown }).request);
 
@@ -256,7 +256,7 @@ describe("GET /approvals/{id}", () => {
   test("carries everything the approval page has to show from an opaque id", async () => {
     const created = ApprovalRecord.parse((await create()).body.request);
     const read = ApprovalRecord.parse(
-      ((await (await call("GET", `/approvals/${created.id}`)).json()) as { request: unknown })
+      ((await (await call("GET", `/api/approvals/${created.id}`)).json()) as { request: unknown })
         .request,
     );
 
@@ -270,7 +270,7 @@ describe("GET /approvals/{id}", () => {
   });
 
   test("a 404 names the id it could not find", async () => {
-    const response = await call("GET", "/approvals/apr_nosuchthing");
+    const response = await call("GET", "/api/approvals/apr_nosuchthing");
     expect(response.status).toBe(404);
     expect(((await response.json()) as { error: string }).error).toContain("apr_nosuchthing");
   });
@@ -280,18 +280,18 @@ describe("GET /approvals/{id}", () => {
     // reaches this endpoint. There is nowhere in the contract to put a viewer,
     // which makes that structural rather than a promise.
     const created = ApprovalRecord.parse((await create()).body.request);
-    const first = await (await call("GET", `/approvals/${created.id}`)).text();
-    const second = await (await call("GET", `/approvals/${created.id}`)).text();
+    const first = await (await call("GET", `/api/approvals/${created.id}`)).text();
+    const second = await (await call("GET", `/api/approvals/${created.id}`)).text();
     expect(first).toBe(second);
     expect(first).not.toContain("viewer");
   });
 });
 
-describe("POST /approvals/{id}/decision", () => {
+describe("POST /api/approvals/{id}/decision", () => {
   test("records the outcome in the same record shape, with status as the decision", async () => {
     const created = ApprovalRecord.parse((await create()).body.request);
 
-    const response = await call("POST", `/approvals/${created.id}/decision`, {
+    const response = await call("POST", `/api/approvals/${created.id}/decision`, {
       body: { decision: "approved", note: "Coverage checks out.", decided_by: RILEY },
     });
     expect(response.status).toBe(200);
@@ -310,7 +310,7 @@ describe("POST /approvals/{id}/decision", () => {
   });
 
   test("a 404 names the id it could not find", async () => {
-    const response = await call("POST", "/approvals/apr_nosuchthing/decision", {
+    const response = await call("POST", "/api/approvals/apr_nosuchthing/decision", {
       body: { decision: "approved", note: null, decided_by: RILEY },
     });
     expect(response.status).toBe(404);
@@ -319,17 +319,17 @@ describe("POST /approvals/{id}/decision", () => {
 
   test("a decision is final: a denial cannot be rewritten into an approval", async () => {
     const created = ApprovalRecord.parse((await create()).body.request);
-    await call("POST", `/approvals/${created.id}/decision`, {
+    await call("POST", `/api/approvals/${created.id}/decision`, {
       body: { decision: "denied", note: "Too thin.", decided_by: RILEY },
     });
 
-    const second = await call("POST", `/approvals/${created.id}/decision`, {
+    const second = await call("POST", `/api/approvals/${created.id}/decision`, {
       body: { decision: "approved", note: "Changed my mind.", decided_by: RILEY },
     });
     expect(second.status).toBe(409);
 
     const read = ApprovalRecord.parse(
-      ((await (await call("GET", `/approvals/${created.id}`)).json()) as { request: unknown })
+      ((await (await call("GET", `/api/approvals/${created.id}`)).json()) as { request: unknown })
         .request,
     );
     expect(read.status).toBe("denied");

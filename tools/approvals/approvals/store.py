@@ -21,12 +21,12 @@ endpoint of it over real HTTP, so the prose has an executable counterpart.
 
 The four endpoints, in one line each:
 
-    GET  /approvals/roster        every subject the control plane knows, for routing
-    POST /approvals               create; the store mints the id and the clock
-    GET  /approvals/{id}          read one by opaque id — #19's page, not this toolkit
-    POST /approvals/{id}/decision record an outcome
+    GET  /api/approvals/roster        every subject the control plane knows, for routing
+    POST /api/approvals               create; the store mints the id and the clock
+    GET  /api/approvals/{id}          read one by opaque id — #19's page, not this toolkit
+    POST /api/approvals/{id}/decision record an outcome
 
-Three of them have a client below. `GET /approvals/{id}` deliberately does not:
+Three of them have a client below. `GET /api/approvals/{id}` deliberately does not:
 nothing in this toolkit reads a request back, #19 reads it from TypeScript, and
 a Python client nobody calls is dead code in a deployed worker. It is covered
 by `test_store_contract.py` instead, which drives it with a plain HTTP client —
@@ -112,17 +112,17 @@ async def _call(
 
 async def fetch_roster(host: str, token: str) -> list[Subject]:
     """Everyone the control plane knows about, for routing to choose among."""
-    body = await _call(host, token, "GET", "/approvals/roster")
+    body = await _call(host, token, "GET", "/api/approvals/roster")
     return [Subject.from_dict(raw) for raw in body.get("subjects", [])]
 
 
 async def create_request(host: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Persist the routed request. Returns `{"request": …, "rule": … | None}`."""
-    return await _call(host, token, "POST", "/approvals", json=payload)
+    return await _call(host, token, "POST", "/api/approvals", json=payload)
 
 
 async def record_decision(
     host: str, token: str, request_id: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """Record an outcome against an existing request. Returns `{"request": …}`."""
-    return await _call(host, token, "POST", f"/approvals/{request_id}/decision", json=payload)
+    return await _call(host, token, "POST", f"/api/approvals/{request_id}/decision", json=payload)

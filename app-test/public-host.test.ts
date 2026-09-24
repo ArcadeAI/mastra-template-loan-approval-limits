@@ -106,7 +106,8 @@ test("readWebConfig refuses a bare service name, and passes a hostname through",
   expect(readWebConfig({ HOOKS_PUBLIC_HOST: "cg-hooks.onrender.com" }).hooksHost).toBe(
     "cg-hooks.onrender.com",
   );
-  expect(readWebConfig({}).hooksHost).toBe("localhost:8081");
+  // The app's own host since #4, when the control plane folded into it.
+  expect(readWebConfig({}).hooksHost).toBe("localhost:3000");
 });
 
 /**

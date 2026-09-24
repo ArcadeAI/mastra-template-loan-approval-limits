@@ -153,7 +153,7 @@ export function createArcadeStandIn(options: ArcadeStandInOptions) {
       }
 
       const recorded = await fetch(
-        `${base}/approvals/${encodeURIComponent(String(input.request_id))}/decision`,
+        `${base}/api/approvals/${encodeURIComponent(String(input.request_id))}/decision`,
         {
           method: "POST",
           headers: {
@@ -195,7 +195,7 @@ if (import.meta.main) {
     process.exit(1);
   }
 
-  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:8081";
+  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:3000";
   const hookSigningSecret = env.ARCADE_HOOK_SIGNING_SECRET?.trim() || DEV_HOOK_SECRET;
   const approvalsStoreToken = env.APPROVALS_STORE_TOKEN?.trim() || DEV_STORE_TOKEN;
 

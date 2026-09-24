@@ -123,13 +123,13 @@ const store = (method: string, path: string, body?: unknown) =>
   });
 
 async function escalate(overrides: Partial<typeof ESCALATION> = {}): Promise<ApprovalRecord> {
-  const response = await store("POST", "/approvals", { ...ESCALATION, ...overrides });
+  const response = await store("POST", "/api/approvals", { ...ESCALATION, ...overrides });
   expect(response.status).toBe(201);
   return ((await response.json()) as { request: ApprovalRecord }).request;
 }
 
 const decideOnStore = (id: string, decision: "approved" | "denied", by: string) =>
-  store("POST", `/approvals/${id}/decision`, { decision, note: null, decided_by: by });
+  store("POST", `/api/approvals/${id}/decision`, { decision, note: null, decided_by: by });
 
 /** The most recent audit row for one tool, whoever it was about. */
 const lastRowFor = (tool: string) => recent(db, 50).find((event) => event.tool === tool);

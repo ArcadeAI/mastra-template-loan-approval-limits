@@ -6,7 +6,7 @@ build against it. This file is that prose with a runnable counterpart: every
 endpoint, the one record shape, the 401 on each, and the 404s.
 
 It uses a plain HTTP client rather than `approvals/store.py`, deliberately.
-`GET /approvals/{id}` is the read #19's page is built on and **nothing in this
+`GET /api/approvals/{id}` is the read #19's page is built on and **nothing in this
 toolkit calls it** — a Python client nobody uses would be dead code in a
 deployed worker. Driving the contract directly is how it gets exercised without
 inventing a caller for it, and it also means these assertions are about the
@@ -31,10 +31,10 @@ ACT_TWO = {
 }
 
 ENDPOINTS = [
-    ("GET", "/approvals/roster"),
-    ("GET", "/approvals/apr_000000000001"),
-    ("POST", "/approvals"),
-    ("POST", "/approvals/apr_000000000001/decision"),
+    ("GET", "/api/approvals/roster"),
+    ("GET", "/api/approvals/apr_000000000001"),
+    ("POST", "/api/approvals"),
+    ("POST", "/api/approvals/apr_000000000001/decision"),
 ]
 
 
@@ -64,7 +64,7 @@ class TestAuthorization:
 
 class TestRoster:
     def test_returns_every_subject_the_control_plane_knows(self, store: StoreState) -> None:
-        response = call(store, "GET", "/approvals/roster")
+        response = call(store, "GET", "/api/approvals/roster")
         assert response.status_code == 200
         subjects = response.json()["subjects"]
         assert {s["user_id"] for s in subjects} >= {DANA.user_id, RILEY.user_id}
@@ -87,7 +87,7 @@ class TestTheRecordShape:
     ) -> None:
         created = await request_approval(as_dana, **ACT_TWO)
 
-        response = call(store, "GET", f"/approvals/{created['request_id']}")
+        response = call(store, "GET", f"/api/approvals/{created['request_id']}")
         assert response.status_code == 200
         record = response.json()["request"]
 
@@ -106,7 +106,7 @@ class TestTheRecordShape:
         }
         created = await request_approval(as_dana, **ACT_TWO)
 
-        record = call(store, "GET", f"/approvals/{created['request_id']}").json()["request"]
+        record = call(store, "GET", f"/api/approvals/{created['request_id']}").json()["request"]
 
         assert record["requester_id"] == DANA.user_id
         assert record["requester_display_name"] == DANA.display_name
@@ -131,7 +131,7 @@ class TestTheRecordShape:
         # An absent key and a key set to null serialise differently once this
         # round-trips through SQLite and JSON; the contract says null.
         created = await request_approval(as_dana, **ACT_TWO)
-        record = call(store, "GET", f"/approvals/{created['request_id']}").json()["request"]
+        record = call(store, "GET", f"/api/approvals/{created['request_id']}").json()["request"]
         assert "rule" in record
         assert record["rule"] is None
 
@@ -146,7 +146,7 @@ class TestTheRecordShape:
             note="Coverage checks out.",
         )
 
-        record = call(store, "GET", f"/approvals/{created['request_id']}").json()["request"]
+        record = call(store, "GET", f"/api/approvals/{created['request_id']}").json()["request"]
 
         assert set(record) == set(RECORD_FIELDS)
         # No separate `decision` field: once decided, `status` is the decision.
@@ -163,7 +163,7 @@ class TestTheRecordShape:
 
 class TestUnknownRequests:
     def test_reading_an_unknown_id_is_a_404_that_names_it(self, store: StoreState) -> None:
-        response = call(store, "GET", "/approvals/apr_nosuchthing")
+        response = call(store, "GET", "/api/approvals/apr_nosuchthing")
         assert response.status_code == 404
         assert "apr_nosuchthing" in response.json()["error"]
 
@@ -171,7 +171,7 @@ class TestUnknownRequests:
         response = call(
             store,
             "POST",
-            "/approvals/apr_nosuchthing/decision",
+            "/api/approvals/apr_nosuchthing/decision",
             json={"decision": "approved", "note": None, "decided_by": RILEY.user_id},
         )
         assert response.status_code == 404
@@ -191,7 +191,7 @@ class TestTheReadIsNotAuthorization:
         click time in #19.
         """
         created = await request_approval(as_dana, **ACT_TWO)
-        path = f"/approvals/{created['request_id']}"
+        path = f"/api/approvals/{created['request_id']}"
 
         first = call(store, "GET", path)
         second = call(store, "GET", path)

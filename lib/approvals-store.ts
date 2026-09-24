@@ -29,7 +29,7 @@ export interface RosterEntry {
 }
 
 export async function fetchApproval(id: string, config: WebConfig): Promise<ApprovalLookup> {
-  const response = await get(`/approvals/${encodeURIComponent(id)}`, config);
+  const response = await get(`/api/approvals/${encodeURIComponent(id)}`, config);
 
   if (response.status === 404) {
     return { found: false, reason: `No approval request ${id} exists.` };
@@ -48,7 +48,7 @@ export async function fetchApproval(id: string, config: WebConfig): Promise<Appr
 }
 
 export async function fetchRoster(config: WebConfig): Promise<RosterEntry[]> {
-  const response = await get("/approvals/roster", config);
+  const response = await get("/api/approvals/roster", config);
   if (!response.ok) return [];
   const body = (await response.json()) as { subjects?: RosterEntry[] };
   return body.subjects ?? [];

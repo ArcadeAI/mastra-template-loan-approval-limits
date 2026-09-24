@@ -105,7 +105,7 @@ const store = (method: string, path: string, body?: unknown) =>
   });
 
 async function escalate(): Promise<ApprovalRecord> {
-  const response = await store("POST", "/approvals", ESCALATION);
+  const response = await store("POST", "/api/approvals", ESCALATION);
   expect(response.status).toBe(201);
   return ((await response.json()) as { request: ApprovalRecord }).request;
 }
@@ -159,7 +159,7 @@ describe("a recorded decision announces itself on the stream", () => {
     await reader.settle();
     const before = reader.frames.length;
 
-    const response = await store("POST", `/approvals/${request.id}/decision`, {
+    const response = await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "approved",
       note: "Approved — collateral verified.",
       decided_by: RILEY,
@@ -195,7 +195,7 @@ describe("a recorded decision announces itself on the stream", () => {
     await reader.settle();
     const before = reader.frames.length;
 
-    const response = await store("POST", `/approvals/${request.id}/decision`, {
+    const response = await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "denied",
       note: "Concentration risk in this sector.",
       decided_by: RILEY,
@@ -217,7 +217,7 @@ describe("a recorded decision announces itself on the stream", () => {
   test("a decision that changed nothing announces nothing", async () => {
     const reader = await openEventStream(base);
     const request = await upToTheClick();
-    await store("POST", `/approvals/${request.id}/decision`, {
+    await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "approved",
       note: null,
       decided_by: RILEY,
@@ -228,7 +228,7 @@ describe("a recorded decision announces itself on the stream", () => {
     // The losing half of the compare-and-swap. It settles nothing, so it
     // announces nothing — a second notice would tell a browser to start a
     // second turn on an approval that was already spent.
-    const second = await store("POST", `/approvals/${request.id}/decision`, {
+    const second = await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "denied",
       note: null,
       decided_by: MORGAN,
@@ -245,7 +245,7 @@ describe("the frame takes no part in the governance replay", () => {
   test("it carries no `id:` line at all", async () => {
     const reader = await openEventStream(base);
     const request = await upToTheClick();
-    await store("POST", `/approvals/${request.id}/decision`, {
+    await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "approved",
       note: null,
       decided_by: RILEY,
@@ -276,7 +276,7 @@ describe("the frame takes no part in the governance replay", () => {
   test("a governance-only client — the panel — never sees one", async () => {
     const reader = await openEventStream(base);
     const request = await upToTheClick();
-    await store("POST", `/approvals/${request.id}/decision`, {
+    await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "approved",
       note: null,
       decided_by: RILEY,
@@ -310,7 +310,7 @@ describe("the notice is published after the grant is usable, not before", () => 
     // published one line too early would be announcing.
     expect(allGrants(db).map((stored) => stored.lifecycle)).toEqual(["pending"]);
 
-    await store("POST", `/approvals/${request.id}/decision`, {
+    await store("POST", `/api/approvals/${request.id}/decision`, {
       decision: "approved",
       note: null,
       decided_by: RILEY,

@@ -109,7 +109,7 @@ async function pre(
 }
 
 async function escalate(resourceId: string): Promise<ApprovalRecord> {
-  const response = await store("POST", "/approvals", {
+  const response = await store("POST", "/api/approvals", {
     requester_id: DANA,
     action: "approve_loan",
     resource_id: resourceId,
@@ -129,7 +129,7 @@ const authorize = (id: string, decision: "approved" | "denied") =>
 
 /** The store write the tool makes after `/pre` said OK. */
 const record = (id: string, decision: "approved" | "denied") =>
-  store("POST", `/approvals/${id}/decision`, { decision, note: null, decided_by: RILEY });
+  store("POST", `/api/approvals/${id}/decision`, { decision, note: null, decided_by: RILEY });
 
 /** Alice's retry of the call that was blocked in the first place. */
 const retry = (resourceId: string) =>
@@ -140,7 +140,7 @@ const lastRowFor = (tool: string) =>
   recent(db, 50).find((event) => event.tool === tool);
 
 const statusOf = async (id: string): Promise<string> =>
-  ((await (await store("GET", `/approvals/${id}`)).json()) as { request: ApprovalRecord }).request
+  ((await (await store("GET", `/api/approvals/${id}`)).json()) as { request: ApprovalRecord }).request
     .status;
 
 // ---------------------------------------------------------------------------

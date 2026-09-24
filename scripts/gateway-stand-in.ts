@@ -315,7 +315,7 @@ function createApprovalsStore(options: {
         return { ok: false, error: `${String(inputs.amount)} is not an amount that can be routed for approval.` };
       }
 
-      const rosterResponse = await request("GET", "/approvals/roster").catch(
+      const rosterResponse = await request("GET", "/api/approvals/roster").catch(
         (cause: unknown) => cause as Error,
       );
       if (rosterResponse instanceof Error || !rosterResponse.ok) {
@@ -337,7 +337,7 @@ function createApprovalsStore(options: {
         };
       }
 
-      const created = await request("POST", "/approvals", {
+      const created = await request("POST", "/api/approvals", {
         requester_id: actor,
         action,
         resource_id: resourceId,
@@ -387,7 +387,7 @@ function createApprovalsStore(options: {
       const id = String(inputs.request_id ?? "");
       const decision = String(inputs.decision ?? "");
       const note = inputs.note === undefined || inputs.note === null ? null : String(inputs.note);
-      const response = await request("POST", `/approvals/${encodeURIComponent(id)}/decision`, {
+      const response = await request("POST", `/api/approvals/${encodeURIComponent(id)}/decision`, {
         decision,
         note,
         // From the resolved bearer, never from an argument: the deployed tool
@@ -1149,7 +1149,7 @@ if (import.meta.main) {
   }
 
   const gatewayId = env.ARCADE_GATEWAY_ID?.trim() || "cg-demo-us";
-  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:8081";
+  const hooksHost = env.HOOKS_PUBLIC_HOST?.trim() || "localhost:3000";
   // Both toolkits always — the agent has to be able to see
   // `Approvals_RequestApproval`, because the pre-hook's remediation sentence
   // names it (#89). The store token is what decides whether they *run*.

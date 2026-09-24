@@ -10,7 +10,7 @@ would reach the real thing. What the tests then assert is what actually arrived.
 out under "The approvals store contract" in `tools/approvals/README.md`. When
 #19 implements those endpoints in `apps/hooks`, this file is what they have to
 satisfy, and `test_store_contract.py` is what says so out loud — including the
-`GET /approvals/{id}` read that #19's page is built on and that nothing in this
+`GET /api/approvals/{id}` read that #19's page is built on and that nothing in this
 toolkit calls.
 
 `FakeSlack` is a Slack that answers the way Slack answers: `200 OK` with
@@ -129,14 +129,14 @@ class _StoreHandler(BaseHTTPRequestHandler):
         if not self._authorised():
             self._send(401, {"error": "unauthorised"})
             return
-        if self.path == "/approvals/roster":
+        if self.path == "/api/approvals/roster":
             self._send(200, {"subjects": self.state.roster})
             return
 
         # The read #19's approval page is built on. Nothing in this toolkit
         # calls it; it is here because the contract has to be executable.
-        if self.path.startswith("/approvals/"):
-            request_id = self.path.removeprefix("/approvals/")
+        if self.path.startswith("/api/approvals/"):
+            request_id = self.path.removeprefix("/api/approvals/")
             record = self.state.records.get(request_id)
             if record is None:
                 self._send(404, {"error": f"no approval request {request_id}"})
@@ -155,7 +155,7 @@ class _StoreHandler(BaseHTTPRequestHandler):
             self._send(code, {"error": "the approvals store is unavailable"})
             return
 
-        if self.path == "/approvals":
+        if self.path == "/api/approvals":
             body = self._body()
             self.state.created.append(body)
             self.state.seq += 1
@@ -185,8 +185,8 @@ class _StoreHandler(BaseHTTPRequestHandler):
             self._send(201, {"request": record})
             return
 
-        if self.path.startswith("/approvals/") and self.path.endswith("/decision"):
-            request_id = self.path.removeprefix("/approvals/").removesuffix("/decision")
+        if self.path.startswith("/api/approvals/") and self.path.endswith("/decision"):
+            request_id = self.path.removeprefix("/api/approvals/").removesuffix("/decision")
             record = self.state.records.get(request_id)
             if record is None:
                 self._send(404, {"error": f"no approval request {request_id}"})

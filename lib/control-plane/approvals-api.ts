@@ -1,10 +1,16 @@
 /**
- * The four `/approvals` endpoints, as ratified on #18 (storage-A).
+ * The four approvals-store endpoints, as ratified on #18 (storage-A), under
+ * `/api/approvals` since #4.
  *
- *     GET  /approvals/roster         every subject, so routing can show who was not asked
- *     POST /approvals                create; the store mints the id and the clock
- *     GET  /approvals/{id}           read one by opaque id — the approval page is built on this
- *     POST /approvals/{id}/decision  record an outcome
+ *     GET  /api/approvals/roster         every subject, so routing can show who was not asked
+ *     POST /api/approvals                create; the store mints the id and the clock
+ *     GET  /api/approvals/{id}           read one by opaque id — the approval page is built on this
+ *     POST /api/approvals/{id}/decision  record an outcome
+ *
+ * They were `/approvals/…` while the control plane was its own service. In the
+ * app, `/approvals/{id}` is the approval *page* the Slack link opens, and one
+ * path cannot be both an HTML page and this JSON read, so the whole store
+ * moved under one prefix rather than one endpoint moving alone.
  *
  * The contract is written out in Markdown in `tools/approvals/README.md`; this
  * is the service side of it, and `tools/approvals/tests/test_store_contract.py`
@@ -44,8 +50,11 @@ import type { ApprovalNotice } from "./approval-notices.ts";
 import { createApproval, readApproval, recordDecision } from "./approvals-store.ts";
 import type { CacheState } from "./policy-cache.ts";
 
-/** `/approvals` and everything under it. */
-export const APPROVALS_PREFIX = "/approvals";
+/** The store and everything under it. `/approvals` until #4; see above. */
+export const APPROVALS_PREFIX = "/api/approvals";
+
+const DECISION_PATH = /^\/api\/approvals\/([^/]+)\/decision$/;
+const READ_PATH = /^\/api\/approvals\/([^/]+)$/;
 
 const CreateBody = z
   .object({
@@ -110,13 +119,13 @@ export async function handleApprovals(
     return create(request, deps, json);
   }
 
-  const decision = /^\/approvals\/([^/]+)\/decision$/.exec(pathname);
+  const decision = DECISION_PATH.exec(pathname);
   if (decision) {
     if (method !== "POST") return json({ error: "Method not allowed" }, 405);
     return decide(request, decodeURIComponent(decision[1] as string), deps, json);
   }
 
-  const read = /^\/approvals\/([^/]+)$/.exec(pathname);
+  const read = READ_PATH.exec(pathname);
   if (read) {
     if (method !== "GET") return json({ error: "Method not allowed" }, 405);
     const id = decodeURIComponent(read[1] as string);
