@@ -15,6 +15,7 @@
     "loans": "bun scripts/loans.ts",
     "identity": "bun scripts/identity.ts",
     "oauth-client": "bun scripts/identity/oauth-client.ts",
+    "setup-arcade": "bun --no-env-file scripts/setup-arcade.ts",
     "identity:reset": "bun scripts/identity/reset.ts",
     "generate:identity-schema": "bun scripts/identity/generate-schema.ts",
     "generate:identity-schema:check": "bun scripts/identity/generate-schema.ts --check",
