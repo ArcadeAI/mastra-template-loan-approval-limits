@@ -15,7 +15,7 @@
  *
  * The web UI gets its bearer from a browser sign-in and keeps it in a sealed
  * cookie. Studio has no such cookie: it is a separate Node process on its own
- * origin (`localhost:4111` by default), and a cookie set by the app's host is
+ * origin (`localhost:<STUDIO_PORT>`), and a cookie set by the app's host is
  * not sent to it. Arcade Headers mode would sidestep that with a project key and
  * a user id per request, and it is ruled out (`DESIGN.md` → Two hops).
  *
@@ -72,7 +72,19 @@ export const STUDIO_AUTHORIZE_PATH = "/arcade/authorize";
 export const STUDIO_CALLBACK_PATH = "/arcade/callback";
 
 /**
- * The port Studio's server binds: `STUDIO_PORT`, else Mastra's own default.
+ * Mastra's own default port for `mastra dev`, and this template's only when
+ * nothing says otherwise.
+ *
+ * Deliberate: a developer who follows Mastra's Quickstart expects Studio at
+ * `localhost:4111`, so an unconfigured checkout gets it. It is never a port
+ * two things on one machine should share, which is why every Orca worktree
+ * gets `STUDIO_PORT` from its own block (`scripts/orca-setup.sh`) and why every
+ * test that boots Studio binds a port it was handed.
+ */
+export const MASTRA_DEFAULT_PORT = 4111;
+
+/**
+ * The port Studio's server binds: `STUDIO_PORT`, else {@link MASTRA_DEFAULT_PORT}.
  *
  * Stated rather than left to Mastra, because Mastra's fallback is `PORT` and
  * `mastra dev` loads the root `.env.local`, where `PORT` is the app's. Left to
@@ -80,7 +92,7 @@ export const STUDIO_CALLBACK_PATH = "/arcade/callback";
  */
 export function studioPort(env: Record<string, string | undefined> = process.env): number {
   const configured = Number(env.STUDIO_PORT?.trim());
-  return Number.isInteger(configured) && configured > 0 ? configured : 4111;
+  return Number.isInteger(configured) && configured > 0 ? configured : MASTRA_DEFAULT_PORT;
 }
 
 /** How long an authorization started here stays redeemable. */

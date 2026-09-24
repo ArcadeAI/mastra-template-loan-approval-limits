@@ -33,10 +33,12 @@ import { chat, CHAT_PATH } from "../lib/agent/handlers.ts";
 import {
   forgetStudioGrant,
   holdGatewayGrant,
+  MASTRA_DEFAULT_PORT,
   STUDIO_AUTHORIZE_PATH,
   STUDIO_CALLBACK_PATH,
   studioAuthorize,
   studioCallback,
+  studioPort,
   studioTools,
 } from "../lib/agent/studio.ts";
 import { readIdentitySurface, type IdentitySurface } from "../lib/config.ts";
@@ -363,6 +365,16 @@ describe("Studio's hop 1, over loopback", () => {
     const response = await studioAuthorize(new Request(`http://studio.example${STUDIO_AUTHORIZE_PATH}`), config);
     expect(response.status).toBe(403);
     expect(await response.text()).toContain("Studio authorizes on loopback only");
+  });
+});
+
+describe("Studio's port", () => {
+  test("is STUDIO_PORT when it is set, and Mastra's own default only when it is not", () => {
+    expect(studioPort({ STUDIO_PORT: "4405" })).toBe(4405);
+    // `PORT` is the app's, and `mastra dev` reads it from the root `.env.local`.
+    expect(studioPort({ PORT: "4400" })).toBe(MASTRA_DEFAULT_PORT);
+    expect(studioPort({ STUDIO_PORT: "not-a-port" })).toBe(MASTRA_DEFAULT_PORT);
+    expect(MASTRA_DEFAULT_PORT).toBe(4111);
   });
 });
 
