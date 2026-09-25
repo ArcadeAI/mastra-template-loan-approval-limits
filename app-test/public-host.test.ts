@@ -2,10 +2,10 @@
  * A cross-service address this service cannot possibly reach is refused where
  * the environment is read, not when the browser fails to open a stream.
  *
- * The measurement behind it is #59: `render.yaml` derived every cross-service
- * host with `fromService … property: host`, and Render emitted the bare service
- * name — `IDENTITY_HOST` on `cg-loan-app` was `cg-idp-or5b`, not
- * `cg-idp-or5b.onrender.com`. Consumers prepend a scheme and nothing else, so
+ * The measurement behind it is #59: the stage demo's deployment derived every
+ * cross-service host from its host's service references, and what arrived was
+ * the bare service name — `IDENTITY_HOST` on `cg-loan-app` was `cg-idp-or5b`,
+ * not its FQDN. Consumers prepend a scheme and nothing else, so
  * the request went somewhere DNS cannot resolve.
  *
  * `APP_PUBLIC_HOST` is the worst of the three to get wrong, because the panel
@@ -38,15 +38,16 @@ const ACCEPTED = [
   "[::1]",
   "[::1]:9000",
   "[::1]:4421",
-  "cg-hooks.onrender.com",
-  "cg-web-sa31.onrender.com",
-  "cg-hooks.onrender.com:443",
+  "cg-hooks.example.com",
+  "cg-web-sa31.example.com",
+  "cg-hooks.example.com:443",
   "example.test",
 ];
 
 /**
  * Nothing here is reachable. The first five are bare service names — what
- * `fromService` produced, and what a hand-typed key produces again.
+ * a derived service reference produced (#59), and what a hand-typed key
+ * produces again.
  *
  * The rest are round 1 of #67. The first cut of this check let any value
  * through once bracket-stripping left a colon in it, so `[::2]` — no dot, not
@@ -69,8 +70,8 @@ const REFUSED = [
   "localhost:bad",
   "localhost:0",
   "localhost:65536",
-  "cg-hooks.onrender.com:bad",
-  "https://cg-hooks.onrender.com",
+  "cg-hooks.example.com:bad",
+  "https://cg-hooks.example.com",
 ];
 
 test.each(ACCEPTED)("%p is a host something can resolve", (value) => {
@@ -88,7 +89,7 @@ test.each(REFUSED)("%p is refused: it is a service name, not a hostname", (value
 
 test("the refusal names the variable, its value, and where the real one comes from", () => {
   // The whole worth of this check is the message: whoever reads it is about to
-  // go and find the right string, and the right string is on one specific page.
+  // go and find the right string, and the right string is the app's own public host.
   try {
     assertPublicHost("APP_PUBLIC_HOST", "cg-hooks");
     throw new Error("expected a refusal");
@@ -96,15 +97,15 @@ test("the refusal names the variable, its value, and where the real one comes fr
     expect(cause).toBeInstanceOf(PublicHostError);
     const { message } = cause as Error;
     expect(message).toContain("APP_PUBLIC_HOST=cg-hooks");
-    expect(message).toContain("Render dashboard");
-    expect(message).toContain("cg-web-sa31");
+    expect(message).toContain("the host part of its public URL");
+    expect(message).toContain("Never derive or guess it");
   }
 });
 
 test("readWebConfig refuses a bare service name, and passes a hostname through", () => {
   expect(() => readWebConfig({ APP_PUBLIC_HOST: "cg-hooks" })).toThrow(PublicHostError);
-  expect(readWebConfig({ APP_PUBLIC_HOST: "cg-hooks.onrender.com" }).hooksHost).toBe(
-    "cg-hooks.onrender.com",
+  expect(readWebConfig({ APP_PUBLIC_HOST: "cg-hooks.example.com" }).hooksHost).toBe(
+    "cg-hooks.example.com",
   );
   // The app's own host since #4, when the control plane folded into it.
   expect(readWebConfig({}).hooksHost).toBe("localhost:3000");
@@ -128,9 +129,9 @@ test("the panel's stream source refuses a bare service name in either mode", () 
 
   const live = resolvePanelStream({
     GOVERNANCE_STREAM: "hooks",
-    APP_PUBLIC_HOST: "cg-hooks.onrender.com",
+    APP_PUBLIC_HOST: "cg-hooks.example.com",
   });
-  expect(live).toHaveProperty("url", "https://cg-hooks.onrender.com/hooks/events");
+  expect(live).toHaveProperty("url", "https://cg-hooks.example.com/hooks/events");
   expect(resolvePanelStream({}).mode).toBe("fixture");
 });
 

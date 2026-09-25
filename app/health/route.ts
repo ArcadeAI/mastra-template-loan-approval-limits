@@ -1,13 +1,13 @@
 /**
- * Same shape as the `/health` endpoints on `hooks` and `loan-app`, so the
- * Render blueprint can point all three services at one path.
+ * Same shape as the `/health` endpoints on `hooks` and `loan-app`, so one
+ * platform health check could point all three services at one path.
  *
  * **Five fields, and they arrived from three different slices.** Each is a
  * thing a human configures by hand, each fails on its own, and each fails at a
  * point where nothing else on screen would say so.
  *
  * Since #82: `signin`, `gateway` and `verifier` — sign-in, the gateway hop and
- * the custom verifier depend on variables set by hand in the Render dashboard
+ * the custom verifier depend on variables set by hand on the deployment
  * and in the Arcade dashboard, and two of the three fail at a step no hook
  * observes, so an unset one is otherwise discovered mid-rehearsal as "the demo
  * does nothing". They say `configured` or `missing` and never which value is
@@ -28,7 +28,7 @@
  * It still does not read `APPROVALS_STORE_TOKEN`'s production guard, and it
  * answers `200` whatever it finds — a health check that fails on a
  * misconfiguration would take the service out of rotation instead of telling
- * anyone what to fix, and Render would abandon the deploy before anybody could
+ * anyone what to fix, and the host would abandon the deploy before anybody could
  * read this. The refusal lives in the body (`"status":"degraded"`), on the home
  * page, and in the 503 every identity route and the chat route answer.
  * That is what `readIdentitySurface` is for: the same environment, read without
@@ -99,7 +99,7 @@ export async function GET() {
   // `status` first, because it is the field anybody actually reads. `ok` only
   // when every capability is configured, the panel is watching something, and
   // the control plane is `healthy` (a compiled policy that matches the shipped
-  // fixture) — and still HTTP 200, so Render brings the instance up and a
+  // fixture) — and still HTTP 200, so the host brings the instance up and a
   // human can read the fields that say which one. #86, #88, #4, #5 and #6 each
   // added a term to this expression; a deployment that satisfies some and not
   // all is `degraded`.

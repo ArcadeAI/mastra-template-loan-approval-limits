@@ -2,8 +2,8 @@
  * The address of a dependency, checked where the environment is read rather
  * than when the browser fails to open a stream.
  *
- * `render.yaml` used to derive every cross-service address with
- * `fromService … property: host`. Measured on 2026-09-10 (#59): Render emits
+ * The stage demo's deployment used to derive every cross-service address from
+ * its host's service references. Measured on 2026-09-10 (#59): what arrived was
  * the **bare service name**, never the FQDN — `IDENTITY_HOST` arrived on
  * `cg-loan-app` as `cg-idp-or5b`. Consumers prepend a scheme and nothing else,
  * so the request went to `https://cg-idp-or5b/oauth2/userinfo`, DNS failed, and
@@ -14,8 +14,7 @@
  * get wrong: the panel opens `GET /events` from the *browser*, so a bare name
  * fails in somebody else's DevTools console rather than in a server log.
  *
- * The three cross-service keys are `sync: false` now and typed in by hand per
- * environment, which means a human can type a bare name too.
+ * The addresses are typed in by hand per environment now, which means a human can type a bare name too.
  *
  * The check below is written out once per service rather than shared, because
  * `apps/loan-app` depends on nothing outside itself on purpose — it is the part
@@ -70,18 +69,17 @@ function isPort(port: string): boolean {
  */
 function refusal(name: string, host: string, problem: string): PublicHostError {
   return new PublicHostError(
-    `${name}=${host} is not an address this service can reach: ${problem}. Read the value off ` +
-      "that service's page in the Render dashboard (the host part of the URL shown there) and " +
-      "set it by hand; the key is `sync: false` for this reason. Never derive or guess it: " +
-      "onrender.com subdomains are global, so Render silently suffixes a name that is taken — " +
-      "cg-web is cg-web-sa31 and cg-idp is cg-idp-or5b.",
+    `${name}=${host} is not an address this service can reach: ${problem}. Set it by hand to ` +
+      "the host the app is actually served on: the host part of its public URL (your ngrok " +
+      "domain locally, or the deployment's own URL), with no scheme. Never derive or guess it: " +
+      "a guessed hostname can belong to somebody else's deployment.",
   );
 }
 
 /**
  * Refuse anything that is not a reachable HOST-form address: a hostname, or a
- * hostname and a numeric port. A dotless name is the shape `fromService`
- * produced and the shape a hand-typed `cg-idp` produces again, and loopback is
+ * hostname and a numeric port. A dotless name is the shape a derived service
+ * reference produced (#59) and the shape a hand-typed `cg-idp` produces again, and loopback is
  * the only dotless exception because it is the only one that resolves.
  *
  * Unset is not an error. Every consumer carries a localhost default, and a
@@ -106,8 +104,8 @@ export function assertPublicHost(name: string, value: string | undefined): void 
   throw refusal(
     name,
     host,
-    "it has no dot and is not loopback, which is what a Render service *name* looks like " +
-      "(`cg-idp-or5b`) rather than its hostname (`cg-idp-or5b.onrender.com`)",
+    "it has no dot and is not loopback, which is what a service *name* looks like " +
+      "(`cg-idp`) rather than its hostname (`cg-idp.example.com`)",
   );
 }
 

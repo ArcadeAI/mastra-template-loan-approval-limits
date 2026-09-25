@@ -10,8 +10,7 @@ export const DEFAULT_ARCADE_REDIRECT_URI = "https://cloud.arcade.dev/api/v1/oaut
 
 /**
  * A fixed secret for local runs only, and published in this file. Refused
- * under NODE_ENV=production (Render generates a real one, `generateValue: true`
- * in render.yaml), and since #9 refused whenever the issuer is not this
+ * under NODE_ENV=production (a deployment sets a real one), and since #9 refused whenever the issuer is not this
  * machine, whatever NODE_ENV says: see {@link publicHostWithoutSecret}.
  */
 const DEV_SECRET = "cg-idp-dev-secret-not-for-production-0000000000";

@@ -6,8 +6,8 @@
  * produce **four** `/access` calls, one of them enumerating every toolkit in
  * the project (~1.6 MB), and spike #5 counted what that costs on the deployed
  * gateway — **8,278 `/access` frames per `tools/list`**, six `allow` and 8,272
- * `deny` (`docs/spikes/05-custom-verifier.md` §11.3). Appending a row per
- * entry is what put 413,832 rows on the Render disk with nothing looping:
+ * `deny`. Appending a row per entry is what put 413,832 rows on the stage
+ * demo's disk with nothing looping:
  * `413,832 / 8,278 ≈ 50 listings`.
  *
  * The figures divide **per list** and this module works **per call**: a summary

@@ -1,4 +1,5 @@
-# Render does not detect Bun, so this service declares its runtime explicitly.
+# The one image the app ships as. It runs on Bun, declared here rather than left
+# to a hosting platform's runtime detection.
 # Build context is the repo root — Bun workspaces need the root manifest and
 # lockfile to link `packages/*`, and since #3 the root manifest is this app's.
 #

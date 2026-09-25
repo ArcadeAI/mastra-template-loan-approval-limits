@@ -13,7 +13,7 @@
  *    about *when* the words arrive and not about how they are broken up:
  *    consecutive `text` events are one message that grows (`transcript.ts`),
  *    rendered as a safe subset of markdown (`markdown.ts`). #99 found the
- *    opposite live — one block per delta, so the first reply on the Render URL
+ *    opposite live — one block per delta, so the first reply on the deployed URL
  *    read "It / looks like the lo / an system / need / s you".
  * 2. **It shows the tool calls.** A denial that only appeared as prose would
  *    leave nothing on screen distinguishing "the hook refused" from "the model
@@ -158,7 +158,7 @@ export interface ChatProps {
    * here retries or polls.
    *
    * The same URL the panel watches, and for the same reason it is a prop:
-   * `NEXT_PUBLIC_*` is inlined at build time while Render supplies the
+   * `NEXT_PUBLIC_*` is inlined at build time while the hosting platform supplies the
    * environment at runtime, so a client component that read it itself would be
    * `undefined` in the deployed browser and fine under `next dev`
    * (`lib/governance/stream-url.ts`).

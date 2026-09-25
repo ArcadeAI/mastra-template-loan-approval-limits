@@ -4,9 +4,9 @@
  * #29 decided policy is durable: a clearance raised on stage survives a
  * restart, and a reset is something a human runs. #106 measured the cost of
  * that on a fixture change, and #112 measured the worst version of it. On
- * 2026-09-14 at 15:29Z, #89's compile guard shipped; the Render disk still
+ * 2026-09-14 at 15:29Z, #89's compile guard shipped; the stage demo's disk still
  * held the dot-spelled remediation text it refuses; cg-hooks came up
- * `STARTED FAIL-CLOSED`, `/health` answered 503, Render read that as a dead
+ * `STARTED FAIL-CLOSED`, `/health` answered 503, the host read that as a dead
  * instance and served its own 502 over the top. The control plane was not
  * failing closed, it was *gone*, and the shell command that would have fixed
  * it could not be verified over HTTP. Recovery took a rollback, a hand-written

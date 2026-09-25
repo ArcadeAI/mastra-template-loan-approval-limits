@@ -361,7 +361,7 @@ describe("the stated retention bound", () => {
 
   test("the bound is the measured one: 487 bytes a row against a 1 GB disk", () => {
     // `bun run --cwd apps/hooks bench` measures 487 bytes/row on disk, so the
-    // 1 GB Render volume holds ~2.2M rows. The bound is that, rounded down.
+    // 1 GB disk holds ~2.2M rows. The bound is that, rounded down.
     const rowsInAGigabyte = 1024 ** 3 / 487;
     expect(AUDIT_RETENTION_ROWS).toBeLessThan(rowsInAGigabyte);
     expect(AUDIT_RETENTION_ROWS).toBeGreaterThan(rowsInAGigabyte * 0.8);

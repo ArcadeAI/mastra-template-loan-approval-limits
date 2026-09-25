@@ -5,7 +5,7 @@
  * "a run of assistant text; concatenate in order" — and `lib/agent/run.ts`
  * emits one per `text-delta` chunk the provider produces, which live is a few
  * characters each. The chat rendered one block per event, so the first live turn
- * on Render read:
+ * on the stage demo's deployment read:
  *
  *     It
  *     looks like the lo

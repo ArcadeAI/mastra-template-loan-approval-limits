@@ -39,7 +39,7 @@ __all__ = [
 # is pinned in `.env.example` as ARCADE_LOAN_TOOLKIT. Alphanumerics and
 # underscores only, per MCPApp — a hyphen is rejected at construction, and a
 # hyphenated toolkit could not form a parseable Arcade tool name anyway
-# (docs/spikes/02-remote-mcp-hooks.md).
+# (measured in spike #2).
 app = MCPApp(
     name="loan",
     version="1.0.0",

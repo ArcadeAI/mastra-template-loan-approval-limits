@@ -158,7 +158,7 @@ const STREAM_HEADERS: Record<string, string> = {
   "content-type": "text/event-stream; charset=utf-8",
   "cache-control": "no-cache, no-transform",
   connection: "keep-alive",
-  // Render's proxy would otherwise buffer the whole response and deliver the
+  // A reverse proxy would otherwise buffer the whole response and deliver the
   // acts in one go, at the end — which on stage is indistinguishable from the
   // control plane not firing.
   "x-accel-buffering": "no",

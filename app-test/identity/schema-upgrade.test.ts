@@ -14,7 +14,7 @@
  * before, or now older — is refused before anything else happens.
  *
  * The same refusal protects against #60's failure mode: `cg-hooks` came up
- * green and crash-looped on `no such table`, and Render's Shell will not
+ * green and crash-looped on `no such table`, and a hosted shell will not
  * attach to a service that keeps exiting.
  */
 import { afterEach, describe, expect, test } from "bun:test";

@@ -3,13 +3,13 @@
  *
  * Every address here is HOST-form (`host` or `host:port`), never a URL: the
  * consumer adds the scheme, and `baseUrl` is the one place that decides which.
- * The cross-service keys are `sync: false` in `render.yaml` and set by hand from
- * the value on each Render service page — `fromService` emitted the bare service
- * name rather than the hostname, which #59 has the measurement for.
+ * The cross-service keys are set by hand, never derived: the stage demo's
+ * deployment once derived them and got the bare service name rather than the
+ * hostname, which #59 has the measurement for.
  * `public-host.ts` refuses a value that still looks like one.
  *
  * Nothing here is `NEXT_PUBLIC_`, deliberately. `next build` inlines those into
- * the client bundle while Render supplies service env vars at runtime, so a
+ * the client bundle while the hosting platform supplies env vars at runtime, so a
  * `NEXT_PUBLIC_` twin would be empty in production and fine under `next dev` —
  * the worst possible failure mode. Server components read this and pass what
  * the browser needs down as props.
@@ -200,8 +200,7 @@ export function readIdentitySurface(
     agent: {
       anthropicApiKey: env.ANTHROPIC_API_KEY?.trim() ?? "",
       // Defaulted rather than required: a deployment that never set it still
-      // runs the model `DESIGN.md` names, and `render.yaml` sets it explicitly
-      // so the blueprint is the whole list rather than most of it.
+      // runs the model `DESIGN.md` names.
       modelId: env.MODEL_ID?.trim() || "claude-sonnet-5",
       // The same two variables `apps/hooks` keys its rules on, read here as an
       // allow-list. Blank entries are dropped rather than turned into a bare
@@ -301,7 +300,7 @@ export interface DeploymentReadiness {
    * greps for — so a deployment that cannot make a tool call was describing
    * itself as fine.
    *
-   * **Still HTTP 200.** Render takes a non-200 on `healthCheckPath` as a dead
+   * **Still HTTP 200.** A platform health check takes a non-200 as a dead
    * instance and stops the deploy, and an instance that will not come up is an
    * instance whose `/health` nobody can read. The whole point of this endpoint
    * is to be readable while something is wrong, so the refusal belongs in the

@@ -21,7 +21,7 @@ test("src/schema.sql matches what the installed Better Auth generates", async ()
 /**
  * #58's column-level defence, asserted as behaviour rather than as a
  * substring: `loadPeople` lowercases what it seeds, but a row inserted by
- * hand on the Render disk — or by a future Better Auth migration — is not
+ * hand on the deployment's disk — or by a future Better Auth migration — is not
  * its to normalise, and a case-sensitive `email` makes that row a person who
  * cannot log in.
  */

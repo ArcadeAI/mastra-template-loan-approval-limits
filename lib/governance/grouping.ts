@@ -78,7 +78,7 @@ import type { GovernanceEvent, HookPoint } from "@cg/policy-schema";
  *
  * What the window actually has to cover is the gap between the **four
  * `/access` calls** the deployed gateway makes for one `tools/list`
- * (`lib/control-plane/access-audit.ts`) — four HTTP round trips to Render, which
+ * (`lib/control-plane/access-audit.ts`) — four HTTP round trips to the deployment, which
  * nothing here can measure. Three seconds is an order of magnitude above every
  * burst that has been measured, comfortably above four round trips, and well
  * under the gap between two things a presenter does. If a deployed listing

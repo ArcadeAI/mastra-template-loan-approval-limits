@@ -108,8 +108,8 @@ export interface AgentHarness {
   /** The control plane's audit rows, newest first. */
   audit(): Promise<Array<Record<string, unknown>>>;
   /**
-   * The control plane's own account of itself, unauthenticated as Render and
-   * Arcade read it. Act 4's control run asserts on `injection_detection` here
+   * The control plane's own account of itself, unauthenticated as a host's health
+   * check and Arcade read it. Act 4's control run asserts on `injection_detection` here
    * rather than trusting the environment it passed in: what the service says it
    * is doing is the evidence, and what a test asked for is only a request.
    */

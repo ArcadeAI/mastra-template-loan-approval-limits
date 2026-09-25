@@ -115,7 +115,7 @@ to everyone.
 string *is* the remediation instruction the agent acts on. The hook writes it; the system
 prompt does not.
 
-One thing not to do, measured in `docs/spikes/02-remote-mcp-hooks.md`: do not key a rule on
+One thing not to do, measured in spike #2 against a real Arcade project: do not key a rule on
 tool behaviour metadata. `tool.metadata` is never populated on hook payloads — for remote
 MCP tools or hosted toolkits — so such a rule matches nothing, and a rule that matches
 nothing is indistinguishable from a rule that permits.

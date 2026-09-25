@@ -335,7 +335,7 @@ export async function ensureOAuthClient(
  * into hashed storage, see `migrateStoredClientSecret`.
  *
  * The method has to be reconciled here, not only set at creation, for the same
- * reason the redirect URIs are: `idp.db` is on a Render disk and the live
+ * reason the redirect URIs are: `idp.db` is on a persistent disk and the live
  * `cg-idp` client row was written by an earlier build. A constant changed in
  * this file and nowhere else would leave that row on `client_secret_post`
  * forever, and the failure lands at the token endpoint — server to server,

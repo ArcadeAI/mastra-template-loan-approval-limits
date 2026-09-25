@@ -1,10 +1,10 @@
 /**
  * Drives `POST /api/chat` against the **Docker image**, which is the runtime
- * Render actually serves.
+ * a deployment actually serves.
  *
  * #92 is the reason this file exists. The chat route worked under `next start`,
  * passed the 18-assertion tracer bullet, and was read by three reviewers — and
- * answered 500 on Render, because `next start` resolves imports against a full
+ * answered 500 on the stage demo's deployment, because `next start` resolves imports against a full
  * `node_modules` while `output: "standalone"` ships only what file tracing
  * carried. `ws`, which `@mastra/core` opens at module scope, was not carried.
  * Every local check in this repo was blind to that by construction: they all
@@ -150,7 +150,7 @@ async function main(): Promise<number> {
   if (version.error || version.status !== 0) {
     console.error(
       "docker is not available here, so the standalone image could not be built or driven.\n" +
-        "This script verifies the artifact Render runs; `next start` is not a substitute for it.",
+        "This script verifies the artifact a deployment runs; `next start` is not a substitute for it.",
     );
     return 1;
   }
@@ -242,7 +242,7 @@ async function main(): Promise<number> {
     // standalone tree did not carry `public/` at all — so `/` was 200 and both
     // marks were 404, a frame with two broken images on a projector.
     // `app-test/public-assets.test.ts` holds this against the locally built tree on
-    // every run; this is the same claim against the image Render pulls, which
+    // every run; this is the same claim against the image a deployment pulls, which
     // is where the tracing include in next.config.ts has to hold on Alpine
     // rather than on a laptop. Derived from the directory, not from the two
     // names, so the next file added to `public/` is covered by having been

@@ -163,8 +163,8 @@ jobs:
           # anyone. Without them the app still boots and /health still answers
           # 200 — degraded, naming the refusal — so the step below also checks
           # that the control plane's policy loaded, or this job would pass on an
-          # image that governs nothing. Throwaway here; both are `sync: false`
-          # in render.yaml.
+          # image that governs nothing. Throwaway here; a deployment sets its
+          # own, and neither is ever committed.
           #
           # Since #6 it is the identity provider too, which refuses to boot
           # under NODE_ENV=production without a BETTER_AUTH_SECRET, on purpose:
@@ -186,9 +186,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # All three services are runtime: docker with hand-written Dockerfiles,
-      # so without this the entire container path is only ever exercised by a
-      # Render deploy. A workspace added without its matching
+      # The app ships as the one hand-written root Dockerfile, so without this
+      # the container path is only ever exercised by somebody's deploy. A
+      # workspace added without its matching
       # `COPY packages/<new>/package.json` line would keep CI green and then
       # fail `bun install --frozen-lockfile` inside the image at deploy time.
       - name: Build
@@ -207,7 +207,7 @@ jobs:
 
       # A Dockerfile that builds is not an image that serves. A `COPY` narrowed
       # to the wrong set of files builds green and dies on boot, so boot it and
-      # ask the same question Render's health check asks. No database, no
+      # ask the same question a hosting platform's health check asks. No database, no
       # network beyond localhost: every service seeds or stubs on its own.
       - name: Boot and check /health
         run: |

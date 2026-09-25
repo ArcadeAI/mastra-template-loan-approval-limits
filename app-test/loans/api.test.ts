@@ -60,7 +60,7 @@ let baseUrl: string;
  * *volume*, and a suite that only checks the answers cannot see one: the live
  * failure was thirty correct answers a minute per open screen, each of them
  * costing a request the provider counts. So the number is measured here, over
- * the wire, against the service booted the way Render boots it.
+ * the wire, against the service booted the way a deployment boots it.
  */
 let userinfoCalls = 0;
 
@@ -129,7 +129,7 @@ function post(token: string, path: string, body: unknown): Promise<Response> {
 }
 
 describe("health", () => {
-  test("answers for Render's health check, without a token", async () => {
+  test("answers a host's health check, without a token", async () => {
     const body = (await (await fetch(`${baseUrl}/health`)).json()) as HealthBody;
 
     expect(body).toMatchObject({ status: "ok", service: "loan-app" });

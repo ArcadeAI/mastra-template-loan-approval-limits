@@ -6,7 +6,7 @@ person's answer.
 
 A Python `arcade-mcp` toolkit, like its sibling
 [`tools/loan`](../loan/README.md): outside the Bun workspaces, outside
-`render.yaml`, shipped with `arcade deploy`. `arcade-mcp` is the framework the
+the app's Docker image, shipped with `arcade deploy`. `arcade-mcp` is the framework the
 agent's tools are authored in and it is Python-only, so both toolkits are
 Python while everything under `apps/` and `packages/` is TypeScript. The
 boundary is tool authoring, not domain.
@@ -77,9 +77,7 @@ sides on the next run.
 Access is brokered by Arcade's **stock** Slack provider. There is no custom
 Slack app, no bot token, and nothing to provision: the provider issues the
 requester's own user token, so the DM arrives under her name with no APP badge.
-Measured end to end in
-[`docs/spikes/03-slack-scopes.md`](../../docs/spikes/03-slack-scopes.md) (#3),
-which also records both fallbacks for a forker who wants a bot instead.
+Measured end to end in spike #3 against the real Slack API.
 
 Four scopes, not three — exactly the set spike #3 exercised:
 

@@ -658,7 +658,7 @@ describe("a SESSION_SECRET that is set but too weak", () => {
    * tests are that measurement, inverted.
    */
   const FILLED = {
-    APP_PUBLIC_HOST: "cg-web-sa31.onrender.com",
+    APP_PUBLIC_HOST: "cg-web-sa31.example.com",
     IDP_CLIENT_ID: "client-c",
     IDP_CLIENT_SECRET: "client-c-secret",
     ARCADE_GATEWAY_ID: "cg-demo-us",
@@ -745,7 +745,7 @@ describe("a SESSION_SECRET that is set but too weak", () => {
       });
       const { GET } = await import("../app/health/route.ts");
       const answer = await GET();
-      // 200 on the wire, `degraded` in the body: Render abandons a deploy whose
+      // 200 on the wire, `degraded` in the body: a host abandons a deploy whose
       // health check is not 200, and an instance that never comes up is an
       // instance whose /health nobody can read.
       expect(answer.status).toBe(200);
@@ -826,14 +826,14 @@ describe("an unconfigured deployment", () => {
     const bare = readWebConfig({});
     const { signin, verify } = await import("../lib/identity/handlers.ts");
 
-    const signinAnswer = await signin(new Request("https://cg-web-sa31.onrender.com/api/auth/signin"), bare);
+    const signinAnswer = await signin(new Request("https://cg-web-sa31.example.com/api/auth/signin"), bare);
     expect(signinAnswer.status).toBe(503);
     // `APP_PUBLIC_HOST` since #6, which replaced `IDP_ISSUER`: the issuer is
     // the app's own origin now.
     expect(await signinAnswer.text()).toContain("APP_PUBLIC_HOST");
 
     const verifyAnswer = await verify(
-      new Request("https://cg-web-sa31.onrender.com/api/arcade/verify?flow_id=x"),
+      new Request("https://cg-web-sa31.example.com/api/arcade/verify?flow_id=x"),
       bare,
     );
     expect(verifyAnswer.status).toBe(503);

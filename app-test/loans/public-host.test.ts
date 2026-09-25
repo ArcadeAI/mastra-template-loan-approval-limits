@@ -1,15 +1,15 @@
 /**
  * A dependency address this service cannot possibly reach is a startup failure.
  *
- * The measurement behind it is #59: `render.yaml` derived `IDENTITY_HOST`
- * with `fromService … property: host`, and Render emitted the bare service name
- * `cg-idp-or5b` rather than `cg-idp-or5b.onrender.com`. `actor.ts` prepends a
+ * The measurement behind it is #59: the stage demo's deployment derived
+ * `IDENTITY_HOST` from its host's service references, and what arrived was the
+ * bare service name `cg-idp-or5b` rather than its FQDN. `actor.ts` prepends a
  * scheme and nothing else, so every userinfo call went to a name DNS cannot
  * resolve and the API answered 503 "the identity provider could not be
  * reached" — true of the URL, false of the provider, and the reason step 7.1 of
  * the #13 sitting went looking at a healthy service.
  *
- * The three keys are `sync: false` now, which moves the value from a wrong
+ * The addresses are typed in by hand now, which moves the value from a wrong
  * derivation to a human's hands. This is what stops the same string arriving
  * that way again.
  *
@@ -39,15 +39,16 @@ const ACCEPTED = [
   "[::1]",
   "[::1]:9000",
   "[::1]:4413",
-  "cg-idp-or5b.onrender.com",
-  "cg-web-sa31.onrender.com",
-  "cg-hooks.onrender.com:443",
+  "cg-idp-or5b.example.com",
+  "cg-web-sa31.example.com",
+  "cg-hooks.example.com:443",
   "example.test",
 ];
 
 /**
  * Nothing here is reachable. The first five are bare service names — what
- * `fromService` produced, and what a hand-typed key produces again.
+ * a derived service reference produced (#59), and what a hand-typed key
+ * produces again.
  *
  * The rest are round 1 of #67. The first cut of this check let any value
  * through once bracket-stripping left a colon in it, so `[::2]` — no dot, not
@@ -70,8 +71,8 @@ const REFUSED = [
   "localhost:bad",
   "localhost:0",
   "localhost:65536",
-  "cg-hooks.onrender.com:bad",
-  "https://cg-hooks.onrender.com",
+  "cg-hooks.example.com:bad",
+  "https://cg-hooks.example.com",
 ];
 
 test.each(ACCEPTED)("%p is a host something can resolve", (value) => {
@@ -89,7 +90,7 @@ test.each(REFUSED)("%p is refused: it is a service name, not a hostname", (value
 
 test("the refusal names the variable, its value, and where the real one comes from", () => {
   // The whole worth of this check is the message: whoever reads it is about to
-  // go and find the right string, and the right string is on one specific page.
+  // go and find the right string, and the right string is the app's own public host.
   try {
     assertPublicHost("IDENTITY_HOST", "cg-idp-or5b");
     throw new Error("expected a refusal");
@@ -97,14 +98,14 @@ test("the refusal names the variable, its value, and where the real one comes fr
     expect(cause).toBeInstanceOf(PublicHostError);
     const { message } = cause as Error;
     expect(message).toContain("IDENTITY_HOST=cg-idp-or5b");
-    expect(message).toContain("Render dashboard");
-    expect(message).toContain("cg-web-sa31");
+    expect(message).toContain("the host part of its public URL");
+    expect(message).toContain("Never derive or guess it");
   }
 });
 
 test("a good value wins over the default, and is trimmed", () => {
-  expect(publicHost("IDENTITY_HOST", "  cg-idp-or5b.onrender.com ", "localhost:8083")).toBe(
-    "cg-idp-or5b.onrender.com",
+  expect(publicHost("IDENTITY_HOST", "  cg-idp-or5b.example.com ", "localhost:8083")).toBe(
+    "cg-idp-or5b.example.com",
   );
 });
 
@@ -142,7 +143,7 @@ test.each(["cg-idp-or5b", "[::2]", "cg-loan-app:bad", "foo:bar"])(
       // 78 is sysexits' EX_CONFIG, the same status `scripts/dev-idp.ts` uses.
       expect(status).toBe(78);
       expect(stderr).toContain(`IDENTITY_HOST=${host}`);
-      expect(stderr).toContain("Render dashboard");
+      expect(stderr).toContain("the host part of its public URL");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -157,7 +158,7 @@ test.each(["cg-idp-or5b", "[::2]", "cg-loan-app:bad", "foo:bar"])(
  *
  * None of these is ever called: booting is the whole assertion.
  */
-test.each(["cg-idp-or5b.onrender.com", "localhost:8082", "127.0.0.1:1234", "[::1]:9000"])(
+test.each(["cg-idp-or5b.example.com", "localhost:8082", "127.0.0.1:1234", "[::1]:9000"])(
   "the loan API starts on %p",
   async (host) => {
     const dir = mkdtempSync(join(tmpdir(), "cg-public-host-"));

@@ -10,7 +10,7 @@
  * There is deliberately no prose on the panel. `DESIGN.md` open risk 2 — that
  * Arcade refuses an unmet auth requirement before any hook runs, so such a
  * refusal reaches nothing here — is a real caveat and it lives in
- * `docs/app.md`. A paragraph of it on a projector was read as noise in
+ * `DESIGN.md` and the README. A paragraph of it on a projector was read as noise in
  * design review, which is a fair reading: nobody at the back of a room reads a
  * footnote, and the space it took belonged to the lanes.
  *
@@ -136,7 +136,7 @@ export function ControlPlanePanelView({
  * real?" is answered on the projector rather than from the stage.
  *
  * `LIVE` carries the host because that is the falsifiable part. "Live" alone is
- * a word a fixture could print; `LIVE · cg-hooks.onrender.com` names the
+ * a word a fixture could print; `LIVE · cg-hooks.example.com` names the
  * service whose `/events` this is, and a wrong one is visible at the back of
  * the room. Chartreuse is Arcade's chrome signifier and already means "the live
  * dot" on this header, so live gets it and the replay is deliberately plainer —

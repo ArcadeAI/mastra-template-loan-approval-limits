@@ -120,7 +120,7 @@ export function sessionSecretProblem(secret: string | undefined): string | null 
  * The AES key for a secret.
  *
  * SHA-256 over a domain-separated copy of the secret, so `SESSION_SECRET` can
- * be any alphabet — a human types this into Render — while the key is always
+ * be any alphabet — a human types this into a deployment's settings — while the key is always
  * exactly 256 bits. The prefix means a secret reused elsewhere never yields the
  * same key here.
  *

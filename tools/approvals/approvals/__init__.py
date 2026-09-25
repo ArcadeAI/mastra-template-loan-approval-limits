@@ -1,7 +1,7 @@
 """The approvals toolkit: escalate a blocked call to the one human who can decide it.
 
 A Python `arcade-mcp` toolkit, like its sibling `tools/loan`: outside the Bun
-workspaces and outside `render.yaml`, shipped with `arcade deploy`. Python
+workspaces and outside the app's Docker image, shipped with `arcade deploy`. Python
 because `arcade-mcp`, the framework the agent's tools are authored in, is
 Python-only — the boundary is tool authoring, not domain.
 

@@ -5,9 +5,9 @@
  * `handlers.ts` has four deliberate refusals — 503, 400, 401, 502 — and each
  * says what to do about itself. This is the fifth case and it is different in
  * kind: nothing decided anything, the code simply broke. #92 is what it costs
- * when that arrives bare. On Render, `POST /api/chat` answered Next's stock 500
+ * when that arrives bare. On the stage demo's deployment, `POST /api/chat` answered Next's stock 500
  * HTML page, the browser rendered *"The chat route answered 500."*, and the
- * only place the cause existed was a Render log line a human had to go and
+ * only place the cause existed was a deploy log line a human had to go and
  * paste into the issue. Three reviewers had passed the same build.
  *
  * So the contract here is: **say which step broke, in the response**. The step
@@ -39,7 +39,7 @@ export function describeCause(cause: unknown): string {
  * A JSON 500 naming the step, and the stack on stderr.
  *
  * The stack is logged rather than returned: it names paths inside the image and
- * a browser has no use for it, but the Render log is where whoever is on the
+ * a browser has no use for it, but the deploy log is where whoever is on the
  * other end of a failed rehearsal will look next.
  */
 export function serverFault(step: string, cause: unknown): Response {

@@ -3,7 +3,7 @@
  * none of our tools.
  *
  * The failure this file exists to keep out: Alice, signed in, asks for the $95K
- * loan on the live Render URL and reads *"The gateway advertised 0 tools and
+ * loan on the live deployment and reads *"The gateway advertised 0 tools and
  * none of them belong to \"Loan\" or \"Approvals\" … Check ARCADE_LOAN_TOOLKIT
  * and ARCADE_APPROVALS_TOOLKIT"*. Both variables were correct. Her gateway
  * token was not, and one click on `/api/arcade/start` was the whole fix.

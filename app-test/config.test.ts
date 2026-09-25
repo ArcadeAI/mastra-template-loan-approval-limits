@@ -138,12 +138,12 @@ describe("both services guard production the same way", () => {
 
 describe("addresses", () => {
   test("are host-form, and the consumer adds the scheme", () => {
-    // Render's `fromService` can only emit a bare host and blueprints have no
-    // string interpolation, so every cross-service address in this repo is
-    // host-form and this function is the one place that picks http or https.
+    // Every address in this repo is host-form, set by hand on the deployment
+    // with no scheme, and this function is the one place that picks http or
+    // https.
     expect(baseUrl("localhost:4400")).toBe("http://localhost:4400");
     expect(baseUrl("127.0.0.1:4400")).toBe("http://127.0.0.1:4400");
-    expect(baseUrl("cg-hooks-sa31.onrender.com")).toBe("https://cg-hooks-sa31.onrender.com");
+    expect(baseUrl("cg-hooks-sa31.example.com")).toBe("https://cg-hooks-sa31.example.com");
   });
 
   test("a trailing slash on the Arcade URL does not become a double slash", () => {

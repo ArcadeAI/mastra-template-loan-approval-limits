@@ -1,6 +1,6 @@
 /**
  * The authorization-code flow Arcade will drive, exercised over real HTTP
- * against the service booted the way Render boots it: `bun src/index.ts`, env
+ * against the service booted the way a deployment boots it: `bun src/index.ts`, env
  * only. Authorize → login page → consent page → code → token → userinfo. No
  * handler is called in-process; the thing that has to work is the wire.
  *
@@ -508,7 +508,7 @@ describe("the fixture's port probe", () => {
 });
 
 describe("health", () => {
-  test("answers for Render's health check and names the endpoints", async () => {
+  test("answers a host's health check and names the endpoints", async () => {
     const body = (await (await fetch(`${baseUrl}/identity/health`)).json()) as Record<string, any>;
 
     expect(body).toMatchObject({ status: "ok", service: "idp", people: 4, issuer: baseUrl });
@@ -1440,8 +1440,8 @@ describe("a replayed authorization code is named as one", () => {
  * The first round could only say "something is fetching the authorization
  * callback twice", because this service logged rejections and nothing else: the
  * successful first exchange left no trace, so two hits looked like one rejection
- * with no partner, and the caller behind either was never named. On Render at
- * 21:05:28Z the missing half was the whole answer — cg-web's single `next_uri`
+ * with no partner, and the caller behind either was never named. On the stage demo's
+ * deployment at 21:05:28Z the missing half was the whole answer — cg-web's single `next_uri`
  * fetch was already in *its* log, and the 290 ms gap to cg-idp's rejection could
  * not be attributed to anyone.
  *
@@ -1483,7 +1483,7 @@ describe("every token request leaves a line, successes included", () => {
 
     const response = await exchange(code, verifier, {
       "user-agent": "arcade-engine/test",
-      // Render's proxy appends, so the caller is the left-most entry and the
+      // A reverse proxy appends, so the caller is the left-most entry and the
       // hops after it are infrastructure.
       "x-forwarded-for": "203.0.113.7, 10.0.0.1",
     });
@@ -1494,7 +1494,7 @@ describe("every token request leaves a line, successes included", () => {
     expect(line).toContain("outcome=success");
     expect(line).toContain('ua="arcade-engine/test"');
     expect(line).toContain("ip=203.0.113.7");
-    // The hop Render added is not the caller, and printing it would put the
+    // The hop the proxy added is not the caller, and printing it would put the
     // same value on every line and attribute nothing.
     expect(line).not.toContain("10.0.0.1");
     expect(line).toContain(`client_id=${creds.client_id}`);
@@ -1627,7 +1627,7 @@ describe("reset does not rotate the OAuth client", () => {
 describe("the log", () => {
   // Last on purpose: by now the service has booted, served every flow above,
   // survived a reset and been asked for its credentials several times. If any
-  // of that printed the secret, a `render logs` would have shown it.
+  // of that printed the secret, the deploy log would have shown it.
   test("never carries the client secret, over the whole run", async () => {
     const logged = await Bun.file(logPath).text();
 

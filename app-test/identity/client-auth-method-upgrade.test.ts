@@ -1,7 +1,7 @@
 /**
  * The #61 upgrade on a disk that already exists.
  *
- * `idp.db` lives on a Render disk, so the live `cg-idp` OAuth client row was
+ * `idp.db` lives on a persistent disk, so the live `cg-idp` OAuth client row was
  * written by an earlier build with `tokenEndpointAuthMethod:
  * "client_secret_post"`. Changing the constant in `src/client.ts` moves what a
  * *new* client would be created with and nothing else — the live row would keep
@@ -15,7 +15,7 @@
  * and the same secret** answering to HTTP Basic afterwards. No rotation: the
  * credentials in the Arcade dashboard must survive this.
  *
- * The service is booted the way Render boots it, twice, over real HTTP.
+ * The service is booted the way a deployment boots it, twice, over real HTTP.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Subprocess } from "bun";
@@ -73,7 +73,7 @@ function baseEnv(port: number): Record<string, string> {
  * Boots the service on its own free port and returns its base URL plus
  * everything it wrote to stderr once it is up. Stderr, because the line that
  * announces a reconciled auth method goes there on purpose: it costs a human a
- * field in the Arcade dashboard, and `render logs` should surface it without
+ * field in the Arcade dashboard, and the deploy log should surface it without
  * anyone knowing to look.
  */
 async function boot(): Promise<{ baseUrl: string; stderr: () => Promise<string> }> {

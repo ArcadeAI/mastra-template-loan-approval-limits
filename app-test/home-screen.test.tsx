@@ -451,11 +451,11 @@ describe("what the split took with it", () => {
   test("no stream badge: this page makes no claim about a control plane", () => {
     // Both halves of #81's badge. A bank page that said LIVE or FIXTURE REPLAY
     // would be answering "is this real?" about a surface it does not show.
-    const live = screen({ approvalStreamUrl: "https://cg-hooks.onrender.com/events" });
+    const live = screen({ approvalStreamUrl: "https://cg-hooks.example.com/events" });
 
     expect(live).not.toContain("LIVE ·");
     expect(live).not.toContain("FIXTURE REPLAY");
-    expect(live).not.toContain("cg-hooks.onrender.com");
+    expect(live).not.toContain("cg-hooks.example.com");
   });
 
   test("the shell that held the split is gone, and nothing imports it", () => {

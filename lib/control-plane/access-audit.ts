@@ -7,10 +7,10 @@
  *
  * - **Four `/access` calls per `tools/list`** — one scoped to `Loan`, one
  *   enumerating every toolkit in the project, ~1.6 MB
- *   (`docs/spikes/02-remote-mcp-hooks.md`).
+ *   (measured against a real Arcade project while the stage demo was built).
  * - **8,278 frames per `tools/list`, on the deployed gateway.** Six `allow` —
  *   this project's six tools — and 8,272 `deny`, every one carrying Alice's
- *   lowercase email (`docs/spikes/05-custom-verifier.md` §11.3, measured
+ *   lowercase email (the custom-verifier spike, measured
  *   against `cg-demo-us` rather than a throwaway project).
  *
  * Those two divide: **8,278 frames across four calls is the per-*list* figure,
@@ -19,7 +19,7 @@
  *
  * `handleAccess` used to append one row per tool named in the request, which
  * for the enumerating call is one row per catalogue entry. That is what #107
- * is: 413,832 rows on the Render disk with nothing looping —
+ * is: 413,832 rows on the stage demo's disk with nothing looping —
  * `413,832 / 8,278 ≈ 50 listings`, which is about 25 loads of `/` and a few
  * turns. Every one of those rows past the sixth is about a tool this control
  * plane does not govern, has no rule for and will never be asked about again,

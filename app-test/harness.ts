@@ -19,7 +19,7 @@
  *
  * That stand-in lives in `scripts/arcade-stand-in.ts` and is imported here
  * rather than duplicated, because it is also the thing a person runs to drive
- * the two beats by hand (see `docs/app.md`). One implementation means
+ * the two beats by hand. One implementation means
  * the demo a human sees and the behaviour this suite pins cannot diverge.
  *
  * What that leaves unverified is stated plainly and is not pretended away:
@@ -170,7 +170,7 @@ export interface Hooks {
  * `env` is merged over the defaults, so a caller can hand the control plane a
  * `RESET_TOKEN` or a database on disk without this function growing a
  * parameter per variable. Everything a test overrides that way is a thing
- * `render.yaml` also sets, which keeps the subprocess a deployment rather than
+ * a deployment also sets, which keeps the subprocess a deployment rather than
  * a fixture.
  */
 export async function startHooks(

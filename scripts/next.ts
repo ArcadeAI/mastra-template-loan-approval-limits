@@ -20,7 +20,7 @@
  * src/index.ts` does for `hooks`, `loan-app` and `idp`, and the Next CLI
  * inherits that environment and reads `PORT` out of it. A real environment
  * variable still wins over the file — `PORT=4420 bun run dev`
- * and Render's injected `PORT` both keep working — because that is Bun's own
+ * and a host's injected `PORT` both keep working — because that is Bun's own
  * precedence, not something re-implemented here.
  *
  * **The Next server runs on Bun, not Node, since #4.** `next`'s bin starts

@@ -130,7 +130,7 @@ export async function followNextUri(nextUri: string): Promise<{ status: number; 
  *
  * Arcade's continuation carries the authorization leg's query string, and on
  * some legs that includes a `code`. A log line is read by people and shipped to
- * Render; the shape is the diagnosis and the values are credentials.
+ * a hosting platform; the shape is the diagnosis and the values are credentials.
  */
 export function loggable(value: string | null): string {
   if (!value) return "(none)";

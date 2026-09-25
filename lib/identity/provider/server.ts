@@ -827,7 +827,7 @@ export async function openIdentityProvider(config: IdpConfig = readConfig()): Pr
       // When the request arrived, not when it finished. This is the field that
       // gets lined up against cg-web's `[verifier] next_uri answered` line, and
       // a completion time would fold this service's own latency into the gap
-      // being measured (#100: 290 ms between the two, on Render).
+      // being measured (#100: 290 ms between the two, on the stage demo's deployment).
       const at = new Date().toISOString();
 
       /**
@@ -935,7 +935,7 @@ export async function openIdentityProvider(config: IdpConfig = readConfig()): Pr
   );
 
   // Its own line, and on stderr when it is the one that costs a human something,
-  // so `render logs` shows it without anyone having to know to look. The secret
+  // so the deploy log shows it without anyone having to know to look. The secret
   // itself is never printed here, whatever happened to it — `bun run
   // oauth-client --rotate` is the only thing that prints one.
   for (const each of clients) {
@@ -947,7 +947,7 @@ export async function openIdentityProvider(config: IdpConfig = readConfig()): Pr
 
   // The other thing that can cost a human a field in the Arcade dashboard, and
   // the one this boot may just have changed underneath them. On stderr for the
-  // same reason the rotation line is: `render logs` shows it without anyone
+  // same reason the rotation line is: the deploy log shows it without anyone
   // having to know to look.
   for (const each of clients.filter((candidate) => candidate.authMethodReconciled)) {
     console.error(

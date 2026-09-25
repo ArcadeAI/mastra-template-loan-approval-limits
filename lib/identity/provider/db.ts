@@ -195,7 +195,7 @@ function resetAdvice(path: string): string {
  * Thrown at boot, before the port opens, when `idp.db` is not one this build
  * can bring forward. Names the file and the way out, because the alternative
  * is a `SQLiteError: no such table` from the first request that needs the
- * missing piece, a crash loop, and a Render Shell that will not attach to a
+ * missing piece, a crash loop, and a remote shell that will not attach to a
  * service that keeps exiting (#60, measured on `cg-hooks`).
  */
 export class SchemaTooNewError extends Error {

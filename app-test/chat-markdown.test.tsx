@@ -4,8 +4,8 @@
  * Three separate claims, and only the first is about legibility:
  *
  * 1. **Markdown renders**, as a subset: links, emphasis, strong, inline code,
- *    paragraphs. The model emitted `[Authorize access](…)` on the Render URL and
- *    the screen showed the brackets.
+ *    paragraphs. The model emitted `[Authorize access](…)` on the stage demo's deployment
+ *    and the screen showed the brackets.
  * 2. **Nothing else renders.** The reply is the one surface on this screen that
  *    a prompt injection gets to write — act 4 is a loan file trying to — so an
  *    HTML payload in a `text` event is shown as text, and a link the parser will
@@ -14,7 +14,7 @@
  *    escaped nothing.
  * 3. **The authorization card prints the name and the link and stops.** Arcade's
  *    `llm_instructions` are words for the model, they carry the full authorize
- *    URL, and on the Render URL they overflowed the card by several hundred
+ *    URL, and on the stage demo's deployment they overflowed the card by several hundred
  *    pixels. They stay in the event, where `test/gateway-token-rejected.test.ts`
  *    reads them; they are off the screen.
  *
@@ -197,7 +197,7 @@ describe("consecutive text events are one block", () => {
 describe("the authorization card is a name and a link", () => {
   const LLM_INSTRUCTIONS =
     "Please show the following link to the end user formatted as markdown: " +
-    "https://cg-idp-sa31.onrender.com/oauth2/authorize?client_id=abc123&redirect_uri=" +
+    "https://cg-idp-sa31.example.com/oauth2/authorize?client_id=abc123&redirect_uri=" +
     "https%3A%2F%2Fcloud.arcade.dev%2Fapi%2Fv1%2Foauth%2Fcallback&response_type=code&state=xyz";
 
   const layer2 = renderToStaticMarkup(
@@ -221,7 +221,7 @@ describe("the authorization card is a name and a link", () => {
     // The overflow #99 measured: hundreds of pixels of query string in a card
     // that had a working link two lines above it.
     expect(layer2).not.toContain("Please show the following link");
-    expect(layer2).not.toContain("cg-idp-sa31.onrender.com");
+    expect(layer2).not.toContain("cg-idp-sa31.example.com");
     expect(layer2).not.toContain("client_id");
     // The `href` is the one place the URL belongs, and nowhere in the text.
     expect(text(layer2)).not.toContain("https://");

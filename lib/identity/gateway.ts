@@ -8,7 +8,7 @@
  *
  * **`apps/web` drives this flow itself.** Mastra's `MCPClient.authenticate()`
  * refuses a non-loopback redirect URI, and this service is deployed at an
- * HTTPS origin, so the alternative would be a loopback listener on a Render
+ * HTTPS origin, so the alternative would be a loopback listener on a hosted
  * instance nobody's browser can reach. `MCPClient` is handed a static token
  * instead (#14). Every step below is the one spike #04 measured against the
  * live gateway; nothing here is inferred from a specification.

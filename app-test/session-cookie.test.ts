@@ -19,7 +19,7 @@ import { SESSION_COOKIE, clearSession, readSession, writeSession, type Session }
 const SECRET = "a-session-secret-for-the-suite-0123456789";
 
 const config = (overrides: Record<string, string> = {}) =>
-  readWebConfig({ SESSION_SECRET: SECRET, APP_PUBLIC_HOST: "cg-web-sa31.onrender.com", ...overrides });
+  readWebConfig({ SESSION_SECRET: SECRET, APP_PUBLIC_HOST: "cg-web-sa31.example.com", ...overrides });
 
 /**
  * One byte of a sealed value, deterministically changed.
@@ -41,7 +41,7 @@ function flipByte(sealed: string, part: 1 | 2, index: number): string {
 }
 
 /** A request carrying whatever `Set-Cookie` headers a previous response wrote. */
-function requestCarrying(headers: Headers, url = "https://cg-web-sa31.onrender.com/"): Request {
+function requestCarrying(headers: Headers, url = "https://cg-web-sa31.example.com/"): Request {
   const jar = new Map<string, string>();
   for (const raw of headers.getSetCookie()) {
     const pair = raw.split(";")[0]!;
@@ -147,7 +147,7 @@ describe("chunking past 4KB", () => {
     };
 
     const headers = new Headers();
-    const request = new Request("https://cg-web-sa31.onrender.com/");
+    const request = new Request("https://cg-web-sa31.example.com/");
     await writeSession(headers, request, session, config());
 
     const written = headers.getSetCookie();
@@ -175,7 +175,7 @@ describe("chunking past 4KB", () => {
     const headers = new Headers();
     await writeSession(
       headers,
-      new Request("https://cg-web-sa31.onrender.com/"),
+      new Request("https://cg-web-sa31.example.com/"),
       {
         email: "alice@bank.example",
         signed_in_at: 1,
@@ -200,7 +200,7 @@ describe("chunking past 4KB", () => {
     const long = new Headers();
     await writeSession(
       long,
-      new Request("https://cg-web-sa31.onrender.com/"),
+      new Request("https://cg-web-sa31.example.com/"),
       {
         email: "alice@bank.example",
         signed_in_at: 1,
@@ -237,7 +237,7 @@ describe("chunking past 4KB", () => {
     const headers = new Headers();
     await writeSession(
       headers,
-      new Request("https://cg-web-sa31.onrender.com/"),
+      new Request("https://cg-web-sa31.example.com/"),
       {
         email: "alice@bank.example",
         signed_in_at: 1,
@@ -259,7 +259,7 @@ describe("the attributes a browser is given", () => {
     const headers = new Headers();
     await writeSession(
       headers,
-      new Request("https://cg-web-sa31.onrender.com/"),
+      new Request("https://cg-web-sa31.example.com/"),
       { email: "alice@bank.example", signed_in_at: 1 },
       config(),
     );

@@ -4,8 +4,8 @@
  * The limiter is on only under `NODE_ENV=production`
  * (`enabled: options.rateLimit?.enabled ?? isProduction`), which every
  * Dockerfile here sets and no test does — that is the whole reason #166 was
- * invisible until a live rehearsal. So this boots the service the way Render
- * boots it, on an OS-assigned port, against a throwaway database, with a
+ * invisible until a live rehearsal. So this boots the service the way a
+ * deployment boots it, on an OS-assigned port, against a throwaway database, with a
  * secret generated in memory for this run and never written anywhere.
  *
  * Two modes:

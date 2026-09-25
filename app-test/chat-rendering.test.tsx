@@ -1,7 +1,7 @@
 /**
  * #99 — the reply, as a person reads it, through the real `Chat`.
  *
- * The bug this file exists to keep out was live on the Render URL and invisible
+ * The bug this file exists to keep out was live on the stage demo's deployment and invisible
  * to 553 passing tests: the model's reply arrived as `text` events of a few
  * characters each and the chat drew one block per event, so Alice's first turn
  * read "It / looks like the lo / an system / need / s you".

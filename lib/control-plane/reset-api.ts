@@ -4,7 +4,7 @@
  *
  * #29 made the databases durable and named "resetting is a script you run"
  * (#23) as the other half of that bargain. Until this endpoint, the script did
- * not exist, so the only way back was a `sqlite3` session in a Render shell.
+ * not exist, so the only way back was a `sqlite3` session in a remote shell.
  * #106 records what that cost on one day: three manual resets and a 502 outage
  * to get two fixture changes onto the live service, twice seeding the wrong
  * text because the shell was attached to a rolled-back image while the fixture

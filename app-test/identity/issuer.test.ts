@@ -22,7 +22,7 @@ const CASES: Array<[string, string]> = [
   ["127.0.0.1:4403", "http://127.0.0.1:4403"],
   ["cg-template.ngrok.app", "https://cg-template.ngrok.app"],
   ["loans-demo.ngrok-free.app", "https://loans-demo.ngrok-free.app"],
-  ["cg-web-sa31.onrender.com", "https://cg-web-sa31.onrender.com"],
+  ["cg-web-sa31.example.com", "https://cg-web-sa31.example.com"],
 ];
 
 describe("the issuer's scheme", () => {

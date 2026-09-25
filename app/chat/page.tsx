@@ -70,7 +70,7 @@ export default async function ChatPage() {
       <PersonaToolList session={session} tools={tools} />
 
       {/* Resolved on the server: `NEXT_PUBLIC_*` is inlined at build time and
-          Render supplies the environment at runtime, so the browser is handed
+          the hosting platform supplies the environment at runtime, so the browser is handed
           the address rather than working it out (#81, #20). */}
       <Chat signedInAs={session?.email ?? null} approvalStreamUrl={approvalStreamUrl(process.env)} />
     </main>
