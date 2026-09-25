@@ -143,6 +143,8 @@ describe("next dev, with APP_PUBLIC_HOST set to a host that is not localhost", (
     const tunnel = await devResource(TUNNEL_HOST);
     const body = await tunnel.text();
     console.log(`[dev-origins] /_next/hmr with Origin https://${TUNNEL_HOST} -> ${tunnel.status} ${JSON.stringify(body.slice(0, 80))}`);
+    await Bun.sleep(200);
+    for (const line of output().split("\n").filter((text) => text.includes(BLOCKED))) console.log(`[dev-origins] next dev said: ${line.trim()}`);
     expect(tunnel.status).not.toBe(403);
     expect(body).not.toBe("Unauthorized");
 
@@ -152,8 +154,6 @@ describe("next dev, with APP_PUBLIC_HOST set to a host that is not localhost", (
     expect(chunk, "the home page names no client chunk").toBeString();
     const script = await devResource(TUNNEL_HOST, chunk!);
     expect(script.status).toBe(200);
-
-    await Bun.sleep(200);
     expect(output()).not.toContain(`from "${TUNNEL_HOST}"`);
   }, 60_000);
 
