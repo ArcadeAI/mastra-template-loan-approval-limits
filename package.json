@@ -1,5 +1,5 @@
 {
-  "name": "mastra-contextual-governance",
+  "name": "arcade-governance",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -37,7 +37,7 @@
     "lib/loans is a workspace member for its manifest's `cg.governed` flag, which `packages/policy-schema`'s sweep reads to exempt it; `bun run loans` puts the module on a port of its own (scripts/loans.ts), for tests and for anyone who wants the loan API without Next.",
     "`studio` is `mastra dev`: it bundles `src/mastra/index.ts` and serves Mastra Studio under Node, on `STUDIO_PORT` rather than on `PORT`, which is the app's and which `mastra dev` would otherwise read from the root `.env.local`. Studio runs the chat route's agent and authorizes against the gateway itself, at `/arcade/authorize` on its own server (#8). In an Orca worktree `scripts/orca-setup.sh` sets `STUDIO_PORT` from the worktree's block; unset, Studio takes Mastra's own default, 4111, deliberately (`lib/agent/studio.ts::MASTRA_DEFAULT_PORT`). `app-test/studio-dev-server.test.ts` boots it on a port the OS hands out."
   ],
-  "//ws": "`ws` is a transitive runtime dependency, declared here on purpose. `@mastra/core` opens it at module scope (`import WebSocket from \"ws\"`), and Bun's isolated install links only a package's *declared* dependencies — so without this line `ws` exists only under `node_modules/.bun/@mastra+core@…/node_modules/ws` and is unreachable from the app. In the Alpine builder webpack left it as a bare `require(\"ws\")` external, Next's file tracing could not resolve that specifier from the emitted route, and the standalone image shipped without it: `POST /api/chat` answered `Cannot find module 'ws'` on Render while `next start` on a full node_modules was fine. Declaring it is the whole fix — the specifier now resolves from this package, so tracing carries it. Measured in #92; `scripts/verify-standalone.ts` is what proves it, against the Docker image rather than `next start`.",
+  "//ws": "`ws` is a transitive runtime dependency, declared here on purpose. `@mastra/core` opens it at module scope (`import WebSocket from \"ws\"`), and Bun's isolated install links only a package's *declared* dependencies — so without this line `ws` exists only under `node_modules/.bun/@mastra+core@…/node_modules/ws` and is unreachable from the app. In the Alpine builder webpack left it as a bare `require(\"ws\")` external, Next's file tracing could not resolve that specifier from the emitted route, and the standalone image shipped without it: `POST /api/chat` answered `Cannot find module 'ws'` on the stage demo's deployment while `next start` on a full node_modules was fine. Declaring it is the whole fix — the specifier now resolves from this package, so tracing carries it. Measured in #92; `scripts/verify-standalone.ts` is what proves it, against the Docker image rather than `next start`.",
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.61",
     "@better-auth/oauth-provider": "1.7.5",
