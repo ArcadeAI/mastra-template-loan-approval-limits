@@ -32,7 +32,6 @@ test("tools/loan, the identity provider and setup-arcade name the same provider 
     origin: "https://h.example",
     arcadeClientId: "c",
     arcadeClientSecret: "s",
-    hookToken: "t",
     approvalsStoreToken: "a",
   });
   expect(PROVIDER_ID).toBe(declared!);

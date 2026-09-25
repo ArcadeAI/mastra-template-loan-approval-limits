@@ -72,7 +72,7 @@ class StandIn {
     if (request.headers.get("authorization") !== `Bearer ${KEY}`) return Response.json({ message: "unauthorized" }, { status: 401 });
 
     const [, , ...parts] = url.pathname.split("/"); // "", "v1", ...
-    const route = `${request.method} /${parts.map((part, i) => (i > 0 && /^(auth_providers|plugins|secrets)$/.test(parts[i - 1]!) ? ":id" : part)).join("/")}`;
+    const route = `${request.method} /${parts.map((part, i) => (i > 0 && /^(auth_providers|secrets)$/.test(parts[i - 1]!) ? ":id" : part)).join("/")}`;
     switch (route) {
       case "GET /admin/auth_providers/:id": {
         const provider = this.providers.get(parts[2]!);
@@ -184,9 +184,9 @@ function clientsIn(dir: string): Record<string, { clientId: string; redirectUris
   }
 }
 
-const sequence = (requests: Recorded[]) => requests.map((each) => `${each.method} ${each.path.replace(/plg_\d+/, "<id>")}`);
+const sequence = (requests: Recorded[]) => requests.map((each) => `${each.method} ${each.path}`);
 
-test("a real run registers every API-able piece, fills .env's blanks, and prints the two forms", async () => {
+test("a real run registers every API-able piece, fills .env's blanks, and prints the three forms", async () => {
   const mine = "the-developer-chose-this-session-secret-0123456789";
   const dir = project("full", (env) => env.replace(/^SESSION_SECRET=$/m, `SESSION_SECRET=${mine}`));
   const run = await setupArcade(dir);
@@ -197,10 +197,6 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
     "POST /v1/admin/auth_providers",
     "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
     "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
-    "GET /v1/plugins?limit=100",
-    "POST /v1/plugins",
-    "PATCH /v1/plugins/<id>",
-    "GET /v1/plugins/<id>",
     "PUT /v1/admin/settings/session_verification",
     "GET /v1/admin/settings/session_verification",
   ]);
@@ -225,15 +221,9 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   expect(clients.arcade!.redirectUris).toContain(CALLBACK);
   expect(env.IDP_OAUTH_REDIRECT_URIS_ARCADE).toBe(CALLBACK);
 
-  // The hooks: three full URLs, the health path, active, and the bearer the app will check.
-  const [plugin] = [...arcade.plugins.values()] as Array<Record<string, any>>;
-  expect(plugin!.status).toBe("active");
-  expect(plugin!.webhook_config.health_check_path).toBe("/hooks/health");
-  for (const point of ["access", "pre", "post"]) {
-    expect(plugin!.webhook_config.endpoints[point].url).toBe(`${ORIGIN}/hooks/${point}`);
-    expect(plugin!.webhook_config.endpoints[point].failure_mode).toBe("fail_closed");
-  }
-  expect(plugin!.webhook_config.auth).toEqual({ type: "bearer", token: env.ARCADE_HOOK_SIGNING_SECRET });
+  // The hooks: a form now (#28), with the bearer the app will check named, never printed.
+  hooksFormIsComplete(run.stdout);
+  expect(`${run.stdout}${run.stderr}`).not.toContain(env.ARCADE_HOOK_SIGNING_SECRET!);
 
   // The tool secrets, in the CLI's body shape, and the verifier as read back.
   for (const request of arcade.requests.filter((each) => each.path.startsWith("/v1/admin/secrets/"))) {
@@ -271,7 +261,8 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   expect(env.SESSION_SECRET).toBe(mine);
   expect(run.stdout).toMatch(/kept\s+SESSION_SECRET/);
 
-  // The two forms the API cannot fill.
+  // The three forms the API cannot fill, in the order they are filled in.
+  expect(formOrder(run.stdout)).toEqual(["User Source", "hooks", "gateway"]);
   expect(run.stdout).toContain("User Sources → Create User Source");
   expect(run.stdout).toContain(`Issuer URL      ${ORIGIN}`);
   expect(run.stdout).toContain(`Client ID       ${clients["arcade-user-source"]!.clientId}`);
@@ -281,6 +272,41 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   // Nothing printed carries the API key.
   expect(`${run.stdout}${run.stderr}`).not.toContain(KEY);
 }, 60_000);
+
+/**
+ * The contextual access hooks form (#28), field by field. Every name on the
+ * left is the live swagger's (`schemas.CreatePluginRequest`, its
+ * `webhook_config`, `schemas.WebhookEndpointRequest`, and
+ * `schemas.CreateHookRequest`'s `hook_point`), and the bearer is named, never
+ * printed.
+ */
+function hooksFormIsComplete(stdout: string): void {
+  const start = stdout.indexOf("┌─ Contextual access hooks");
+  expect(start, "no contextual access hooks form").toBeGreaterThan(-1);
+  const form = stdout.slice(start, stdout.indexOf("└─", start));
+  expect(form).toMatch(/│ {2}name +loan-approval-limits-hooks$/m);
+  expect(form).toMatch(/│ {2}plugin_type +webhook$/m);
+  expect(form).toMatch(/│ {2}status +active$/m);
+  for (const [point, phase] of [["access", "before"], ["pre", "before"], ["post", "after"]] as const) {
+    const at = form.indexOf(`│  webhook_config.endpoints.${point}   (hook_point tool.${point})`);
+    expect(at, `the form has no ${point} endpoint`).toBeGreaterThan(-1);
+    const block = form.slice(at).split("\n").slice(1, 5).join("\n");
+    expect(block).toMatch(new RegExp(`│ {4}url +${ORIGIN.replace(/\./g, "\\.")}/hooks/${point}$`, "m"));
+    expect(block).toMatch(new RegExp(`│ {4}phase +${phase}$`, "m"));
+    expect(block).toMatch(/│ {4}failure_mode +fail_closed$/m);
+    expect(block).toMatch(/│ {4}status +active$/m);
+  }
+  expect(form).toMatch(/│ {2}webhook_config\.health_check_path +\/hooks\/health$/m);
+  expect(form).toMatch(/│ {2}webhook_config\.auth\.type +bearer$/m);
+  expect(form).toMatch(/│ {2}webhook_config\.auth\.token +the value of ARCADE_HOOK_SIGNING_SECRET in \.env \(not printed here\)$/m);
+}
+
+/** The forms in the order the output prints them. */
+function formOrder(stdout: string): string[] {
+  return [...stdout.matchAll(/^┌─ (.*)$/gm)].map(([, title]) =>
+    /User Sources/.test(title!) ? "User Source" : /Contextual access hooks/.test(title!) ? "hooks" : /MCP Gateways/.test(title!) ? "gateway" : title!,
+  );
+}
 
 /**
  * What is left after the run, in the order the README's Quickstart gives it
@@ -293,6 +319,7 @@ const NEXT_STEPS: Array<[string, RegExp]> = [
   ["start the app", /`bun run dev`/],
   ["start the tunnel", /ngrok http --url=/],
   ["the User Source form", /fill in the User Source form/i],
+  ["the hooks form", /fill in the contextual access hooks form/i],
   ["deploy both toolkits", /arcade deploy/],
   ["the gateway form", /fill in the gateway form/i],
   ["open the app", /open `?https:\/\//i],
@@ -328,12 +355,17 @@ test("the steps it prints after the forms are the README's, in the README's orde
   expect(printed).toContain(`Open ${ORIGIN}, never localhost`);
   startsTheApp(printed);
 
-  // The check bites: the pre-#11 order, deploy after both forms, fails it.
+  // The check bites: the pre-#11 order, deploy after the forms, fails it,
+  // and so does the hooks form ahead of the tunnel its health check needs (#28).
   const lines = printed.split("\n");
   const deploy = lines.findIndex((line) => line.includes("arcade deploy"));
   const [moved] = lines.splice(deploy, 1);
   lines.splice(lines.findIndex((line) => /gateway form/i.test(line)) + 1, 0, moved!);
   expect(stepOrder(lines.join("\n"))).not.toEqual(order);
+  const early = printed.split("\n");
+  const [hooks] = early.splice(early.findIndex((line) => /contextual access hooks form/i.test(line)), 1);
+  early.splice(early.findIndex((line) => /ngrok http/.test(line)), 0, hooks!);
+  expect(stepOrder(early.join("\n"))).not.toEqual(order);
 }, 60_000);
 
 test("a dry run ends with the same steps", async () => {
@@ -355,7 +387,7 @@ function startsTheApp(printed: string): void {
   expect(printed).not.toMatch(/^\s*\d\. Restart/m);
 }
 
-test("--dry-run prints the same requests a real run makes, in order, and writes and sends nothing", async () => {
+test("--dry-run from a fresh project prints the requests a real run makes, in order, and writes and sends nothing", async () => {
   const dir = project("dry");
   const before = readFileSync(join(dir, ".env"), "utf8");
   const run = await setupArcade(dir, "--dry-run");
@@ -371,10 +403,6 @@ test("--dry-run prints the same requests a real run makes, in order, and writes 
     "POST /v1/admin/auth_providers",
     "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
     "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
-    "GET /v1/plugins?limit=100",
-    "POST /v1/plugins",
-    "PATCH /v1/plugins/<id>",
-    "GET /v1/plugins/<id>",
     "PUT /v1/admin/settings/session_verification",
     "GET /v1/admin/settings/session_verification",
   ]);
@@ -395,7 +423,8 @@ test("--dry-run prints the same requests a real run makes, in order, and writes 
   expect(run.stdout).not.toContain("POST " + arcade.url + "/v1/admin/secrets");
   expect(run.stdout).toMatch(/would fill .*\bBETTER_AUTH_SECRET\b/);
   expect(run.stdout).not.toContain(KEY);
-  expect(run.stdout).toContain(`"url": "${ORIGIN}/hooks/pre"`);
+  hooksFormIsComplete(run.stdout);
+  expect(formOrder(run.stdout)).toEqual(["User Source", "hooks", "gateway"]);
 });
 
 test("it never creates a gateway and never names Arcade Headers mode, in a real run or a dry one", async () => {
@@ -524,14 +553,10 @@ test("running it again changes nothing that is registered and rotates nothing Ar
     "GET /v1/admin/auth_providers/app-identity",
     "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
     "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
-    "GET /v1/plugins?limit=100",
-    "PATCH /v1/plugins/<id>",
-    "GET /v1/plugins/<id>",
     "PUT /v1/admin/settings/session_verification",
     "GET /v1/admin/settings/session_verification",
   ]);
   expect(JSON.stringify(arcade.providers.get("app-identity"))).toBe(providerAfterFirst);
-  expect(arcade.plugins.size).toBe(1);
   expect(readFileSync(join(dir, ".env"), "utf8")).toBe(envAfterFirst);
   // The User Source's secret was shown once, on the first run, and is not re-minted.
   expect(again.stdout).toContain("(unchanged, and not shown");
@@ -626,7 +651,6 @@ test("a rerun resumes from the live project's state: the provider matches, nothi
   for (const [, key] of section.matchAll(/^([A-Z_][A-Z0-9_]*)=$/gm)) expect(envBefore[key!], `block 2 left ${key} blank`).toMatch(/\S/);
   expect(clientsIn(dir).arcade!.redirectUris).toContain(CALLBACK);
   expect(arcade.secrets.size).toBe(0);
-  expect(arcade.plugins.size).toBe(0);
   expect(arcade.verifier).toEqual({ verifier_url: "", unsafe_skip_verification: false });
 
   const envText = readFileSync(join(dir, ".env"), "utf8");
@@ -644,24 +668,133 @@ test("a rerun resumes from the live project's state: the provider matches, nothi
     "GET /v1/admin/auth_providers/app-identity",
     "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
     "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
-    "GET /v1/plugins?limit=100",
-    "POST /v1/plugins",
-    "PATCH /v1/plugins/<id>",
-    "GET /v1/plugins/<id>",
     "PUT /v1/admin/settings/session_verification",
     "GET /v1/admin/settings/session_verification",
   ]);
   // Minted nothing, overwrote nothing, re-created nothing.
   expect(clientRows(dir)).toBe(rows);
   expect(readFileSync(join(dir, ".env"), "utf8")).toBe(envText);
-  expect(rerun.stdout).toContain("filled   (nothing: every value was already set)");
+  expect(rerun.stdout).toContain("filled   (nothing to fill: every value was already set)");
   expect(JSON.stringify(arcade.providers.get("app-identity"))).toBe(provider);
-  // And went on to set the secrets, the hooks and the verifier.
+  // And went on to set the secrets and the verifier, and printed the hooks form.
   expect(arcade.secrets.get("APP_PUBLIC_HOST")).toBe(HOST);
   expect(arcade.secrets.get("APPROVALS_STORE_TOKEN")).toBe(envBefore.APPROVALS_STORE_TOKEN);
-  const [plugin] = [...arcade.plugins.values()] as Array<Record<string, any>>;
-  expect(plugin!.status).toBe("active");
-  expect(plugin!.webhook_config.auth.token).toBe(envBefore.ARCADE_HOOK_SIGNING_SECRET);
+  hooksFormIsComplete(rerun.stdout);
   expect(arcade.verifier).toEqual({ verifier_url: `${ORIGIN}/api/arcade/verify`, unsafe_skip_verification: false });
   expect(rerun.stdout).toContain(`custom verifier: ${ORIGIN}/api/arcade/verify (read back)`);
 }, 60_000);
+
+/** The requests a dry run prints, as `METHOD /path`. */
+const printedRequests = (stdout: string) =>
+  [...stdout.matchAll(/^ {2}(GET|POST|PUT|PATCH|DELETE) \S+?(\/v1\/\S+)$/gm)].map(([, method, path]) => `${method} ${path}`);
+
+/** What a dry run says only when it is about to create things: none of it is true of a resumed project (#28). */
+const FRESH_ONLY = [
+  "would mint the OAuth clients",
+  "would fill ",
+  "IDP_CLIENT_ID, IDP_CLIENT_SECRET",
+  "minted by this run>",
+  "POST ",
+];
+
+test("a dry run of a fresh project describes the real run that follows it", async () => {
+  const dir = project("dry-fresh-truth");
+  const dry = await setupArcade(dir, "--dry-run");
+  expect(dry.code, `${dry.stdout}\n${dry.stderr}`).toBe(0);
+  expect(arcade.requests).toEqual([]);
+
+  expect(dry.stdout).toContain("idp.db: would mint the OAuth clients arcade, arcade-user-source, web");
+  expect(dry.stdout).toMatch(/would fill .*\bIDP_CLIENT_ID, IDP_CLIENT_SECRET\b.*\bIDP_OAUTH_REDIRECT_URIS_ARCADE\b/);
+  expect(dry.stdout).toContain("Client Secret   <its secret, minted by this run>");
+  expect(dry.stdout).toContain(`  POST ${arcade.url}/v1/admin/auth_providers\n`);
+
+  const real = await setupArcade(dir);
+  expect(real.code, `${real.stdout}\n${real.stderr}`).toBe(0);
+  expect(printedRequests(dry.stdout)).toEqual(sequence(arcade.requests));
+}, 60_000);
+
+/**
+ * The human's live project after the second real run (#7, 2026-09-25, `main`
+ * at `3be53ff`): both tool secrets PUT (200), `app-identity` registered and
+ * unchanged, `.env`'s second block filled, `idp.db` minted, and the run stopped
+ * at `GET /v1/plugins` (404), so no verifier. That state is built here by a
+ * whole run with the verifier then taken back out, and checked rather than
+ * assumed. From it, the dry run and the real rerun must agree (#28).
+ */
+test("from the live project's state after run 2, the dry run tells the truth and the rerun finishes with the three forms", async () => {
+  const dir = project("resume-run-2");
+  expect((await setupArcade(dir)).code).toBe(0);
+  arcade.verifier = { verifier_url: "", unsafe_skip_verification: false };
+
+  expect(arcade.providers.has("app-identity")).toBe(true);
+  expect([...arcade.secrets.keys()].sort()).toEqual(["APPROVALS_STORE_TOKEN", "APP_PUBLIC_HOST"]);
+  expect(existsSync(join(dir, "idp.db"))).toBe(true);
+  const envBefore = envOf(dir);
+  const example = readFileSync(join(ROOT, ".env.example"), "utf8");
+  const block2 = example.slice(example.indexOf("# --- Filled in by `bun run setup-arcade"), example.indexOf("# --- Optional"));
+  for (const [, key] of block2.matchAll(/^([A-Z_][A-Z0-9_]*)=$/gm)) expect(envBefore[key!], `block 2 left ${key} blank`).toMatch(/\S/);
+  const secretsBefore = new Map(arcade.secrets);
+  const envText = readFileSync(join(dir, ".env"), "utf8");
+  const rows = clientRows(dir);
+  const provider = JSON.stringify(arcade.providers.get("app-identity"));
+  arcade.requests = [];
+
+  // The dry run: what a real run does from here, and nothing a fresh one does.
+  const dry = await setupArcade(dir, "--dry-run");
+  console.log(`--- setup-arcade ${HOST} --dry-run, from the live state after run 2 ---\n${dry.stdout}${dry.stderr}`);
+  expect(dry.code, `${dry.stdout}\n${dry.stderr}`).toBe(0);
+  expect(arcade.requests).toEqual([]);
+  for (const phrase of FRESH_ONLY) expect(dry.stdout, `the resumed dry run says ${JSON.stringify(phrase)}`).not.toContain(phrase);
+  expect(dry.stdout).toContain(".env: nothing to fill: every value is already set, and none is overwritten");
+  expect(dry.stdout).toContain("idp.db: already holds the OAuth clients");
+  expect(dry.stdout).toContain("  no secret is minted or rotated");
+  expect(dry.stdout).toContain("(expected 200: .env holds the callback Arcade made for this provider.");
+  expect(dry.stdout).toContain("If Arcade answers 404 instead, a real run mints a new secret for the");
+  expect(dry.stdout).toContain("Client Secret   (unchanged, and not shown");
+  expect(formOrder(dry.stdout)).toEqual(["User Source", "hooks", "gateway"]);
+  // The check bites: the fresh project's dry run says every one of them.
+  const fresh = await setupArcade(project("resume-run-2-fresh"), "--dry-run");
+  for (const phrase of FRESH_ONLY) expect(fresh.stdout).toContain(phrase);
+
+  // The real rerun.
+  const rerun = await setupArcade(dir);
+  console.log(`--- setup-arcade ${HOST}, from the live state after run 2 ---\n${rerun.stdout}${rerun.stderr}`);
+  expect(rerun.code, `${rerun.stdout}\n${rerun.stderr}`).toBe(0);
+  const called = sequence(arcade.requests);
+  expect(called).toEqual([
+    "GET /v1/admin/auth_providers/app-identity",
+    "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
+    "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
+    "PUT /v1/admin/settings/session_verification",
+    "GET /v1/admin/settings/session_verification",
+  ]);
+  expect(printedRequests(dry.stdout)).toEqual(called);
+
+  // In this order: provider matches, .env has nothing to fill, both secrets, the verifier, the three forms.
+  const at = (text: string) => {
+    const index = rerun.stdout.indexOf(text);
+    expect(index, `the rerun never printed ${JSON.stringify(text)}`).toBeGreaterThan(-1);
+    return index;
+  };
+  const marks = [
+    at("the provider app-identity is already registered and matches"),
+    at("filled   (nothing to fill: every value was already set)"),
+    at("PUT /v1/admin/secrets/APP_PUBLIC_HOST → 200"),
+    at("PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN → 200"),
+    at(`custom verifier: ${ORIGIN}/api/arcade/verify (read back)`),
+    at("┌─ Arcade dashboard → your project → User Sources"),
+    at("┌─ Contextual access hooks"),
+    at("┌─ Arcade dashboard → your project → MCP Gateways"),
+    at("Then:"),
+  ];
+  expect([...marks].sort((a, b) => a - b)).toEqual(marks);
+  hooksFormIsComplete(rerun.stdout);
+
+  // Idempotent: the same secrets, nothing minted, nothing overwritten, nothing re-created.
+  expect(arcade.secrets).toEqual(secretsBefore);
+  expect(clientRows(dir)).toBe(rows);
+  expect(readFileSync(join(dir, ".env"), "utf8")).toBe(envText);
+  expect(JSON.stringify(arcade.providers.get("app-identity"))).toBe(provider);
+  expect(arcade.verifier).toEqual({ verifier_url: `${ORIGIN}/api/arcade/verify`, unsafe_skip_verification: false });
+  expect(`${rerun.stdout}${dry.stdout}`).not.toContain(envBefore.ARCADE_HOOK_SIGNING_SECRET!);
+}, 90_000);
