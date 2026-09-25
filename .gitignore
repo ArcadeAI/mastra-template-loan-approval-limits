@@ -27,9 +27,13 @@ build/
 .env.local
 .env.*.local
 
-# data — bootstrapped from checked-in fixtures, never committed
+# data — bootstrapped from checked-in fixtures, never committed. The -wal and
+# -shm sidecars are SQLite's write-ahead log, which holds rows not yet
+# checkpointed into the .db: sessions, OAuth clients, audit rows (#19).
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 
 # Orca — role prompts in .orca/ are committed and public-safe. Everything under
