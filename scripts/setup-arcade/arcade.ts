@@ -13,15 +13,12 @@
  * call is exercised against the stand-in in `app-test/setup-arcade.test.ts`,
  * which answers anything else with Arcade's own 404.
  *
- * Four registrations go through the API, each with its spec path:
+ * Three registrations go through the API, each with its spec path:
  *
  * - the hop-2 provider: `POST /v1/admin/auth_providers`
  *   (`schemas.AuthProviderCreateRequest`), after `GET /v1/admin/auth_providers/{id}`.
  *   **Create-only.** DESIGN.md → "Arcade config is read-only": if the provider
  *   exists it is read back, compared, and never PATCHed;
- * - the hook extension: `POST /v1/plugins` (`schemas.CreatePluginRequest`),
- *   then `PATCH /v1/plugins/{id}` to `status: active`, because a plugin is
- *   created inactive (measured in the remote-MCP hooks spike);
  * - the tool secrets: `PUT /v1/admin/secrets/{secret_key}` with
  *   `{ description, value }`, as the Arcade CLI sends it (`arcade_cli/secret.py`
  *   `_upsert_secret`, and `deploy.py` for `arcade deploy`, both through
@@ -31,9 +28,13 @@
  *   `GET` on the same path, because a verifier that did not take is open
  *   risk 2 (DESIGN.md) and fails where no hook fires.
  *
- * The User Source and the gateway are printed as dashboard forms instead
- * (`forms.ts`): the spec has no User Source endpoint, and `POST /v1/gateways`
- * has no field that attaches one. Nothing here ever creates a gateway, and
+ * The User Source, the hooks and the gateway are printed as dashboard forms
+ * instead (`forms.ts`): the spec has no User Source endpoint, and
+ * `POST /v1/gateways` has no field that attaches one. The hooks were sent to
+ * `/v1/plugins` until #28, and real Arcade has no such route: plugins and hooks
+ * live only under `/v1/orgs/{org_id}/projects/{project_id}/…`, and a project
+ * key has no route that names its org or project. Nothing here calls a plugins
+ * or hooks route, nothing ever creates a gateway, and
  * nothing names the header auth type, which is Arcade Headers mode (DESIGN.md
  * rules it out); `app-test/setup-arcade.test.ts` fails if either appears.
  *
@@ -48,8 +49,6 @@
  * fails if this, the provider's and `tools/loan`'s ever disagree.
  */
 export const PROVIDER_ID = "app-identity";
-/** The hook extension's name, which is how a re-run finds the one it made. */
-export const PLUGIN_NAME = "loan-approval-limits-hooks";
 
 export interface Registration {
   /** HOST-form `APP_PUBLIC_HOST`. */
@@ -59,8 +58,6 @@ export interface Registration {
   /** The `arcade` OAuth client at the app's identity provider. */
   arcadeClientId: string;
   arcadeClientSecret: string;
-  /** The bearer Arcade presents to the hooks: `ARCADE_HOOK_SIGNING_SECRET`. */
-  hookToken: string;
   approvalsStoreToken: string;
 }
 
@@ -156,37 +153,6 @@ export function providerDifferences(existing: unknown, desired: unknown): string
     differences.push("oauth2.client_secret: Arcade holds no secret");
   }
   return differences;
-}
-
-/**
- * The hook extension: three full URLs and a health path, because the
- * extension has no base URL (`schemas.WebhookEndpointRequest`, measured by #4
- * and recorded on #7). `failure_mode` is required on every endpoint
- * (measured in the remote-MCP hooks spike): fail closed, so an unreachable control
- * plane refuses rather than permits.
- */
-export function pluginBody(registration: Registration) {
-  const endpoint = (path: string, phase: "before" | "after") => ({
-    url: `${registration.origin}/hooks/${path}`,
-    phase,
-    failure_mode: "fail_closed",
-    status: "active",
-  });
-  return {
-    name: PLUGIN_NAME,
-    description: "The Loan Approval Limits control plane: /hooks/access, /hooks/pre, /hooks/post",
-    plugin_type: "webhook",
-    status: "active",
-    webhook_config: {
-      auth: { type: "bearer", token: registration.hookToken },
-      health_check_path: "/hooks/health",
-      endpoints: {
-        access: endpoint("access", "before"),
-        pre: endpoint("pre", "before"),
-        post: endpoint("post", "after"),
-      },
-    },
-  };
 }
 
 /** The tool secrets the toolkits read, in the order they are set. */

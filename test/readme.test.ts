@@ -165,6 +165,32 @@ function boldTitles(markdown: string): number[] {
     .map(({ n }) => n);
 }
 
+/**
+ * The Quickstart's remaining steps, from starting the app, in a working order
+ * (#28): the User Source reads its issuer and the hooks answer their health
+ * check through the tunnel, so both forms come after it, and the gateway form
+ * lists the toolkits' tools only once both are deployed. `setup-arcade`'s
+ * "Then:" list is held to the same order in `app-test/setup-arcade.test.ts`.
+ */
+const QUICKSTART_ORDER: Array<[string, RegExp]> = [
+  ["start the app", /Run `bun run dev`/],
+  ["start the tunnel", /`ngrok http --url=/],
+  ["the User Source form", /fill in the User Source form/i],
+  ["the hooks form", /fill in the contextual access hooks form/i],
+  ["deploy both toolkits", /run `arcade deploy`/],
+  ["the gateway form", /fill in the gateway form/i],
+  ["open the app", /Open `https:\/\/<APP_PUBLIC_HOST>`/],
+];
+
+/** The steps in the order the Quickstart's remainder first names them, or the ones it never does. */
+function quickstartOrder(markdown: string): string[] {
+  const quickstart = section(markdown, "Quickstart 🚀");
+  const rest = quickstart.slice(Math.max(0, quickstart.indexOf("5. **Start the app")));
+  const found = QUICKSTART_ORDER.map(([name, pattern]) => ({ name, at: rest.search(pattern) }));
+  const missing = found.filter(({ at }) => at === -1).map(({ name }) => `missing: ${name}`);
+  return missing.length > 0 ? missing : found.sort((a, b) => a.at - b.at).map(({ name }) => name);
+}
+
 // --- The README ---------------------------------------------------------------
 
 describe("README.md follows Mastra's outline", () => {
@@ -203,6 +229,10 @@ describe("README.md follows Mastra's outline", () => {
     }
     expect(quickstart).toContain("https://<APP_PUBLIC_HOST>");
     expect(quickstart).not.toContain("git clone");
+  });
+
+  test("the Quickstart's last steps run in a working order: tunnel, User Source, hooks, deploys, gateway", () => {
+    expect(quickstartOrder(README)).toEqual(QUICKSTART_ORDER.map(([name]) => name));
   });
 
   test("About Mastra templates is the partnership pattern, with no monorepo language", () => {
@@ -292,6 +322,17 @@ describe("each check bites on a planted violation", () => {
       "./docs/app.md: no such file",
       "./docs/spikes/04-user-source.md: no such file",
     ]);
+  });
+
+  test("a Quickstart with the hooks form before the tunnel, or without it", () => {
+    const lines = README.split("\n");
+    const hooks = lines.findIndex((line) => /fill in the contextual access hooks form/i.test(line));
+    expect(hooks).toBeGreaterThan(-1);
+    const [moved] = lines.splice(hooks, 1);
+    const withoutIt = lines.join("\n");
+    expect(quickstartOrder(withoutIt)).toEqual(["missing: the hooks form"]);
+    lines.splice(lines.findIndex((line) => /`ngrok http --url=/.test(line)), 0, moved!);
+    expect(quickstartOrder(lines.join("\n"))).not.toEqual(QUICKSTART_ORDER.map(([name]) => name));
   });
 
   test("a URL nobody verified", () => {

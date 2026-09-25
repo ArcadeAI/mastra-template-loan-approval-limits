@@ -33,13 +33,14 @@ A limit written into a system prompt is a suggestion, and we measured how fragil
    - Run `cp .env.example .env` and fill in the seven values described under Prerequisites.
 4. **Register the app with Arcade**
    - Run `bun run setup-arcade <APP_PUBLIC_HOST> --dry-run` to print every request it would send, with every secret as a placeholder. Nothing is written and nothing is sent.
-   - Run `bun run setup-arcade <APP_PUBLIC_HOST>`. It mints the app's three OAuth clients, fills the second block of `.env` (blanks only, never overwriting), and registers the `app-identity` auth provider, the two tool secrets, the hooks and the custom verifier through Arcade's API.
-   - It ends by printing two dashboard forms that Arcade's API cannot fill: the User Source and the gateway. Keep that output for step 6.
+   - Run `bun run setup-arcade <APP_PUBLIC_HOST>`. It mints the app's three OAuth clients, fills the second block of `.env` (blanks only, never overwriting), and registers the `app-identity` auth provider, the two tool secrets and the custom verifier through Arcade's API.
+   - It ends by printing three dashboard forms that Arcade's API cannot fill: the User Source, the contextual access hooks and the gateway. Keep that output for step 6.
 5. **Start the app and the tunnel**
    - Run `bun run dev`. It prints the URL to open, `https://<APP_PUBLIC_HOST>`, and the ngrok command for this port.
    - In a second terminal, run that command: `ngrok http --url=<APP_PUBLIC_HOST> 3000`.
 6. **Finish the Arcade side**
    - With the app reachable through the tunnel, fill in the User Source form that `setup-arcade` printed (Arcade dashboard, your project, User Sources).
+   - Fill in the contextual access hooks form that `setup-arcade` printed: the three hook URLs on your host, the health check `/hooks/health`, fail-closed, and the value of `ARCADE_HOOK_SIGNING_SECRET` in `.env` as the bearer token. Arcade checks that health path through the tunnel, so the app has to be up.
    - Deploy both toolkits: run `arcade deploy` in `tools/loan`, then again in `tools/approvals`. Their tool secrets were already set in step 4.
    - Fill in the gateway form that `setup-arcade` printed (MCP Gateways). The toolkits' tools are listed there once both deploys have run.
 7. **Ask for the $95K approval**

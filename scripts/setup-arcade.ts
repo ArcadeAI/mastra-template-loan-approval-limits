@@ -18,33 +18,36 @@
  *    `IDP_OAUTH_CLIENTS` and the clients' redirect URIs, `IDP_CLIENT_ID` and
  *    `IDP_CLIENT_SECRET`, `ARCADE_GATEWAY_ID`, and `GOVERNANCE_STREAM=hooks`.
  * 5. **Registers by API**: the provider, the tool secrets `APP_PUBLIC_HOST`
- *    and `APPROVALS_STORE_TOKEN`, the hook extension (three URLs and
- *    `health_check_path`), and the custom verifier, which it reads back.
- * 6. **Prints** the two dashboard forms the API cannot fill, the User Source
- *    and the gateway, and what is left, in the README Quickstart's order:
- *    start the app, start the tunnel, fill in the User Source form,
- *    `arcade deploy` both toolkits, fill in the gateway form, open the app.
+ *    and `APPROVALS_STORE_TOKEN`, and the custom verifier, which it reads back.
+ *    No plugins or hooks route (#28): real Arcade has no `/v1/plugins`.
+ * 6. **Prints** the three dashboard forms the API cannot fill, the User Source,
+ *    the contextual access hooks and the gateway, and what is left, in the
+ *    README Quickstart's order: start the app, start the tunnel, fill in the
+ *    User Source form, fill in the hooks form, `arcade deploy` both toolkits,
+ *    fill in the gateway form, open the app.
  *
  * `--dry-run` writes nothing and sends nothing: it prints every request a real
- * run makes, in order, with the key and every secret as a placeholder. Which
- * registration goes which way, and the spec path of each call, is in
- * `scripts/setup-arcade/arcade.ts`. `app-test/setup-arcade.test.ts` runs this
- * against a local stand-in. Its first run against the real API (#7) stopped at
- * the tool secrets, sent as POST; they are PUT since #26, and a rerun picks up
- * from that state.
+ * run would make from the state on disk, in order, with the key and every
+ * secret as a placeholder. Sending nothing, it cannot ask Arcade whether the
+ * provider exists, so it infers it: `.env`'s `IDP_OAUTH_REDIRECT_URIS_ARCADE`
+ * holds the callback Arcade returns when it creates the provider, and `idp.db`
+ * holds the clients (#28). Which registration goes which way, and the spec
+ * path of each call, is in `scripts/setup-arcade/arcade.ts`.
+ * `app-test/setup-arcade.test.ts` runs this against a local stand-in. Its
+ * first run against the real API (#7) stopped at the tool secrets, sent as
+ * POST; they are PUT since #26. The second stopped at `GET /v1/plugins`; the
+ * hooks are a form since #28. A rerun picks up from either state.
  *
  * Run it with `--no-env-file` (the package script does): it reads `.env` and
  * `.env.local` itself, so it knows which values `.env` holds and which come
  * from elsewhere, and writes only to `.env`.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   ArcadeAdmin,
   ArcadeError,
-  pluginBody,
-  PLUGIN_NAME,
   PROVIDER_ID,
   providerBody,
   providerDifferences,
@@ -54,7 +57,7 @@ import {
   verifierBody,
 } from "./setup-arcade/arcade.ts";
 import { fillBlanks, parseEnv, readEnvFile, writeEnvFile } from "./setup-arcade/env-file.ts";
-import { gatewayForm, nextSteps, userSourceForm } from "./setup-arcade/forms.ts";
+import { gatewayForm, hooksForm, nextSteps, userSourceForm } from "./setup-arcade/forms.ts";
 
 const USER_SOURCE_CALLBACK = "https://cloud.arcade.dev/oauth2/intermediate_callback";
 const CLIENT_KEYS = ["arcade", "arcade-user-source", "web"] as const;
@@ -204,36 +207,66 @@ const admin = new ArcadeAdmin(apiUrl, apiKey, dryRun, out);
 
 // --- Dry run: the whole sequence, nothing sent ------------------------------
 
+/** `.env` has the app's own sign-in client, so a real run leaves the `web` client's secret alone. */
+const webConfigured = effective("IDP_CLIENT_ID") !== "" && effective("IDP_CLIENT_SECRET") !== "";
 if (dryRun) {
+  // What a real run would find, read off the disk alone: a dry run sends
+  // nothing, so it cannot ask Arcade (#28). `IDP_OAUTH_REDIRECT_URIS_ARCADE`
+  // is written only from the callback Arcade returns when it creates the
+  // provider, and `idp.db` is where the clients are minted.
+  const idpDb = resolve(cwd, effective("IDP_DB_PATH") || "./idp.db");
+  const clientsOnDisk = existsSync(idpDb);
+  const callbackRecorded = effective("IDP_OAUTH_REDIRECT_URIS_ARCADE") !== "";
+  const registered = clientsOnDisk && callbackRecorded;
+
   const keys = Object.keys(planned).filter((key) => (fileEnv[key]?.trim() ?? "") === "" && !setElsewhere(key));
-  out(`\n.env${envExists ? "" : " (created from .env.example)"}: would fill ${[...keys, "IDP_CLIENT_ID", "IDP_CLIENT_SECRET"].join(", ")}`);
-  out("  and IDP_OAUTH_REDIRECT_URIS_ARCADE, with the callback Arcade generates for the provider");
-  out(`idp.db: would mint the OAuth clients ${CLIENT_KEYS.join(", ")} (a client that already exists keeps its id)`);
+  if (!webConfigured) keys.push("IDP_CLIENT_ID", "IDP_CLIENT_SECRET");
+  if (!callbackRecorded) keys.push("IDP_OAUTH_REDIRECT_URIS_ARCADE (with the callback Arcade generates for the provider)");
+  out(
+    `\n.env${envExists ? "" : " (created from .env.example)"}: ` +
+      (keys.length > 0 ? `would fill ${keys.join(", ")}` : "nothing to fill: every value is already set, and none is overwritten"),
+  );
+  if (!clientsOnDisk) {
+    out(`idp.db: would mint the OAuth clients ${CLIENT_KEYS.join(", ")}`);
+    if (callbackRecorded) {
+      out(
+        `  warning       .env records the provider's callback, but there is no ${idpDb}: a real run mints new clients, ` +
+          `and a provider Arcade still holds names the old arcade client, so the run stops at the comparison`,
+      );
+    }
+  } else {
+    const rotated = [...(registered ? [] : ["arcade (the provider is created with it)"]), ...(webConfigured ? [] : ["web (.env has no IDP_CLIENT_ID and IDP_CLIENT_SECRET)"])];
+    out(`idp.db: already holds the OAuth clients; each keeps its id, and a missing one is minted`);
+    out(rotated.length > 0 ? `  a new secret, under the same id, for ${rotated.join(" and ")}` : "  no secret is minted or rotated");
+  }
+
   out(`\nRequests, in order (${apiUrl}):`);
   const registration: Registration = {
     host,
     origin,
     arcadeClientId: "<the arcade client id in idp.db>",
-    arcadeClientSecret: "<the arcade client secret, minted by this run>",
-    hookToken: hookToken.generated ? hookToken.value : "<ARCADE_HOOK_SIGNING_SECRET from .env>",
+    arcadeClientSecret: clientsOnDisk ? "<a new secret for the arcade client, rotated by this run>" : "<the arcade client secret, minted by this run>",
     approvalsStoreToken: storeToken.generated ? storeToken.value : "<APPROVALS_STORE_TOKEN from .env>",
   };
   await admin.request("GET", `/v1/admin/auth_providers/${PROVIDER_ID}`);
-  out("    (404: the provider is created below. 200: it is compared, and a difference stops the run.)");
-  await admin.request("POST", "/v1/admin/auth_providers", providerBody(registration));
+  if (registered) {
+    out("    (expected 200: .env holds the callback Arcade made for this provider. It is compared, a difference stops");
+    out("    the run, and nothing is created. If Arcade answers 404 instead, a real run mints a new secret for the");
+    out("    arcade client and creates the provider with it.)");
+  } else {
+    out("    (404: the provider is created below. 200: it is compared, and a difference stops the run.)");
+    await admin.request("POST", "/v1/admin/auth_providers", providerBody(registration));
+  }
   for (const secret of toolSecrets(host, registration.approvalsStoreToken)) {
     const { method, path, body } = secretRequest(secret);
     await admin.request(method, path, body);
   }
-  await admin.request("GET", "/v1/plugins?limit=100");
-  out(`    (a plugin named ${PLUGIN_NAME} is PATCHed to the body below; otherwise it is created)`);
-  await admin.request("POST", "/v1/plugins", pluginBody(registration));
-  await admin.request("PATCH", "/v1/plugins/<id>", { status: "active" });
-  await admin.request("GET", "/v1/plugins/<id>");
   await admin.request("PUT", "/v1/admin/settings/session_verification", verifierBody(origin));
   await admin.request("GET", "/v1/admin/settings/session_verification");
-  out("\nThen two dashboard forms, which Arcade's API cannot fill:\n");
-  out(userSourceForm({ origin, clientId: "<the arcade-user-source client id>", clientSecret: "<its secret, minted by this run>" }));
+  out("\nThen three dashboard forms, which Arcade's API cannot fill:\n");
+  out(userSourceForm({ origin, clientId: "<the arcade-user-source client id in idp.db>", clientSecret: clientsOnDisk ? null : "<its secret, minted by this run>" }));
+  out();
+  out(hooksForm({ origin }));
   out();
   out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
   out();
@@ -291,7 +324,7 @@ const client = (key: string) => {
 };
 
 if (providerExists) {
-  const desired = providerBody({ host, origin, arcadeClientId: client("arcade").client_id, arcadeClientSecret: "", hookToken: "", approvalsStoreToken: "" });
+  const desired = providerBody({ host, origin, arcadeClientId: client("arcade").client_id, arcadeClientSecret: "", approvalsStoreToken: "" });
   const differences = providerDifferences(existingProvider.json, desired);
   if (differences.length > 0) {
     out(`\nThe provider ${PROVIDER_ID} already exists in this Arcade project, and it is not what this app needs:`);
@@ -316,7 +349,6 @@ async function secretOf(key: string, rotate: boolean): Promise<string | null> {
 // `arcade`: rotated only when the provider is about to be created with it.
 const arcadeSecret = await secretOf("arcade", !providerExists);
 // `web`: its credentials live in .env, so rotating is safe whenever .env has none.
-const webConfigured = effective("IDP_CLIENT_ID") !== "" && effective("IDP_CLIENT_SECRET") !== "";
 const webSecret = webConfigured ? null : await secretOf("web", true);
 if (webConfigured && effective("IDP_CLIENT_ID") !== client("web").client_id) {
   out(`  warning       IDP_CLIENT_ID is ${effective("IDP_CLIENT_ID")}, but idp.db's web client is ${client("web").client_id}; sign-in will fail until they match`);
@@ -335,7 +367,7 @@ if (webSecret !== null) {
 let filled = fillBlanks(envText, toWrite);
 writeEnvFile(envPath, filled.text);
 out(`\n.env${envExists ? "" : " (created from .env.example)"}:`);
-out(`  filled   ${filled.written.join(", ") || "(nothing: every value was already set)"}`);
+out(`  filled   ${filled.written.join(", ") || "(nothing to fill: every value was already set)"}`);
 if (filled.kept.length > 0) out(`  kept     ${filled.kept.join(", ")}  (already set; never overwritten)`);
 
 // --- 5. Arcade --------------------------------------------------------------
@@ -345,7 +377,6 @@ const registration: Registration = {
   origin,
   arcadeClientId: client("arcade").client_id,
   arcadeClientSecret: arcadeSecret ?? "",
-  hookToken: hookToken.value,
   approvalsStoreToken: storeToken.value,
 };
 
@@ -386,35 +417,7 @@ for (const secret of toolSecrets(host, storeToken.value)) {
   const { method, path, body } = secretRequest(secret);
   await step(`setting the tool secret ${secret.key}`, () => admin.expect(method, path, body));
 }
-
-const plugin = await step("registering the hooks", async () => {
-  const listed = await admin.expect("GET", "/v1/plugins?limit=100");
-  const found = ((listed?.items as Array<{ id: string; name: string }> | undefined) ?? []).find((each) => each.name === PLUGIN_NAME);
-  const body = pluginBody(registration);
-  const id = found
-    ? found.id
-    : String(((await admin.expect("POST", "/v1/plugins", body)) as { id?: unknown } | null)?.id ?? "");
-  if (id === "") throw new Error("POST /v1/plugins answered without an id");
-  // Created inactive (measured), and a re-run brings an existing one up to date.
-  const { name: _name, plugin_type: _type, ...patch } = body;
-  await admin.expect("PATCH", `/v1/plugins/${id}`, found ? patch : { status: "active" });
-  return (await admin.expect("GET", `/v1/plugins/${id}`)) as Record<string, unknown> | null;
-});
-{
-  const config = plugin?.webhook_config as
-    | { health_check_path?: string; endpoints?: Record<string, { url?: string }>; auth?: { token?: { exists?: boolean } } }
-    | undefined;
-  const problems = [
-    ...(plugin?.status === "active" ? [] : [`status is ${JSON.stringify(plugin?.status)}, not "active"`]),
-    ...(config?.health_check_path === "/hooks/health" ? [] : [`health_check_path is ${JSON.stringify(config?.health_check_path)}`]),
-    ...(["access", "pre", "post"] as const).flatMap((point) =>
-      config?.endpoints?.[point]?.url === `${origin}/hooks/${point}` ? [] : [`${point} is ${JSON.stringify(config?.endpoints?.[point]?.url)}`],
-    ),
-    ...(config?.auth?.token?.exists === false ? ["no bearer token is stored"] : []),
-  ];
-  if (problems.length > 0) fail(`the hook extension ${PLUGIN_NAME} read back wrong: ${problems.join("; ")}`);
-  out(`  hooks: ${origin}/hooks/{access,pre,post}, health ${"/hooks/health"}, active`);
-}
+out("  hooks: not by API, which a project key cannot reach (#28); the form below");
 
 const verifier = await step("setting the custom verifier", async () => {
   await admin.expect("PUT", "/v1/admin/settings/session_verification", verifierBody(origin));
@@ -431,8 +434,10 @@ out(`  custom verifier: ${verifier.verifier_url} (read back)`);
 
 // --- 6. What the API cannot do ----------------------------------------------
 
-out("\nTwo dashboard forms are left. Arcade's API cannot fill these:\n");
+out("\nThree dashboard forms are left. Arcade's API cannot fill these:\n");
 out(userSourceForm({ origin, clientId: client("arcade-user-source").client_id, clientSecret: userSourceSecret }));
+out();
+out(hooksForm({ origin }));
 out();
 out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
 out();
