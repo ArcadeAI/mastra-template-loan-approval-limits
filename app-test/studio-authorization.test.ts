@@ -141,21 +141,26 @@ describe("a Loan tool that needs authorizing, in Studio", () => {
     expect(shown).toContain("Authorize it in the web UI: open https://lal-tunnel.example, sign in as the same person");
   }, 60_000);
 
-  test("a hook denial is still a tool error, so the model reads it as a failed call", async () => {
+  test("a hook denial is still a tool error, and Studio draws it as the hook's own words", async () => {
     holdGatewayGrant({ access_token: harness.tokenFor(DANA), expires_at: Date.now() + 3_600_000, client_id: "studio-authorization-tests" });
     const script = scriptedModel([{ call: "Loan_ApproveLoan", input: { loan_id: OVER_LIMIT_LOAN, amount: 95_000 } }, { say: "Noted." }]);
     const agent = studioAgent({ port: 4999 });
     agent.__updateModel({ model: script.model as never });
     const streamed = await agent.stream("Approve the loan for $95K.");
-    const types: string[] = [];
+    const outcomes: Array<{ type: string; shown: string }> = [];
     for await (const chunk of streamed.fullStream as AsyncIterable<{ type: string; payload: Record<string, unknown> }>) {
       if (chunk.payload?.toolName === "Loan_ApproveLoan" && /^tool-(error|result)$/.test(chunk.type)) {
-        types.push(chunk.type);
-        // Recorded, not asserted: Studio draws every tool error this way, and a denial must stay one.
-        console.log(`[studio-authorization] the denial, as Studio draws it: ${drawn(chunk, errorText)}`);
+        outcomes.push({ type: chunk.type, shown: drawn(chunk, errorText) });
       }
     }
-    expect(types).toEqual(["tool-error"]);
-    expect(JSON.stringify(script.prompts.at(-1))).toContain("exceeds your approval authority");
+    console.log(`[studio-authorization] the denial, as Studio draws it: ${outcomes.map((each) => each.shown).join(" | ")}`);
+    // A failed call, which is how the model has to read a refusal.
+    expect(outcomes.map((each) => each.type)).toEqual(["tool-error"]);
+    const [{ shown }] = outcomes as [{ type: string; shown: string }];
+    expect(shown).toStartWith("Tool execution was denied by an extension policy: DENIED: approving LN-2291 for 95000 exceeds your approval authority of 50000.");
+    expect(shown).toMatch(/\[ref evt_[a-z0-9]+\]$/);
+    // And the model reads exactly the text it always did, as an error.
+    const read = script.prompts.at(-1)!.at(-1) as { content: Array<{ output: { type: string; value: string } }> };
+    expect(read.content[0]!.output).toEqual({ type: "error-text", value: shown });
   }, 60_000);
 });

@@ -312,11 +312,13 @@ export async function studioTools(
     );
   }
 
-  return closeTurnOnEscalation(readableAuthorization(selected.tools, webUi(config)), {
-    escalationTool: `${config.agent.approvalsToolkit}_RequestApproval`,
-    onRefused: (tool) =>
-      console.warn(`[studio] ${tool} was asked for after this turn ended on an approval request; nothing reached the gateway`),
-  }).tools;
+  return readableErrors(
+    closeTurnOnEscalation(readableAuthorization(selected.tools, webUi(config)), {
+      escalationTool: `${config.agent.approvalsToolkit}_RequestApproval`,
+      onRefused: (tool) =>
+        console.warn(`[studio] ${tool} was asked for after this turn ended on an approval request; nothing reached the gateway`),
+    }).tools,
+  );
 }
 
 /**
@@ -369,6 +371,50 @@ function readableAuthorization(tools: Record<string, unknown>, webUiOrigin: stri
         // result, which would otherwise reach the model as `{}`.
         const challenge = challengeIn(result, isEmpty(result) ? elicitedDuringCall() : []);
         return challenge === null ? result : authorizationText(name, challenge.url, webUiOrigin);
+      },
+    };
+  }
+  return wrapped;
+}
+
+/**
+ * The one `cause` code Studio's page reads a tool error's text from (#30).
+ *
+ * Mastra hands Studio a tool error as a plain `Error` whose `message` is not
+ * enumerable, so it does not survive the JSON Studio's server streams, and the
+ * page falls back to `String(error)`: `[object Object]`, for the act-2 denial
+ * as for everything else. Its one other branch reads `cause.message` when
+ * `cause.code` is this code, which Mastra uses for a sub-agent's failed tool
+ * call. Mastra reads the code in one other place, to find a sub-agent thread
+ * in `details`, and this error has no `details`. Studio 1.31's renderer,
+ * quoted from the bundle by `app-test/studio-authorization.test.ts`.
+ */
+const STUDIO_READABLE_CAUSE = "AGENT_AGENT_TOOL_EXECUTION_FAILED";
+
+/**
+ * Every tool failure in Studio, rethrown so Studio draws its text. Still a
+ * throw, so Mastra still reports a failed call and the model reads the same
+ * text it always did: a hook denial stays a denial.
+ */
+function readableErrors(tools: Record<string, unknown>): Record<string, unknown> {
+  const wrapped: Record<string, unknown> = {};
+  for (const [name, tool] of Object.entries(tools)) {
+    const execute = (tool as { execute?: (...args: unknown[]) => unknown }).execute;
+    if (typeof execute !== "function") {
+      wrapped[name] = tool;
+      continue;
+    }
+    const call = execute.bind(tool);
+    wrapped[name] = {
+      ...(tool as object),
+      async execute(...args: unknown[]) {
+        try {
+          return await call(...args);
+        } catch (failure) {
+          // The same text Mastra would have handed the model: the failure's own message.
+          const text = messagesOf(failure)[0] ?? String(failure);
+          throw Object.assign(new Error(text, { cause: failure }), { code: STUDIO_READABLE_CAUSE });
+        }
       },
     };
   }
