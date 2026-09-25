@@ -1,7 +1,8 @@
 /**
  * The three registrations `bun run setup-arcade` cannot make by API, printed as
  * one paste-ready block per dashboard form (#9, #28), in the order they are
- * filled in.
+ * filled in (#30): the User Source, the gateway that authenticates through it,
+ * then the hooks.
  *
  * - **The User Source** (hop 1). Arcade's API reference has no User Source
  *   endpoint at all. The fields are the ones docs.arcade.dev lists under
@@ -128,22 +129,25 @@ export interface NextSteps {
 
 /**
  * What is left once the run has registered everything it can, in the README
- * Quickstart's order (steps 5 to 7), which `app-test/setup-arcade.test.ts`
+ * Quickstart's order (steps 5 to 8), which `app-test/setup-arcade.test.ts`
  * pins against the README itself (#11). The order is not a preference:
  * Arcade reads the User Source's issuer from the app, and checks the hooks'
- * `/hooks/health`, so the app and the tunnel are up before either form (#28),
- * and the gateway form lists the toolkits' tools only once `arcade deploy` has
- * run, so the deploys come before it.
+ * `/hooks/health`, so the app and the tunnel are up before either form (#28).
+ * The gateway form lists the toolkits' tools only once `arcade deploy` has
+ * run, and on the third live run the tester reached it before deploying, so
+ * the deploys are their own step, straight after the tunnel (#30). The gateway
+ * authenticates through the User Source, so that form comes first, and the
+ * hooks form last.
  */
 export function nextSteps({ host, origin, port }: NextSteps): string {
   return [
     "Then:",
     "  1. Start `bun run dev` (or restart it, if it is already running), so the app reads the new .env.",
     `  2. Start the tunnel: ngrok http --url=${host} ${port}`,
-    "  3. With the app reachable through the tunnel, fill in the User Source form above.",
-    "  4. Fill in the contextual access hooks form above. Arcade checks /hooks/health through the tunnel.",
-    "  5. Deploy the toolkits (their secrets are set above): arcade deploy, in tools/loan and in tools/approvals.",
-    "  6. Fill in the gateway form above. The toolkits' tools are listed there once both deploys have run.",
+    "  3. Deploy both toolkits (their secrets are set above): arcade deploy, in tools/loan and in tools/approvals.",
+    "  4. With the app reachable through the tunnel, fill in the User Source form above.",
+    "  5. Fill in the gateway form above. It authenticates through the User Source from step 4, and lists the toolkits' tools because step 3 deployed them.",
+    "  6. Fill in the contextual access hooks form above. Arcade checks /hooks/health through the tunnel.",
     `  7. Open ${origin}, never localhost, and sign in.`,
   ].join("\n");
 }

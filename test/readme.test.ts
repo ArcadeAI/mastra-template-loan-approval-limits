@@ -167,18 +167,21 @@ function boldTitles(markdown: string): number[] {
 
 /**
  * The Quickstart's remaining steps, from starting the app, in a working order
- * (#28): the User Source reads its issuer and the hooks answer their health
- * check through the tunnel, so both forms come after it, and the gateway form
- * lists the toolkits' tools only once both are deployed. `setup-arcade`'s
- * "Then:" list is held to the same order in `app-test/setup-arcade.test.ts`.
+ * (#28, #30): the User Source reads its issuer and the hooks answer their
+ * health check through the tunnel, so the forms come after it. The deploys are
+ * their own step before any form, because the gateway form lists the
+ * toolkits' tools only once both are deployed, and the gateway form comes
+ * straight after the User Source it authenticates through, ahead of the hooks.
+ * `setup-arcade`'s "Then:" list is held to the same order in
+ * `app-test/setup-arcade.test.ts`.
  */
 const QUICKSTART_ORDER: Array<[string, RegExp]> = [
   ["start the app", /Run `bun run dev`/],
   ["start the tunnel", /`ngrok http --url=/],
+  ["deploy both toolkits", /run `arcade deploy`/i],
   ["the User Source form", /fill in the User Source form/i],
-  ["the hooks form", /fill in the contextual access hooks form/i],
-  ["deploy both toolkits", /run `arcade deploy`/],
   ["the gateway form", /fill in the gateway form/i],
+  ["the hooks form", /fill in the contextual access hooks form/i],
   ["open the app", /Open `https:\/\/<APP_PUBLIC_HOST>`/],
 ];
 
@@ -231,7 +234,7 @@ describe("README.md follows Mastra's outline", () => {
     expect(quickstart).not.toContain("git clone");
   });
 
-  test("the Quickstart's last steps run in a working order: tunnel, User Source, hooks, deploys, gateway", () => {
+  test("the Quickstart's last steps run in a working order: tunnel, deploys, User Source, gateway, hooks", () => {
     expect(quickstartOrder(README)).toEqual(QUICKSTART_ORDER.map(([name]) => name));
   });
 
@@ -333,6 +336,18 @@ describe("each check bites on a planted violation", () => {
     expect(quickstartOrder(withoutIt)).toEqual(["missing: the hooks form"]);
     lines.splice(lines.findIndex((line) => /`ngrok http --url=/.test(line)), 0, moved!);
     expect(quickstartOrder(lines.join("\n"))).not.toEqual(QUICKSTART_ORDER.map(([name]) => name));
+  });
+
+  test("a Quickstart in run 3's order: the hooks form before the gateway form, the deploys after the User Source (#30)", () => {
+    const order = QUICKSTART_ORDER.map(([name]) => name);
+    const hooksFirst = README.split("\n");
+    const [gateway] = hooksFirst.splice(hooksFirst.findIndex((line) => /fill in the gateway form/i.test(line)), 1);
+    hooksFirst.splice(hooksFirst.findIndex((line) => /fill in the contextual access hooks form/i.test(line)) + 1, 0, gateway!);
+    expect(quickstartOrder(hooksFirst.join("\n"))).not.toEqual(order);
+    const deployLate = README.split("\n");
+    const [deploy] = deployLate.splice(deployLate.findIndex((line) => /run `arcade deploy`/i.test(line)), 1);
+    deployLate.splice(deployLate.findIndex((line) => /fill in the User Source form/i.test(line)) + 1, 0, deploy!);
+    expect(quickstartOrder(deployLate.join("\n"))).not.toEqual(order);
   });
 
   test("a URL nobody verified", () => {

@@ -266,7 +266,7 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   expect(run.stdout).toMatch(/kept\s+SESSION_SECRET/);
 
   // The three forms the API cannot fill, in the order they are filled in.
-  expect(formOrder(run.stdout)).toEqual(["User Source", "hooks", "gateway"]);
+  expect(formOrder(run.stdout)).toEqual(["User Source", "gateway", "hooks"]);
   expect(run.stdout).toContain("User Sources → Create User Source");
   expect(run.stdout).toContain(`Issuer URL      ${ORIGIN}`);
   expect(run.stdout).toContain(`Client ID       ${clients["arcade-user-source"]!.clientId}`);
@@ -316,16 +316,20 @@ function formOrder(stdout: string): string[] {
  * What is left after the run, in the order the README's Quickstart gives it
  * (#11). Until #11 the printed list put `arcade deploy` after the forms, while
  * its own gateway form says the tools are listed only once the deploys have
- * run. Both texts are read here, so the list cannot drift from the README, or
- * the README from the list, without this failing.
+ * run. Since #30 the deploys come straight after the tunnel, as their own
+ * step, and the gateway form comes before the hooks form: the live tester
+ * reached the gateway form before anything was deployed, and it listed no
+ * tools. The gateway still needs the User Source, so that form stays first.
+ * Both texts are read here, so the list cannot drift from the README, or the
+ * README from the list, without this failing.
  */
 const NEXT_STEPS: Array<[string, RegExp]> = [
   ["start the app", /`bun run dev`/],
   ["start the tunnel", /ngrok http --url=/],
-  ["the User Source form", /fill in the User Source form/i],
-  ["the hooks form", /fill in the contextual access hooks form/i],
   ["deploy both toolkits", /arcade deploy/],
+  ["the User Source form", /fill in the User Source form/i],
   ["the gateway form", /fill in the gateway form/i],
+  ["the hooks form", /fill in the contextual access hooks form/i],
   ["open the app", /open `?https:\/\//i],
 ];
 
@@ -360,7 +364,9 @@ test("the steps it prints after the forms are the README's, in the README's orde
   startsTheApp(printed);
 
   // The check bites: the pre-#11 order, deploy after the forms, fails it,
-  // and so does the hooks form ahead of the tunnel its health check needs (#28).
+  // and so does the hooks form ahead of the tunnel its health check needs (#28),
+  // and so does run 3's order, the deploys after the User Source form and the
+  // hooks form ahead of the gateway form (#30).
   const lines = printed.split("\n");
   const deploy = lines.findIndex((line) => line.includes("arcade deploy"));
   const [moved] = lines.splice(deploy, 1);
@@ -370,6 +376,14 @@ test("the steps it prints after the forms are the README's, in the README's orde
   const [hooks] = early.splice(early.findIndex((line) => /contextual access hooks form/i.test(line)), 1);
   early.splice(early.findIndex((line) => /ngrok http/.test(line)), 0, hooks!);
   expect(stepOrder(early.join("\n"))).not.toEqual(order);
+  const run3 = printed.split("\n");
+  const [deployed] = run3.splice(run3.findIndex((line) => line.includes("arcade deploy")), 1);
+  run3.splice(run3.findIndex((line) => /User Source form/i.test(line)) + 1, 0, deployed!);
+  expect(stepOrder(run3.join("\n"))).not.toEqual(order);
+  const hooksFirst = printed.split("\n");
+  const [gateway] = hooksFirst.splice(hooksFirst.findIndex((line) => /gateway form/i.test(line)), 1);
+  hooksFirst.splice(hooksFirst.findIndex((line) => /contextual access hooks form/i.test(line)) + 1, 0, gateway!);
+  expect(stepOrder(hooksFirst.join("\n"))).not.toEqual(order);
 }, 60_000);
 
 test("a dry run ends with the same steps", async () => {
@@ -428,7 +442,7 @@ test("--dry-run from a fresh project prints the requests a real run makes, in or
   expect(run.stdout).toMatch(/would fill .*\bBETTER_AUTH_SECRET\b/);
   expect(run.stdout).not.toContain(KEY);
   hooksFormIsComplete(run.stdout);
-  expect(formOrder(run.stdout)).toEqual(["User Source", "hooks", "gateway"]);
+  expect(formOrder(run.stdout)).toEqual(["User Source", "gateway", "hooks"]);
 });
 
 test("it never creates a gateway and never names Arcade Headers mode, in a real run or a dry one", async () => {
@@ -755,7 +769,7 @@ test("from the live project's state after run 2, the dry run tells the truth and
   expect(dry.stdout).toContain("(expected 200: .env holds the callback Arcade made for this provider.");
   expect(dry.stdout).toContain("If Arcade answers 404 instead, a real run mints a new secret for the");
   expect(dry.stdout).toContain("Client Secret   (unchanged, and not shown");
-  expect(formOrder(dry.stdout)).toEqual(["User Source", "hooks", "gateway"]);
+  expect(formOrder(dry.stdout)).toEqual(["User Source", "gateway", "hooks"]);
   // The check bites: the fresh project's dry run says every one of them.
   const fresh = await setupArcade(project("resume-run-2-fresh"), "--dry-run");
   for (const phrase of FRESH_ONLY) expect(fresh.stdout).toContain(phrase);
@@ -787,8 +801,8 @@ test("from the live project's state after run 2, the dry run tells the truth and
     at("PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN → 200"),
     at(`custom verifier: ${ORIGIN}/api/arcade/verify (read back)`),
     at("┌─ Arcade dashboard → your project → User Sources"),
-    at("┌─ Contextual access hooks"),
     at("┌─ Arcade dashboard → your project → MCP Gateways"),
+    at("┌─ Contextual access hooks"),
     at("Then:"),
   ];
   expect([...marks].sort((a, b) => a - b)).toEqual(marks);

@@ -21,10 +21,10 @@
  *    and `APPROVALS_STORE_TOKEN`, and the custom verifier, which it reads back.
  *    No plugins or hooks route (#28): real Arcade has no `/v1/plugins`.
  * 6. **Prints** the three dashboard forms the API cannot fill, the User Source,
- *    the contextual access hooks and the gateway, and what is left, in the
- *    README Quickstart's order: start the app, start the tunnel, fill in the
- *    User Source form, fill in the hooks form, `arcade deploy` both toolkits,
- *    fill in the gateway form, open the app.
+ *    the gateway and the contextual access hooks, and what is left, in the
+ *    README Quickstart's order (#30): start the app, start the tunnel,
+ *    `arcade deploy` both toolkits, fill in the User Source form, the gateway
+ *    form and the hooks form, open the app.
  *
  * `--dry-run` writes nothing and sends nothing: it prints every request a real
  * run would make from the state on disk, in order, with the key and every
@@ -266,9 +266,9 @@ if (dryRun) {
   out("\nThen three dashboard forms, which Arcade's API cannot fill:\n");
   out(userSourceForm({ origin, clientId: "<the arcade-user-source client id in idp.db>", clientSecret: clientsOnDisk ? null : "<its secret, minted by this run>" }));
   out();
-  out(hooksForm({ origin }));
-  out();
   out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
+  out();
+  out(hooksForm({ origin }));
   out();
   out(nextSteps({ host, origin, port: effective("PORT") || "3000" }));
   process.exit(0);
@@ -437,8 +437,8 @@ out(`  custom verifier: ${verifier.verifier_url} (read back)`);
 out("\nThree dashboard forms are left. Arcade's API cannot fill these:\n");
 out(userSourceForm({ origin, clientId: client("arcade-user-source").client_id, clientSecret: userSourceSecret }));
 out();
-out(hooksForm({ origin }));
-out();
 out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
+out();
+out(hooksForm({ origin }));
 out();
 out(nextSteps({ host, origin, port: effective("PORT") || "3000" }));
