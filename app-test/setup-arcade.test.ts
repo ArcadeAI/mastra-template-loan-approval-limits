@@ -272,6 +272,65 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   expect(`${run.stdout}${run.stderr}`).not.toContain(KEY);
 }, 60_000);
 
+/**
+ * What is left after the run, in the order the README's Quickstart gives it
+ * (#11). Until #11 the printed list put `arcade deploy` after the forms, while
+ * its own gateway form says the tools are listed only once the deploys have
+ * run. Both texts are read here, so the list cannot drift from the README, or
+ * the README from the list, without this failing.
+ */
+const NEXT_STEPS: Array<[string, RegExp]> = [
+  ["restart the app", /`bun run dev`/],
+  ["start the tunnel", /ngrok http --url=/],
+  ["the User Source form", /fill in the User Source form/i],
+  ["deploy both toolkits", /arcade deploy/],
+  ["the gateway form", /fill in the gateway form/i],
+  ["open the app", /open `?https:\/\//i],
+];
+
+/** The step names in the order the text first mentions them, or the ones it never does. */
+function stepOrder(text: string): string[] {
+  const found = NEXT_STEPS.map(([name, pattern]) => ({ name, at: text.search(pattern) }));
+  const missing = found.filter(({ at }) => at === -1).map(({ name }) => `missing: ${name}`);
+  if (missing.length > 0) return missing;
+  return found.sort((a, b) => a.at - b.at).map(({ name }) => name);
+}
+
+/** From the Quickstart step that starts the app to the end of the Quickstart. */
+function readmeRemainder(): string {
+  const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+  const start = readme.indexOf("5. **Start the app");
+  const end = readme.indexOf("\n## ", start);
+  if (start === -1 || end === -1) throw new Error("README.md's Quickstart has no step 5 to read from");
+  return readme.slice(start, end);
+}
+
+test("the steps it prints after the forms are the README's, in the README's order", async () => {
+  const run = await setupArcade(project("next-steps"));
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  const printed = run.stdout.slice(run.stdout.lastIndexOf("Then:"));
+  expect(printed.startsWith("Then:")).toBe(true);
+
+  const order = NEXT_STEPS.map(([name]) => name);
+  expect(stepOrder(printed)).toEqual(order);
+  expect(stepOrder(readmeRemainder())).toEqual(order);
+  expect(printed).toContain(`ngrok http --url=${HOST} `);
+  expect(printed).toContain(`Open ${ORIGIN}, never localhost`);
+
+  // The check bites: the pre-#11 order, deploy after both forms, fails it.
+  const lines = printed.split("\n");
+  const deploy = lines.findIndex((line) => line.includes("arcade deploy"));
+  const [moved] = lines.splice(deploy, 1);
+  lines.splice(lines.findIndex((line) => /gateway form/i.test(line)) + 1, 0, moved!);
+  expect(stepOrder(lines.join("\n"))).not.toEqual(order);
+}, 60_000);
+
+test("a dry run ends with the same steps", async () => {
+  const run = await setupArcade(project("next-steps-dry"), "--dry-run");
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  expect(stepOrder(run.stdout.slice(run.stdout.lastIndexOf("Then:")))).toEqual(NEXT_STEPS.map(([name]) => name));
+});
+
 test("--dry-run prints the same requests a real run makes, in order, and writes and sends nothing", async () => {
   const dir = project("dry");
   const before = readFileSync(join(dir, ".env"), "utf8");

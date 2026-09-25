@@ -63,3 +63,29 @@ export function gatewayForm({ slug, loanToolkit, approvalsToolkit }: GatewayForm
     "└─",
   ].join("\n");
 }
+
+export interface NextSteps {
+  host: string;
+  origin: string;
+  port: string;
+}
+
+/**
+ * What is left once the run has registered everything it can, in the README
+ * Quickstart's order (steps 5 to 7), which `app-test/setup-arcade.test.ts`
+ * pins against the README itself (#11). The order is not a preference:
+ * Arcade reads the User Source's issuer from the app, so the app and the
+ * tunnel are up before that form, and the gateway form lists the toolkits'
+ * tools only once `arcade deploy` has run, so the deploys come before it.
+ */
+export function nextSteps({ host, origin, port }: NextSteps): string {
+  return [
+    "Then:",
+    "  1. Restart `bun run dev`, so the app reads the new .env.",
+    `  2. Start the tunnel: ngrok http --url=${host} ${port}`,
+    "  3. With the app reachable through the tunnel, fill in the User Source form above.",
+    "  4. Deploy the toolkits (their secrets are set above): arcade deploy, in tools/loan and in tools/approvals.",
+    "  5. Fill in the gateway form above. The toolkits' tools are listed there once both deploys have run.",
+    `  6. Open ${origin}, never localhost, and sign in.`,
+  ].join("\n");
+}
