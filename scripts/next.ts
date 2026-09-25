@@ -34,6 +34,8 @@
  * Production does not run this. The root `Dockerfile` serves the standalone
  * build with `bun server.js`, which reads `process.env.PORT` itself.
  */
+import { listenersOn, portTakenMessage } from "./port-in-use.ts";
+
 const args = process.argv.slice(2);
 
 if (args.length === 0) {
@@ -47,6 +49,22 @@ if (args.length === 0) {
 // printed below would be wrong. Named explicitly, a taken port is an error.
 if (!process.env.PORT?.trim()) process.env.PORT = "3000";
 
+// And a port something else already answers on is an error too, checked here
+// because Next's own check misses half of it (#30). Next binds the wildcard,
+// which succeeds beside a listener on one loopback address, so on the third
+// live run Next started on 3000 while `astro dev` held `[::1]:3000`, and the
+// tunnel reached Astro. `scripts/port-in-use.ts` asks both loopback addresses.
+if (args[0] === "dev" || args[0] === "start") {
+  const port = Number(portArgument(args) ?? process.env.PORT);
+  if (Number.isInteger(port) && port > 0) {
+    const held = await listenersOn(port);
+    if (held.length > 0) {
+      console.error(`[next.ts] ${portTakenMessage(port, held)}`);
+      process.exit(1);
+    }
+  }
+}
+
 // The URL to open, before Next's own banner (#9). With APP_PUBLIC_HOST set it
 // is the tunnel, never localhost: the sessions and the verifier live there.
 // Advisory, so a launcher copied away from `lib/` (app-test/dev-port.test.ts
@@ -59,6 +77,15 @@ if (args[0] === "dev" || args[0] === "start") {
   } catch (error) {
     console.error(`[next.ts] could not work out the URL to open: ${(error as Error).message}`);
   }
+}
+
+/** A `--port`/`-p` passed through to Next, which wins over `PORT` there too. */
+function portArgument(argv: readonly string[]): string | undefined {
+  for (const [index, arg] of argv.entries()) {
+    if (arg === "--port" || arg === "-p") return argv[index + 1];
+    if (arg.startsWith("--port=")) return arg.slice("--port=".length);
+  }
+  return undefined;
 }
 
 // `bun run next` rather than the bin path: it resolves `node_modules/.bin`

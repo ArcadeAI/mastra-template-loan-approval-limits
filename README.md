@@ -135,7 +135,7 @@ The toolkits have their own READMEs: [`tools/loan`](./tools/loan/README.md) and 
 - **Open the app on its public host.** With `APP_PUBLIC_HOST` set, the home page shows an amber banner when it is served on any other host, such as localhost.
 - **`BETTER_AUTH_SECRET` is written by `setup-arcade`.** Blank, the app uses a published development secret, and only on localhost: with `APP_PUBLIC_HOST` set to anything else, identity refuses to start (no sign-in, no approval, no hop-2 exchange) and `/health` says why under `identity`. A plain localhost run with nothing set still works on the development secret.
 - **Changing `BETTER_AUTH_SECRET` is a rotation.** An `idp.db` whose signing key the configured secret cannot open is refused at boot and never re-keyed silently. The fix it names is to delete the local `idp.db`, then run `bun run setup-arcade` again before registering anything, because the OAuth clients change with it.
-- **The port.** `bun run dev` always passes a port to Next, `PORT` or 3000, so a taken port is an error rather than a silent move to 3001 that the tunnel would not follow. Studio binds `STUDIO_PORT`, default 4111.
+- **The port.** `bun run dev` always passes a port to Next, `PORT` or 3000, so a taken port is an error rather than a silent move to 3001 that the tunnel would not follow. Before starting Next it also checks `127.0.0.1` and `::1`, and refuses a port that anything answers on at either, because Next itself would start beside a listener on only one of them. Studio binds `STUDIO_PORT`, default 4111.
 - **Never drive the demo from an Arcade Org Admin account.** An admin's tool list is the whole org catalogue: measured at 8259 tools, all correctly denied, and a 1.6 MB `/hooks/access` payload.
 
 ## Resetting the demo
