@@ -46,6 +46,8 @@
  * runs cannot drift apart. That is the whole reason this is a module with a
  * `main` rather than a script.
  */
+import { resolveStandInPort } from "./gateway-stand-in.ts";
+
 /**
  * The two bearers the stand-in needs, and the development values it falls back
  * to — the same ones the control plane falls back to outside production, so a
@@ -63,7 +65,7 @@ export interface ArcadeStandInOptions {
   hookSigningSecret: string;
   /** What the four `/approvals` endpoints require. */
   approvalsStoreToken: string;
-  /** `0` lets the OS pick, which is what tests and an unset `PORT` want. */
+  /** `0` lets the OS pick, which is what tests and an unset `ARCADE_API_URL` want. */
   port?: number;
   /** Every execution attempt, in order. The suite asserts on this. */
   onExecute?: (call: { user_id: string; tool: string }) => void;
@@ -187,13 +189,20 @@ export function createArcadeStandIn(options: ArcadeStandInOptions) {
 
 if (import.meta.main) {
   const env = process.env;
-  // Never a hard-coded port. `PORT` if it is set, otherwise :0 and print what
-  // the OS gave us — this worktree owns a block of ten ports and another one
-  // owns a different block, so nothing here may pick a number.
-  const port = env.PORT === undefined || env.PORT.trim() === "" ? 0 : Number(env.PORT);
-  if (!Number.isInteger(port) || port < 0) {
-    console.error(`[arcade-stand-in] PORT="${env.PORT}" is not a port number`);
-    process.exit(1);
+  // Never a hard-coded port, and never `PORT` (#22). `bun run arcade-stand-in`
+  // runs from the root, so Bun loads the root `.env.local` into it, and `PORT`
+  // there is the app's: next to a running `bun run dev` this used to fail with
+  // `EADDRINUSE` on the app's own port. The port comes from `ARCADE_API_URL`,
+  // the address the app is told to reach Arcade at, exactly as
+  // `gateway-stand-in` takes it; unset is :0, and the banner prints what the OS
+  // gave us. `app-test/arcade-stand-in.test.ts` fails if it goes back to `PORT`.
+  let port: number;
+  try {
+    port = resolveStandInPort(env);
+  } catch (cause) {
+    console.error(`[arcade-stand-in] ${cause instanceof Error ? cause.message : String(cause)}`);
+    // 78 is sysexits' EX_CONFIG, as in `gateway-stand-in` and `scripts/dev-idp.ts`.
+    process.exit(78);
   }
 
   const hooksHost = env.APP_PUBLIC_HOST?.trim() || "localhost:3000";
