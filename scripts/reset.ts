@@ -1,9 +1,8 @@
 /**
  * `bun run reset` — the demo back to the seeded state, in seconds.
  *
- *     bun run reset                 # between takes: the loan book and the control plane
- *     bun run reset --hard          # ...and the IdP, which signs every persona out
- *     bun run reset --target render # either of the above, against the deployed ones
+ *     bun run reset          # between takes: the loan book and the control plane
+ *     bun run reset --hard   # ...and the IdP, which signs every persona out
  *
  * Three databases, three modules of the one app — but **not on every run**:
  *
@@ -18,8 +17,9 @@
  *                                         consents — `--hard` only
  *                                         (`apps/idp` until #6)
  *
- * All three at one address since #6: `APP_PUBLIC_HOST`, or
- * `RENDER_APP_PUBLIC_HOST` with `--target render`.
+ * All three at one address since #6: `APP_PUBLIC_HOST`. To reset a deployment
+ * rather than this checkout's app, run the command with that deployment's
+ * `APP_PUBLIC_HOST` and `RESET_TOKEN` in its environment.
  *
  * ## Why the IdP is not in the default run (#123)
  *
@@ -54,20 +54,21 @@
  * ## Why HTTP and not a shell
  *
  * Each service seeds from the fixture compiled into **its own running image**.
- * A `sqlite3` session in a Render shell cannot promise that: on 2026-09-14 two
- * of three manual reseeds were attached to a rolled-back instance and wrote
+ * A `sqlite3` session in a shell on the host cannot promise that: on 2026-09-14,
+ * on the stage demo's deployment, two of three manual reseeds were attached to a
+ * rolled-back instance and wrote
  * the old rows back, so the next deploy failed closed again (#106). The
  * endpoint is served by the process that is actually answering requests, which
  * is the only thing that can make the promise.
  *
- * It also means this command needs no SSH, no Render shell and no `sqlite3` —
- * just one bearer and three addresses.
+ * It also means this command needs no SSH, no shell on the host and no
+ * `sqlite3`: just one bearer and one address.
  *
  * ## Two things this is not
  *
- * **A redeploy is not a reset.** All three databases sit on Render disks and
- * seed only when empty (#29), so a redeploy carries every stage edit and every
- * approval forward. This command is the only way back.
+ * **A redeploy is not a reset.** All three databases sit on a persistent disk
+ * and seed only when empty (#29), so a redeploy carries every stage edit and
+ * every approval forward. This command is the only way back.
  *
  * **A reset is not a re-registration.** `idp.db` holds the OAuth client id and
  * secret that were typed into the Arcade dashboard by hand. Nothing here
@@ -79,30 +80,24 @@
  *
  * ## Addresses
  *
- * HOST-form, and read from the environment, never derived. `onrender.com`
- * subdomains are global and Render silently suffixes a name that is taken —
- * `cg-web` is `cg-web-sa31`, and the bare subdomain belongs to a stranger — so
- * a guessed hostname is somebody else's deployment. `--target local` reads the
- * three `*_PUBLIC_HOST` variables this checkout's `.env.local` already
- * carries; `--target render` reads their `RENDER_`-prefixed twins, which a
- * human copies off the Render dashboard once. Scheme is added here: `http` for
+ * HOST-form, and read from the environment, never derived: a guessed hostname
+ * is somebody else's deployment. The one variable is `APP_PUBLIC_HOST`, which
+ * this checkout's `.env` already carries. Scheme is added here: `http` for
  * loopback, `https` for everything else.
+ *
+ * There is no `--target`. It chose between this checkout and the stage demo's
+ * hosted deployment until #11, and it is refused by name rather than ignored:
+ * a presenter who typed it expects some other environment to be reset, and
+ * quietly resetting this one instead is the half-reset believed clean.
  */
 import { assertPublicHost, PublicHostError } from "../lib/control-plane/public-host.ts";
 
 /** sysexits: the environment is wrong, not the invocation. */
 const EX_CONFIG = 78;
 
-const TARGETS = ["local", "render"] as const;
-type Target = (typeof TARGETS)[number];
-
 interface ServiceSpec {
   /** What the output calls it. */
   label: string;
-  /** The Render service name, for a human comparing this against a dashboard. */
-  render: string;
-  /** The environment variable holding its address, per target. */
-  hostVar: Record<Target, string>;
   body?: unknown;
   /**
    * Its reset endpoint: `/hooks/admin/reset` for the control plane since #4,
@@ -114,7 +109,7 @@ interface ServiceSpec {
 }
 
 /** The one address every module is reset at, since #6 made them one app. */
-const APP_HOST: Record<Target, string> = { local: "APP_PUBLIC_HOST", render: "RENDER_APP_PUBLIC_HOST" };
+const APP_HOST = "APP_PUBLIC_HOST";
 
 /**
  * Identity first when it runs at all. It is the only one whose failure means
@@ -123,8 +118,6 @@ const APP_HOST: Record<Target, string> = { local: "APP_PUBLIC_HOST", render: "RE
  */
 const IDP: ServiceSpec = {
   label: "idp",
-  render: "cg-web",
-  hostVar: APP_HOST,
   resetPath: "/identity/admin/reset",
 };
 
@@ -140,8 +133,6 @@ const BETWEEN_TAKES: ServiceSpec[] = [
   // command exists to replace.
   {
     label: "hooks",
-    render: "cg-web",
-    hostVar: APP_HOST,
     body: { mode: "demo" },
     resetPath: "/hooks/admin/reset",
   },
@@ -150,8 +141,6 @@ const BETWEEN_TAKES: ServiceSpec[] = [
   // output.
   {
     label: "loan-app",
-    render: "cg-web",
-    hostVar: APP_HOST,
     resetPath: "/bank/admin/reset",
   },
 ];
@@ -203,7 +192,6 @@ export function originFor(host: string): string {
 }
 
 export interface ResetOptions {
-  target: Target;
   /**
    * Reset `apps/idp` as well. Off by default — see the note at the top of this
    * file on why a between-takes reset must not touch identity.
@@ -243,16 +231,15 @@ function requireToken(env: Record<string, string | undefined>): string {
   );
 }
 
-function requireHost(spec: ServiceSpec, options: ResetOptions): string {
-  const name = spec.hostVar[options.target];
+function requireHost(options: ResetOptions): string {
+  const name = APP_HOST;
   const host = options.env[name]?.trim() ?? "";
   if (host.length === 0) {
     throw new ResetConfigError(
-      `${name} is unset, so there is no address for ${spec.render}. Read the host off that ` +
-        "service's page in the Render dashboard (the host part of the URL shown there) and set " +
-        "it by hand. Never derive or guess it: onrender.com subdomains are global, so Render " +
-        "silently suffixes a name that is taken — cg-web is cg-web-sa31 and cg-idp is " +
-        "cg-idp-or5b, and the bare subdomains belong to strangers.",
+      `${name} is unset, so there is no address for the app. Set it to the host the app is ` +
+        "served on, host part only and no scheme: the ngrok domain for this checkout, or the " +
+        "deployment's own host. Never derive or guess it: a guessed hostname is somebody " +
+        "else's deployment.",
     );
   }
   try {
@@ -290,7 +277,7 @@ async function resetOne(
   options: Required<Pick<ResetOptions, "fetch" | "timeoutMs">> & ResetOptions,
   token: string,
 ): Promise<ServiceOutcome> {
-  const host = requireHost(spec, options);
+  const host = requireHost(options);
   const origin = originFor(host);
   const label = spec.label.padEnd(8);
 
@@ -432,8 +419,8 @@ export async function runReset(options: ResetOptions): Promise<ResetOutcome> {
   // IDENTITY_HOST would refuse to put the loan book back because of a
   // variable it was never going to read.
   log(
-    `[reset] target ${options.target}, scope ${hard ? "hard (includes the IdP)" : "between-takes"} — ` +
-      specs.map((spec) => `${spec.render} ${requireHost(spec, resolved)}`).join(", "),
+    `[reset] ${APP_HOST} ${requireHost(resolved)}, scope ${hard ? "hard (includes the IdP)" : "between-takes"} — ` +
+      specs.map((spec) => spec.label).join(", "),
   );
 
   const started = performance.now();
@@ -461,12 +448,13 @@ export async function runReset(options: ResetOptions): Promise<ResetOutcome> {
   return { ok, hard, services };
 }
 
-export function parseTarget(argv: string[]): Target {
-  const at = argv.indexOf("--target");
-  if (at === -1) return "local";
-  const value = argv[at + 1];
-  if (value !== undefined && (TARGETS as readonly string[]).includes(value)) return value as Target;
-  throw new ResetConfigError(`--target must be one of ${TARGETS.join(", ")} (got ${String(value)})`);
+/** `--target` is gone, and refused rather than ignored (see "Addresses" above). */
+export function refuseTarget(argv: string[]): void {
+  if (!argv.some((arg) => arg === "--target" || arg.startsWith("--target="))) return;
+  throw new ResetConfigError(
+    `--target is not an option any more. The reset runs against ${APP_HOST}; to reset a ` +
+      `deployment, run it with that deployment's ${APP_HOST} and RESET_TOKEN in the environment.`,
+  );
 }
 
 /**
@@ -495,8 +483,8 @@ export function parseHard(argv: string[]): boolean {
 if (import.meta.main) {
   try {
     const argv = Bun.argv.slice(2);
+    refuseTarget(argv);
     const outcome = await runReset({
-      target: parseTarget(argv),
       hard: parseHard(argv),
       env: process.env,
     });

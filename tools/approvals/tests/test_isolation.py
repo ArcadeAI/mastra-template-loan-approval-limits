@@ -75,17 +75,21 @@ class TestNothingReachesIn:
         manifest = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
         assert not any("tools" in pattern for pattern in manifest["workspaces"])
 
-    def test_it_is_not_a_render_service(self) -> None:
-        # It ships with `arcade deploy`; a blueprint entry would make deleting
-        # the directory a failed sync.
-        blueprint = (REPO_ROOT / "render.yaml").read_text(encoding="utf-8")
-        # Comments in the blueprint say why it is absent; those are the point.
-        declarations = [
-            line
-            for line in blueprint.splitlines()
-            if "tools/approvals" in line and not line.lstrip().startswith("#")
+    def test_it_is_not_in_the_app_image(self) -> None:
+        # It ships with `arcade deploy`, not in the app's container; an image
+        # that copied it would make deleting the directory a failed build.
+        ignored = [
+            line.strip()
+            for line in (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
         ]
-        assert declarations == [], declarations
+        assert "tools" in ignored, ignored
+        copies = [
+            line
+            for line in (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8").splitlines()
+            if re.match(r"\s*(COPY|ADD)\b", line, re.IGNORECASE) and "tools" in line
+        ]
+        assert copies == [], copies
 
     def test_it_carries_no_package_manifest_the_workspace_could_pick_up(self) -> None:
         assert not (TOOLKIT / "package.json").exists()
