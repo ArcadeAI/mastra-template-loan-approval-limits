@@ -57,7 +57,11 @@ class StandIn {
    * is created, which is the state the human's live project is in (#26).
    */
   secretsLikeTheLiveRun = false;
-  private readonly server = Bun.serve({ port: 0, fetch: (request) => this.handle(request) });
+  // On 127.0.0.1, the address the script is pointed at, not the default
+  // 0.0.0.0: macOS lets another process hold 127.0.0.1 on the same port, and
+  // it then answers in the stand-in's place (a 403 from somebody else, seen
+  // once on #28's full run).
+  private readonly server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => this.handle(request) });
   readonly url = `http://127.0.0.1:${this.server.port}`;
 
   stop(): void {
