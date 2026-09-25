@@ -132,7 +132,7 @@ function explain(message: string, config: WebConfig): string {
   return (
     `${message} ARCADE_API_KEY is unset, so this call carried no credential — which is the ` +
     `likeliest cause. Set it, or run the offline stand-in and point ARCADE_API_URL at it: ` +
-    `see "Driving the two beats locally" in docs/app.md. Nothing was decided either way.`
+    `see scripts/arcade-stand-in.ts. Nothing was decided either way.`
   );
 }
 
