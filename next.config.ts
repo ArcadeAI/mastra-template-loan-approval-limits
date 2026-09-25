@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+import { allowedDevOrigins } from "./lib/dev-origins.ts";
+
 const config: NextConfig = {
   // The root Dockerfile runs this app; standalone keeps the runtime
   // image to the server plus only the dependencies it actually traced.
@@ -10,12 +12,15 @@ const config: NextConfig = {
   // this under `.next/` (gitignored) and gets a server of its own. Unset
   // everywhere else, which is Next's own `.next`.
   ...(process.env.CG_NEXT_DIST_DIR ? { distDir: process.env.CG_NEXT_DIST_DIR } : {}),
-  // `next dev` only, and only the loopback address (#190). Next 16 answers 403
-  // to a `/_next/*` request from any origin but `localhost`, so a page opened
-  // at `http://127.0.0.1:<port>` never gets its client chunks and never
-  // hydrates. Every browser test in `app-test/` opens the app that way. Next 15
-  // only warned. The production server (`server.js`) ignores this option.
-  allowedDevOrigins: ["127.0.0.1"],
+  // `next dev` only: the loopback address (#190) and the host of
+  // `APP_PUBLIC_HOST` (#30), and nothing else. Next 16 answers 403 to a
+  // `/_next/*` request from any origin but `localhost`, so a page opened at
+  // `http://127.0.0.1:<port>` or at `https://<APP_PUBLIC_HOST>` through the
+  // tunnel never gets its dev resources and never hydrates. Every browser test
+  // in `app-test/` opens the app at the first, and the Quickstart at the
+  // second. Next 15 only warned. The production server (`server.js`) ignores
+  // this option. `app-test/dev-origins.test.ts` boots `next dev` behind both.
+  allowedDevOrigins: allowedDevOrigins(),
   // No generated agent rules (#9). Next 16's `next dev` writes `AGENTS.md` and
   // `CLAUDE.md` at the root whenever it detects a coding agent in its
   // environment (`AI_AGENT`, `CLAUDECODE` and others). They are gitignored,
