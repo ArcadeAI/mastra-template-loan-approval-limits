@@ -3,10 +3,15 @@
  *
  * Designed from Arcade's public API reference: the OpenAPI document the
  * public `arcade-js` SDK pins (`.stats.yml`, 2026-09-04; docs.arcade.dev's API
- * reference links the same spec at `api.arcade.dev/v1/swagger`). Nothing here
- * was measured against the real API: every call is exercised against the
- * stand-in in `app-test/setup-arcade.test.ts`, and the assumptions are listed
- * on #7 for the human's live run.
+ * reference links the same spec at `api.arcade.dev/v1/swagger`). **The spec is
+ * not enough on its own.** It says the tool secrets are `POST`, and the first
+ * live run (#7, 2026-09-25) got a 404 `route_not_found` for that, while
+ * `POST /v1/admin/auth_providers` got 201 a moment earlier with the same key. So
+ * every request here is also checked against the official client code wherever
+ * one makes the call: the Arcade CLI (`arcade-mcp`), `arcadepy` and `arcade-js`.
+ * The table, with file and line for each source, is on #26's pull request. Every
+ * call is exercised against the stand-in in `app-test/setup-arcade.test.ts`,
+ * which answers anything else with Arcade's own 404.
  *
  * Four registrations go through the API, each with its spec path:
  *
@@ -17,8 +22,11 @@
  * - the hook extension: `POST /v1/plugins` (`schemas.CreatePluginRequest`),
  *   then `PATCH /v1/plugins/{id}` to `status: active`, because a plugin is
  *   created inactive (measured in the remote-MCP hooks spike);
- * - the tool secrets: `POST /v1/admin/secrets/{secret_key}`
- *   (`schemas.UpsertStoredSecretRequest`);
+ * - the tool secrets: `PUT /v1/admin/secrets/{secret_key}` with
+ *   `{ description, value }`, as the Arcade CLI sends it (`arcade_cli/secret.py`
+ *   `_upsert_secret`, and `deploy.py` for `arcade deploy`, both through
+ *   `utils.py` `build_api_key_scoped_url` under an API key). **Not** the spec's
+ *   POST, which Arcade answers 404 (#26);
  * - the custom verifier: `PUT /v1/admin/settings/session_verification`, then
  *   `GET` on the same path, because a verifier that did not take is open
  *   risk 2 (DESIGN.md) and fails where no hook fires.
@@ -179,6 +187,26 @@ export function pluginBody(registration: Registration) {
       },
     },
   };
+}
+
+/** The tool secrets the toolkits read, in the order they are set. */
+export function toolSecrets(host: string, approvalsStoreToken: string) {
+  return [
+    { key: "APP_PUBLIC_HOST", description: "The app's public host (setup-arcade)", value: host },
+    { key: "APPROVALS_STORE_TOKEN", description: "Bearer for the app's approvals store (setup-arcade)", value: approvalsStoreToken },
+  ];
+}
+
+/**
+ * One tool secret, the way the Arcade CLI upserts it: `PUT`, and the body in
+ * the CLI's key order, `description` then `value`.
+ */
+export function secretRequest(secret: { key: string; description: string; value: string }) {
+  return {
+    method: "PUT",
+    path: `/v1/admin/secrets/${secret.key}`,
+    body: { description: secret.description, value: secret.value },
+  } as const;
 }
 
 export function verifierBody(origin: string) {

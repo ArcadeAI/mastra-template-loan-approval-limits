@@ -470,7 +470,7 @@ match.
 
 Renaming the host secret is three places, and all three must move together: the
 toolkit's `APP_HOST_SECRET`, the secret `bun run setup-arcade` registers
-(`scripts/setup-arcade.ts`, `POST /v1/admin/secrets/APP_PUBLIC_HOST`), and
+(`toolSecrets` in `scripts/setup-arcade/arcade.ts`, `PUT /v1/admin/secrets/APP_PUBLIC_HOST`), and
 `.env.example`. An Arcade secret is the one configuration channel a deployed toolkit
 has.
 
