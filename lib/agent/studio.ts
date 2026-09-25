@@ -63,8 +63,10 @@ import { nonce, pkce } from "../identity/oidc.ts";
 import { escapeHtml, page, redirect, verbatim } from "../identity/pages.ts";
 import type { GatewayToken } from "../identity/session.ts";
 import { anthropicModel, buildAgent } from "./agent.ts";
+import { authorizationRequired } from "./authorization.ts";
 import { closeTurnOnEscalation } from "./escalation.ts";
 import { gatewayToken, type GatewayHolder } from "./gateway-token.ts";
+import { readNativeUrlElicitations } from "./native-elicitation.ts";
 import { gatewayClient, governedToolset } from "./tools.ts";
 
 /** Registered on Studio's own server by `src/mastra/index.ts`. Mastra reserves `/api`. */
@@ -110,7 +112,9 @@ const studio: {
   holder: GatewayHolder;
   legs: Map<string, { verifier: string; clientId: string; redirectUri: string; expiresAt: number }>;
   connection: { token: string; client: MCPClient } | null;
-} = { holder: {}, legs: new Map(), connection: null };
+  /** Every authorization link the gateway sent as a native URL elicitation, in arrival order. */
+  elicited: string[];
+} = { holder: {}, legs: new Map(), connection: null, elicited: [] };
 
 /** What Studio needs from the environment, and only that: no sign-in, no cookie secret. */
 export function studioProblems(config: IdentitySurface): string[] {
@@ -245,6 +249,7 @@ export function holdGatewayGrant(gateway: GatewayToken): void {
 export async function forgetStudioGrant(): Promise<void> {
   studio.holder = {};
   studio.legs.clear();
+  studio.elicited = [];
   await studio.connection?.client.disconnect().catch(() => undefined);
   studio.connection = null;
 }
@@ -307,11 +312,128 @@ export async function studioTools(
     );
   }
 
-  return closeTurnOnEscalation(selected.tools, {
+  return closeTurnOnEscalation(readableAuthorization(selected.tools, webUi(config)), {
     escalationTool: `${config.agent.approvalsToolkit}_RequestApproval`,
     onRefused: (tool) =>
       console.warn(`[studio] ${tool} was asked for after this turn ended on an approval request; nothing reached the gateway`),
   }).tools;
+}
+
+/**
+ * Layer 2 in Studio: a tool call that needs the person to authorize a toolkit
+ * first comes back as **readable text carrying the authorization link** (#30).
+ *
+ * The chat route draws that challenge as an authorization card (`run.ts`).
+ * Studio has no card, and on the third live run (#7) it drew the Loan
+ * toolkit's hop-2 challenge as a tool error whose result read `[object
+ * Object]`. Two things made that, and neither is ours to change: Arcade's
+ * gateway answered with an error ("authorization challenge requires URL
+ * elicitation"), and Mastra wraps every tool error in a `TOOL_EXECUTION_FAILED`
+ * whose JSON has no top-level `message`, which Studio's page prints with
+ * `String(error)`. So a challenge is turned into a result here, inside
+ * `execute`, before Mastra wraps anything.
+ *
+ * A challenge is recognised in any of the shapes the chat route reads: the
+ * legacy `authorization_url` JSON, the MCP URL-elicitation error `-32042` with
+ * or without `data.elicitations`, Arcade's own wording for it, and a native
+ * `elicitation/create` that Studio's handler cancelled during this call. With
+ * no link anywhere, the text says so and sends the person to the web UI, whose
+ * card can carry one.
+ *
+ * Everything else passes through untouched: a hook denial still throws, so the
+ * model still reads it as a failed call, which is what act 2 depends on.
+ */
+function readableAuthorization(tools: Record<string, unknown>, webUiOrigin: string): Record<string, unknown> {
+  const wrapped: Record<string, unknown> = {};
+  for (const [name, tool] of Object.entries(tools)) {
+    const execute = (tool as { execute?: (...args: unknown[]) => unknown }).execute;
+    if (typeof execute !== "function") {
+      wrapped[name] = tool;
+      continue;
+    }
+    const call = execute.bind(tool);
+    wrapped[name] = {
+      ...(tool as object),
+      async execute(...args: unknown[]) {
+        const mark = studio.elicited.length;
+        const elicitedDuringCall = () => studio.elicited.slice(mark);
+        let result: unknown;
+        try {
+          result = await call(...args);
+        } catch (failure) {
+          const challenge = challengeIn(failure, elicitedDuringCall());
+          if (challenge === null) throw failure;
+          return authorizationText(name, challenge.url, webUiOrigin);
+        }
+        // A cancelled native elicitation can settle the call with an empty
+        // result, which would otherwise reach the model as `{}`.
+        const challenge = challengeIn(result, isEmpty(result) ? elicitedDuringCall() : []);
+        return challenge === null ? result : authorizationText(name, challenge.url, webUiOrigin);
+      },
+    };
+  }
+  return wrapped;
+}
+
+/** Arcade's own message for a URL-elicitation challenge, as the third live run showed it. */
+const URL_ELICITATION = /\burl elicitation\b/i;
+
+/** A layer-2 challenge in a tool's result or failure, with its link when one came, or `null`. */
+function challengeIn(value: unknown, elicited: readonly string[]): { url?: string } | null {
+  const native = readNativeUrlElicitations(value)[0]?.url;
+  if (native !== undefined) return { url: native };
+  const messages = messagesOf(value);
+  const legacy = [value, ...messages].map((candidate) => authorizationRequired(candidate)).find((found) => found !== null);
+  if (legacy?.url !== undefined) return { url: legacy.url };
+  if (elicited.length > 0) return { url: elicited.at(-1)! };
+  if (legacy !== undefined && legacy !== null) return {};
+  return messages.some((message) => URL_ELICITATION.test(message)) ? {} : null;
+}
+
+/** The text of an error and of its causes, which `Object.values` does not reach: `message` is not enumerable. */
+function messagesOf(value: unknown): string[] {
+  const found: string[] = [];
+  let current: unknown = value;
+  for (let depth = 0; depth < 4 && typeof current === "object" && current !== null; depth += 1) {
+    const message = (current as { message?: unknown }).message;
+    if (typeof message === "string" && message !== "") found.push(message);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return found;
+}
+
+function isEmpty(result: unknown): boolean {
+  if (result === undefined || result === null) return true;
+  if (typeof result !== "object") return false;
+  const content = (result as { content?: unknown }).content;
+  if (Array.isArray(content)) return content.length === 0;
+  return Object.keys(result).length === 0;
+}
+
+/**
+ * What Studio shows, and what the model reads, in place of the challenge.
+ * Addressed to the person: it says what happened and where to go, and nothing
+ * about what the model should do (`DESIGN.md` → No model-side controls).
+ */
+function authorizationText(tool: string, url: string | undefined, webUiOrigin: string): string {
+  const toolkit = tool.includes("_") ? tool.slice(0, tool.indexOf("_")) : tool;
+  if (url !== undefined) {
+    return (
+      `${tool} did not run: Arcade needs you to authorize the ${toolkit} toolkit first. ` +
+      `Open this link, sign in as the person you authorized Studio as, and allow it: ${url} ` +
+      "Then send your message again."
+    );
+  }
+  return (
+    `${tool} did not run: Arcade needs you to authorize the ${toolkit} toolkit first, and sent Studio no link to show. ` +
+    `Authorize it in the web UI: open ${webUiOrigin}, sign in as the same person, ask for a loan, and authorize when the chat asks. ` +
+    "Then send your message here again."
+  );
+}
+
+/** The web UI, where the chat can carry an authorization card: the app's public origin. */
+function webUi(config: IdentitySurface): string {
+  return config.identity.publicUrl || "the web UI";
 }
 
 /**
@@ -331,11 +453,13 @@ async function connection(config: IdentitySurface, token: string): Promise<MCPCl
     token,
     timeoutMs: MCP_TIMEOUT_MS,
     // A native URL elicitation has no chat card to land on here. It is written
-    // where the developer running Studio will see it, and cancelled — nothing
-    // is accepted on anyone's behalf.
+    // where the developer running Studio will see it, kept for the tool call it
+    // interrupted to show as its result (`readableAuthorization`), and
+    // cancelled — nothing is accepted on anyone's behalf.
     inputRequests: async (params) => {
-      const link = (params as { url?: unknown }).url;
-      console.warn(`[studio] the gateway asked for an authorization${typeof link === "string" ? `: ${link}` : ""}`);
+      const links = readNativeUrlElicitations(params).map((request) => request.url);
+      studio.elicited.push(...links);
+      console.warn(`[studio] the gateway asked for an authorization${links.length > 0 ? `: ${links.join(", ")}` : ""}`);
       return { action: "cancel" };
     },
   });
