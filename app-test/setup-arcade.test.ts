@@ -48,7 +48,6 @@ class StandIn {
   requests: Recorded[] = [];
   providers = new Map<string, Record<string, unknown>>();
   secrets = new Map<string, string>();
-  plugins = new Map<string, Record<string, unknown>>();
   verifier: Record<string, unknown> = { verifier_url: "", unsafe_skip_verification: false };
   /** When set, a PUT to the verifier settings is accepted and ignored. */
   verifierIgnoresPut = false;
@@ -102,25 +101,11 @@ class StandIn {
         this.secrets.set(parts[2]!, sent.value);
         return Response.json({ id: `sec_${parts[2]}`, key: parts[2], description: sent.description ?? "" });
       }
-      case "GET /plugins":
-        return Response.json({ items: [...this.plugins.values()], total_count: this.plugins.size });
-      case "POST /plugins": {
-        const id = `plg_${this.plugins.size + 1}`;
-        const created = { ...(body as Record<string, unknown>), id, status: "inactive" };
-        this.plugins.set(id, created);
-        return Response.json(this.publicPlugin(created), { status: 201 });
-      }
-      case "PATCH /plugins/:id": {
-        const current = this.plugins.get(parts[1]!);
-        if (!current) return Response.json({ message: "not found" }, { status: 404 });
-        const next = { ...current, ...(body as Record<string, unknown>) };
-        this.plugins.set(parts[1]!, next);
-        return Response.json(this.publicPlugin(next));
-      }
-      case "GET /plugins/:id": {
-        const current = this.plugins.get(parts[1]!);
-        return current ? Response.json(this.publicPlugin(current)) : Response.json({ message: "not found" }, { status: 404 });
-      }
+      // No `/v1/plugins`, and nothing under `/hooks` (#28): real Arcade answered
+      // `GET /v1/plugins?limit=100` with the 404 below on the second live run,
+      // and the live swagger serves plugins and hooks only under
+      // `/v1/orgs/{org_id}/…`, which a project key cannot name. They fall
+      // through to the default.
       case "PUT /admin/settings/session_verification":
         if (!this.verifierIgnoresPut) this.verifier = { ...(body as Record<string, unknown>) };
         return Response.json(this.verifier);
@@ -131,11 +116,6 @@ class StandIn {
     }
   }
 
-  /** A plugin as the API answers it: the bearer comes back as `{ exists }`, never the value. */
-  private publicPlugin(plugin: Record<string, unknown>): Record<string, unknown> {
-    const config = plugin.webhook_config as { auth: { token: string } } & Record<string, unknown>;
-    return { ...plugin, webhook_config: { ...config, auth: { type: "bearer", token: { exists: Boolean(config.auth.token) } } } };
-  }
 }
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "cg-setup-arcade-")));
@@ -427,6 +407,54 @@ test("it never creates a gateway and never names Arcade Headers mode, in a real 
   expect(everything).not.toMatch(/arcade_header/i);
   expect(arcade.requests.filter((request) => request.path.startsWith("/v1/gateways"))).toEqual([]);
   expect(dry.stdout).not.toContain("/v1/gateways");
+});
+
+/**
+ * The hooks are a dashboard form, and no request reaches a plugins or hooks
+ * route (#28). Arcade has no `/v1/plugins`; the live swagger has plugins and
+ * hooks only under `/v1/orgs/{org_id}/projects/{project_id}/…`, and no route
+ * tells a project key its org or project. A request path is Arcade's, so the
+ * form's own `https://<host>/hooks/pre` text is not what this looks at.
+ */
+const PLUGIN_OR_HOOK_ROUTE = /\/(plugins|hooks)(\/|\?|$)/;
+
+test("it never calls a plugins or hooks route, in a fresh run, a rerun or a dry run", async () => {
+  const dir = project("no-plugins");
+  const first = await setupArcade(dir);
+  const again = await setupArcade(dir);
+  const dry = await setupArcade(dir, "--dry-run");
+  const dryFresh = await setupArcade(project("no-plugins-dry"), "--dry-run");
+
+  const called = arcade.requests.map((each) => `${each.method} ${each.path}`);
+  expect(called.filter((each) => PLUGIN_OR_HOOK_ROUTE.test(each))).toEqual([]);
+  for (const run of [dry, dryFresh]) {
+    const printed = [...run.stdout.matchAll(/^ {2}(GET|POST|PUT|PATCH|DELETE) (\S+)$/gm)].map(([, method, url]) => `${method} ${url}`);
+    expect(printed.length).toBeGreaterThan(0);
+    expect(printed.filter((each) => PLUGIN_OR_HOOK_ROUTE.test(new URL(each.split(" ")[1]!).pathname))).toEqual([]);
+  }
+  for (const run of [first, again, dry, dryFresh]) expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  // The check bites: the request the pre-#28 script sent first is caught.
+  expect(PLUGIN_OR_HOOK_ROUTE.test("GET /v1/plugins?limit=100")).toBe(true);
+  expect(PLUGIN_OR_HOOK_ROUTE.test("POST /v1/orgs/o/projects/p/hooks")).toBe(true);
+  expect(PLUGIN_OR_HOOK_ROUTE.test("PUT /v1/admin/settings/session_verification")).toBe(false);
+}, 90_000);
+
+test("the stand-in has no plugins route: Arcade's own 404, for the old call and the org-scoped ones", async () => {
+  for (const [method, path] of [
+    ["GET", "/v1/plugins?limit=100"],
+    ["POST", "/v1/plugins"],
+    ["PATCH", "/v1/plugins/plg_1"],
+    ["GET", "/v1/orgs/org_1/projects/prj_1/plugins"],
+    ["POST", "/v1/orgs/org_1/projects/prj_1/hooks"],
+  ] as const) {
+    const answer = await fetch(`${arcade.url}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+      ...(method === "GET" ? {} : { body: "{}" }),
+    });
+    expect(answer.status, `${method} ${path}`).toBe(404);
+    expect(await answer.text()).toBe('{"name":"route_not_found","message":"requested route is not found or method is not allowed"}');
+  }
 });
 
 test("a tracked .env is refused before anything is read, written or sent", async () => {
