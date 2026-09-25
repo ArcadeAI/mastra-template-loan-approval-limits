@@ -169,7 +169,7 @@ Documentation could not answer several of these, so we measured them against a r
 
 **Why Bun?** The three databases use `bun:sqlite`, which Node cannot load, so `next dev`, `next build` and the standalone server all run under Bun. Mastra Studio runs `mastra dev` as a separate Node process, so the agent never imports a module that opens a database, and a test enforces it.
 
-**Can I use a model other than Claude?** Not without a code change. The agent builds its model with `@ai-sdk/anthropic` in `lib/agent/agent.ts`, so `MODEL_ID`, which defaults to `claude-sonnet-5`, picks among Anthropic models only. We measured the 5-of-5 result above on Claude Sonnet 5 at temperature 0, so a different model needs it measured again.
+**Can I use a model other than Claude Sonnet 5?** Another Anthropic model, yes, with no code change. Set `MODEL_ID` in `.env` to its Anthropic model id, and both the chat and Studio pass it to `@ai-sdk/anthropic` with your `ANTHROPIC_API_KEY`. `MODEL_ID` is a bare Anthropic model id, not a `provider/model` string for Mastra's model router, so a model from another provider needs a code change: `anthropicModel` in `lib/agent/agent.ts`, and the `ANTHROPIC_API_KEY` checks in `lib/config.ts` and `lib/agent/studio.ts`. We measured the 5-of-5 result above on Claude Sonnet 5 at temperature 0, so a different model needs it measured again.
 
 ## Deploying
 
