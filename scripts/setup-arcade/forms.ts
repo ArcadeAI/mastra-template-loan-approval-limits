@@ -81,7 +81,7 @@ export interface NextSteps {
 export function nextSteps({ host, origin, port }: NextSteps): string {
   return [
     "Then:",
-    "  1. Restart `bun run dev`, so the app reads the new .env.",
+    "  1. Start `bun run dev` (or restart it, if it is already running), so the app reads the new .env.",
     `  2. Start the tunnel: ngrok http --url=${host} ${port}`,
     "  3. With the app reachable through the tunnel, fill in the User Source form above.",
     "  4. Deploy the toolkits (their secrets are set above): arcade deploy, in tools/loan and in tools/approvals.",

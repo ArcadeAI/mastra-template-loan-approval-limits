@@ -22,14 +22,16 @@
  *    `health_check_path`), and the custom verifier, which it reads back.
  * 6. **Prints** the two dashboard forms the API cannot fill, the User Source
  *    and the gateway, and what is left, in the README Quickstart's order:
- *    restart the app, start the tunnel, fill in the User Source form,
+ *    start the app, start the tunnel, fill in the User Source form,
  *    `arcade deploy` both toolkits, fill in the gateway form, open the app.
  *
  * `--dry-run` writes nothing and sends nothing: it prints every request a real
  * run makes, in order, with the key and every secret as a placeholder. Which
  * registration goes which way, and the spec path of each call, is in
  * `scripts/setup-arcade/arcade.ts`. `app-test/setup-arcade.test.ts` runs this
- * against a local stand-in; it has never been run against the real API.
+ * against a local stand-in. Its first run against the real API (#7) stopped at
+ * the tool secrets, sent as POST; they are PUT since #26, and a rerun picks up
+ * from that state.
  *
  * Run it with `--no-env-file` (the package script does): it reads `.env` and
  * `.env.local` itself, so it knows which values `.env` holds and which come
@@ -38,7 +40,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ArcadeAdmin, ArcadeError, pluginBody, PLUGIN_NAME, PROVIDER_ID, providerBody, providerDifferences, type Registration, verifierBody } from "./setup-arcade/arcade.ts";
+import {
+  ArcadeAdmin,
+  ArcadeError,
+  pluginBody,
+  PLUGIN_NAME,
+  PROVIDER_ID,
+  providerBody,
+  providerDifferences,
+  type Registration,
+  secretRequest,
+  toolSecrets,
+  verifierBody,
+} from "./setup-arcade/arcade.ts";
 import { fillBlanks, parseEnv, readEnvFile, writeEnvFile } from "./setup-arcade/env-file.ts";
 import { gatewayForm, nextSteps, userSourceForm } from "./setup-arcade/forms.ts";
 
@@ -207,8 +221,10 @@ if (dryRun) {
   await admin.request("GET", `/v1/admin/auth_providers/${PROVIDER_ID}`);
   out("    (404: the provider is created below. 200: it is compared, and a difference stops the run.)");
   await admin.request("POST", "/v1/admin/auth_providers", providerBody(registration));
-  await admin.request("POST", "/v1/admin/secrets/APP_PUBLIC_HOST", { value: host, description: "The app's public host (setup-arcade)" });
-  await admin.request("POST", "/v1/admin/secrets/APPROVALS_STORE_TOKEN", { value: registration.approvalsStoreToken, description: "Bearer for the app's approvals store (setup-arcade)" });
+  for (const secret of toolSecrets(host, registration.approvalsStoreToken)) {
+    const { method, path, body } = secretRequest(secret);
+    await admin.request(method, path, body);
+  }
   await admin.request("GET", "/v1/plugins?limit=100");
   out(`    (a plugin named ${PLUGIN_NAME} is PATCHed to the body below; otherwise it is created)`);
   await admin.request("POST", "/v1/plugins", pluginBody(registration));
@@ -366,15 +382,10 @@ if (callback && !client("arcade").redirect_uris.includes(callback)) {
     out(`  allowlisted the provider's callback on the arcade client: ${callback}`);
   }
 }
-await step("setting the tool secret APP_PUBLIC_HOST", () =>
-  admin.expect("POST", "/v1/admin/secrets/APP_PUBLIC_HOST", { value: host, description: "The app's public host (setup-arcade)" }),
-);
-await step("setting the tool secret APPROVALS_STORE_TOKEN", () =>
-  admin.expect("POST", "/v1/admin/secrets/APPROVALS_STORE_TOKEN", {
-    value: storeToken.value,
-    description: "Bearer for the app's approvals store (setup-arcade)",
-  }),
-);
+for (const secret of toolSecrets(host, storeToken.value)) {
+  const { method, path, body } = secretRequest(secret);
+  await step(`setting the tool secret ${secret.key}`, () => admin.expect(method, path, body));
+}
 
 const plugin = await step("registering the hooks", async () => {
   const listed = await admin.expect("GET", "/v1/plugins?limit=100");

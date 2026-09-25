@@ -1,9 +1,13 @@
 /**
  * `bun run setup-arcade <host>` against a stand-in for Arcade's admin API (#9).
  *
- * Never the real API. The stand-in answers the paths `scripts/setup-arcade/arcade.ts`
- * cites from Arcade's published spec, keeps what it is sent, and records every
- * request, so each test can say exactly what reached "Arcade". Each test runs
+ * Never the real API. The stand-in answers the routes `scripts/setup-arcade/arcade.ts`
+ * sends, each with the method the official client uses where one exists, keeps
+ * what it is sent, and records every request, so each test can say exactly what
+ * reached "Arcade". **Anything else gets the 404 Arcade itself answers** for a
+ * route or method it does not serve, byte for byte: until #26 this stand-in
+ * served `POST /v1/admin/secrets/{key}` because the pinned spec says POST, and
+ * the first live run got that 404 instead. Each test runs
  * the real script in a throwaway project of its own: a git repository whose
  * `.env` is the repo's `.env.example` copied verbatim with only
  * `ARCADE_API_KEY` filled, which is where a developer stands after the
@@ -32,7 +36,14 @@ interface Recorded {
   body: unknown;
 }
 
-/** Arcade's admin API, as far as the spec setup-arcade cites describes it. */
+/**
+ * What Arcade answered `POST /v1/admin/secrets/APP_PUBLIC_HOST` with, on the
+ * human's first live run (#7, 2026-09-25). The same body is Arcade's answer to
+ * any route it does not serve, so it is this stand-in's too.
+ */
+const ROUTE_NOT_FOUND = { name: "route_not_found", message: "requested route is not found or method is not allowed" };
+
+/** Arcade's admin API, as far as setup-arcade uses it (the table is on #26's PR). */
 class StandIn {
   requests: Recorded[] = [];
   providers = new Map<string, Record<string, unknown>>();
@@ -41,6 +52,12 @@ class StandIn {
   verifier: Record<string, unknown> = { verifier_url: "", unsafe_skip_verification: false };
   /** When set, a PUT to the verifier settings is accepted and ignored. */
   verifierIgnoresPut = false;
+  /**
+   * When set, the tool-secret route answers every method with Arcade's 404, the
+   * way the live run's POST was answered: the run stops just after the provider
+   * is created, which is the state the human's live project is in (#26).
+   */
+  secretsLikeTheLiveRun = false;
   private readonly server = Bun.serve({ port: 0, fetch: (request) => this.handle(request) });
   readonly url = `http://127.0.0.1:${this.server.port}`;
 
@@ -72,9 +89,19 @@ class StandIn {
         this.providers.set(sent.id, stored);
         return Response.json(stored, { status: 201 });
       }
-      case "POST /admin/secrets/:id":
-        this.secrets.set(parts[2]!, (body as { value: string }).value);
-        return Response.json({ id: `sec_${parts[2]}`, key: parts[2] });
+      // The Arcade CLI's upsert (`arcade_cli/secret.py` `_upsert_secret`, and
+      // `deploy.py` for `arcade deploy`): PUT, `{ description, value }`.
+      // `value` is required and at most 5000 characters
+      // (`schemas.UpsertStoredSecretRequest`).
+      case "PUT /admin/secrets/:id": {
+        if (this.secretsLikeTheLiveRun) return Response.json(ROUTE_NOT_FOUND, { status: 404 });
+        const sent = body as { value?: unknown; description?: unknown } | undefined;
+        if (typeof sent?.value !== "string" || sent.value === "" || sent.value.length > 5000) {
+          return Response.json({ name: "malformed_request", message: "value is a required field" }, { status: 400 });
+        }
+        this.secrets.set(parts[2]!, sent.value);
+        return Response.json({ id: `sec_${parts[2]}`, key: parts[2], description: sent.description ?? "" });
+      }
       case "GET /plugins":
         return Response.json({ items: [...this.plugins.values()], total_count: this.plugins.size });
       case "POST /plugins": {
@@ -100,7 +127,7 @@ class StandIn {
       case "GET /admin/settings/session_verification":
         return Response.json(this.verifier);
       default:
-        return Response.json({ message: `the stand-in has no ${route}` }, { status: 404 });
+        return Response.json(ROUTE_NOT_FOUND, { status: 404 });
     }
   }
 
@@ -188,8 +215,8 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   expect(sequence(arcade.requests)).toEqual([
     "GET /v1/admin/auth_providers/app-identity",
     "POST /v1/admin/auth_providers",
-    "POST /v1/admin/secrets/APP_PUBLIC_HOST",
-    "POST /v1/admin/secrets/APPROVALS_STORE_TOKEN",
+    "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
+    "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
     "GET /v1/plugins?limit=100",
     "POST /v1/plugins",
     "PATCH /v1/plugins/<id>",
@@ -228,7 +255,10 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
   }
   expect(plugin!.webhook_config.auth).toEqual({ type: "bearer", token: env.ARCADE_HOOK_SIGNING_SECRET });
 
-  // The tool secrets, and the verifier as read back.
+  // The tool secrets, in the CLI's body shape, and the verifier as read back.
+  for (const request of arcade.requests.filter((each) => each.path.startsWith("/v1/admin/secrets/"))) {
+    expect(Object.keys(request.body as object).sort()).toEqual(["description", "value"]);
+  }
   expect(arcade.secrets.get("APP_PUBLIC_HOST")).toBe(HOST);
   expect(arcade.secrets.get("APPROVALS_STORE_TOKEN")).toBe(env.APPROVALS_STORE_TOKEN);
   expect(arcade.verifier).toEqual({ verifier_url: `${ORIGIN}/api/arcade/verify`, unsafe_skip_verification: false });
@@ -280,7 +310,7 @@ test("a real run registers every API-able piece, fills .env's blanks, and prints
  * the README from the list, without this failing.
  */
 const NEXT_STEPS: Array<[string, RegExp]> = [
-  ["restart the app", /`bun run dev`/],
+  ["start the app", /`bun run dev`/],
   ["start the tunnel", /ngrok http --url=/],
   ["the User Source form", /fill in the User Source form/i],
   ["deploy both toolkits", /arcade deploy/],
@@ -316,6 +346,7 @@ test("the steps it prints after the forms are the README's, in the README's orde
   expect(stepOrder(readmeRemainder())).toEqual(order);
   expect(printed).toContain(`ngrok http --url=${HOST} `);
   expect(printed).toContain(`Open ${ORIGIN}, never localhost`);
+  startsTheApp(printed);
 
   // The check bites: the pre-#11 order, deploy after both forms, fails it.
   const lines = printed.split("\n");
@@ -328,8 +359,21 @@ test("the steps it prints after the forms are the README's, in the README's orde
 test("a dry run ends with the same steps", async () => {
   const run = await setupArcade(project("next-steps-dry"), "--dry-run");
   expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
-  expect(stepOrder(run.stdout.slice(run.stdout.lastIndexOf("Then:")))).toEqual(NEXT_STEPS.map(([name]) => name));
+  const printed = run.stdout.slice(run.stdout.lastIndexOf("Then:"));
+  expect(stepOrder(printed)).toEqual(NEXT_STEPS.map(([name]) => name));
+  startsTheApp(printed);
 });
+
+/**
+ * The first step starts the app; it does not restart it (#26). A developer
+ * following the Quickstart runs `setup-arcade` at step 4 and has never started
+ * `bun run dev`: "Restart" told them to restart something that was not running.
+ */
+function startsTheApp(printed: string): void {
+  const first = printed.split("\n").find((line) => /^\s*1\./.test(line)) ?? "";
+  expect(first).toMatch(/^\s*1\. Start `bun run dev`/);
+  expect(printed).not.toMatch(/^\s*\d\. Restart/m);
+}
 
 test("--dry-run prints the same requests a real run makes, in order, and writes and sends nothing", async () => {
   const dir = project("dry");
@@ -345,8 +389,8 @@ test("--dry-run prints the same requests a real run makes, in order, and writes 
   expect(printed).toEqual([
     "GET /v1/admin/auth_providers/app-identity",
     "POST /v1/admin/auth_providers",
-    "POST /v1/admin/secrets/APP_PUBLIC_HOST",
-    "POST /v1/admin/secrets/APPROVALS_STORE_TOKEN",
+    "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
+    "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
     "GET /v1/plugins?limit=100",
     "POST /v1/plugins",
     "PATCH /v1/plugins/<id>",
@@ -355,6 +399,20 @@ test("--dry-run prints the same requests a real run makes, in order, and writes 
     "GET /v1/admin/settings/session_verification",
   ]);
   expect(run.stdout).toContain("Authorization: Bearer <ARCADE_API_KEY>");
+  // Each tool secret: PUT, the CLI's `{ description, value }`, and the store
+  // token only as a placeholder, because a dry run shows no secret.
+  const secret = (key: string) => {
+    const at = run.stdout.indexOf(`  PUT ${arcade.url}/v1/admin/secrets/${key}\n`);
+    expect(at, `the dry run prints no PUT for ${key}`).toBeGreaterThan(-1);
+    const block = run.stdout.slice(at).split("\n");
+    const json = block.slice(3, block.findIndex((line, i) => i > 3 && line === "    }") + 1).join("\n");
+    return JSON.parse(json) as Record<string, string>;
+  };
+  expect(Object.keys(secret("APP_PUBLIC_HOST"))).toEqual(["description", "value"]);
+  expect(secret("APP_PUBLIC_HOST").value).toBe(HOST);
+  expect(Object.keys(secret("APPROVALS_STORE_TOKEN"))).toEqual(["description", "value"]);
+  expect(secret("APPROVALS_STORE_TOKEN").value).toBe("<generated APPROVALS_STORE_TOKEN>");
+  expect(run.stdout).not.toContain("POST " + arcade.url + "/v1/admin/secrets");
   expect(run.stdout).toMatch(/would fill .*\bBETTER_AUTH_SECRET\b/);
   expect(run.stdout).not.toContain(KEY);
   expect(run.stdout).toContain(`"url": "${ORIGIN}/hooks/pre"`);
@@ -436,8 +494,8 @@ test("running it again changes nothing that is registered and rotates nothing Ar
   expect(again.stdout).toContain("already registered and matches");
   expect(sequence(arcade.requests)).toEqual([
     "GET /v1/admin/auth_providers/app-identity",
-    "POST /v1/admin/secrets/APP_PUBLIC_HOST",
-    "POST /v1/admin/secrets/APPROVALS_STORE_TOKEN",
+    "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
+    "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
     "GET /v1/plugins?limit=100",
     "PATCH /v1/plugins/<id>",
     "GET /v1/plugins/<id>",
@@ -468,4 +526,114 @@ test("a BETTER_AUTH_SECRET the developer set is kept, and the clients are minted
   expect(envOf(dir).BETTER_AUTH_SECRET).toBe(mine);
   expect(run.stdout).toMatch(/kept\s+.*\bBETTER_AUTH_SECRET\b/);
   expect(`${run.stdout}${run.stderr}`).not.toContain(mine);
+}, 60_000);
+
+/**
+ * The stand-in is a test double for Arcade, so it refuses what Arcade refused
+ * (#26). Until then it served `POST /v1/admin/secrets/{key}`, because the pinned
+ * spec (and `arcade-js`, generated from it) says POST, and the real API
+ * answered the first live run's POST with this 404.
+ */
+test("the stand-in answers a tool secret POSTed the spec's way with Arcade's own 404", async () => {
+  const post = await fetch(`${arcade.url}/v1/admin/secrets/APP_PUBLIC_HOST`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ value: HOST, description: "d" }),
+  });
+  expect(post.status).toBe(404);
+  expect(await post.text()).toBe('{"name":"route_not_found","message":"requested route is not found or method is not allowed"}');
+  expect(arcade.secrets.size).toBe(0);
+
+  const put = await fetch(`${arcade.url}/v1/admin/secrets/APP_PUBLIC_HOST`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ description: "d", value: HOST }),
+  });
+  expect(put.status).toBe(200);
+  expect(arcade.secrets.get("APP_PUBLIC_HOST")).toBe(HOST);
+
+  // And a PUT with no value is refused, as `value` is required.
+  const empty = await fetch(`${arcade.url}/v1/admin/secrets/APPROVALS_STORE_TOKEN`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ description: "d" }),
+  });
+  expect(empty.status).toBe(400);
+});
+
+/** Every `oauthClient` row, whole, hashed secrets included: what "minted nothing" is checked against. */
+function clientRows(dir: string): string {
+  const db = new Database(join(dir, "idp.db"), { readonly: true });
+  try {
+    return JSON.stringify(db.query(`select * from oauthClient order by id`).all());
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The human's live project after the first real run (#7, 2026-09-25): the
+ * provider was created (201) and its callback allowlisted, `.env`'s second
+ * block was filled and `idp.db` minted, and the run stopped at the tool
+ * secrets' 404, so no secret, no hooks and no verifier were set. The fixed
+ * command must pick up from exactly there (#26).
+ */
+test("a rerun resumes from the live project's state: the provider matches, nothing is minted or overwritten, and the rest is set", async () => {
+  const dir = project("resume-live");
+
+  // How the live project got into that state: the tool secrets answered 404.
+  arcade.secretsLikeTheLiveRun = true;
+  const first = await setupArcade(dir);
+  expect(first.code).toBe(1);
+  expect(first.stderr).toContain("setting the tool secret APP_PUBLIC_HOST failed");
+  expect(first.stderr).toContain('"name":"route_not_found"');
+  expect(first.stderr).toContain("running the same command again picks up from here");
+
+  // The state the issue describes, checked rather than assumed.
+  expect(arcade.providers.has("app-identity")).toBe(true);
+  expect(existsSync(join(dir, "idp.db"))).toBe(true);
+  const example = readFileSync(join(ROOT, ".env.example"), "utf8");
+  const section = example.slice(example.indexOf("# --- Filled in by `bun run setup-arcade"), example.indexOf("# --- Optional"));
+  const envBefore = envOf(dir);
+  for (const [, key] of section.matchAll(/^([A-Z_][A-Z0-9_]*)=$/gm)) expect(envBefore[key!], `block 2 left ${key} blank`).toMatch(/\S/);
+  expect(clientsIn(dir).arcade!.redirectUris).toContain(CALLBACK);
+  expect(arcade.secrets.size).toBe(0);
+  expect(arcade.plugins.size).toBe(0);
+  expect(arcade.verifier).toEqual({ verifier_url: "", unsafe_skip_verification: false });
+
+  const envText = readFileSync(join(dir, ".env"), "utf8");
+  const rows = clientRows(dir);
+  const provider = JSON.stringify(arcade.providers.get("app-identity"));
+  arcade.secretsLikeTheLiveRun = false;
+  arcade.requests = [];
+
+  const rerun = await setupArcade(dir);
+  console.log(`--- setup-arcade ${HOST}, resuming from the live state ---\n${rerun.stdout}${rerun.stderr}`);
+
+  expect(rerun.code, `${rerun.stdout}\n${rerun.stderr}`).toBe(0);
+  expect(rerun.stdout).toContain("the provider app-identity is already registered and matches; it is left as it is");
+  expect(sequence(arcade.requests)).toEqual([
+    "GET /v1/admin/auth_providers/app-identity",
+    "PUT /v1/admin/secrets/APP_PUBLIC_HOST",
+    "PUT /v1/admin/secrets/APPROVALS_STORE_TOKEN",
+    "GET /v1/plugins?limit=100",
+    "POST /v1/plugins",
+    "PATCH /v1/plugins/<id>",
+    "GET /v1/plugins/<id>",
+    "PUT /v1/admin/settings/session_verification",
+    "GET /v1/admin/settings/session_verification",
+  ]);
+  // Minted nothing, overwrote nothing, re-created nothing.
+  expect(clientRows(dir)).toBe(rows);
+  expect(readFileSync(join(dir, ".env"), "utf8")).toBe(envText);
+  expect(rerun.stdout).toContain("filled   (nothing: every value was already set)");
+  expect(JSON.stringify(arcade.providers.get("app-identity"))).toBe(provider);
+  // And went on to set the secrets, the hooks and the verifier.
+  expect(arcade.secrets.get("APP_PUBLIC_HOST")).toBe(HOST);
+  expect(arcade.secrets.get("APPROVALS_STORE_TOKEN")).toBe(envBefore.APPROVALS_STORE_TOKEN);
+  const [plugin] = [...arcade.plugins.values()] as Array<Record<string, any>>;
+  expect(plugin!.status).toBe("active");
+  expect(plugin!.webhook_config.auth.token).toBe(envBefore.ARCADE_HOOK_SIGNING_SECRET);
+  expect(arcade.verifier).toEqual({ verifier_url: `${ORIGIN}/api/arcade/verify`, unsafe_skip_verification: false });
+  expect(rerun.stdout).toContain(`custom verifier: ${ORIGIN}/api/arcade/verify (read back)`);
 }, 60_000);
