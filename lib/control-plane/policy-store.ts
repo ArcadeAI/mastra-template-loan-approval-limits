@@ -17,11 +17,11 @@
  * Plus `policy_revision`, a single integer that triggers bump on every write to
  * `subjects`, `catalogue` or `policy_rules`. That number is how the in-memory
  * policy cache (`policy-cache.ts`) notices an edit from *any* connection —
- * this process, a `sqlite3` shell on the Render disk, the rule editor — without
+ * this process, a `sqlite3` shell on the deployment's disk, the rule editor — without
  * re-reading the tables on every hook call.
  *
  * Seed-if-empty, not seed-on-boot (decided on #29): the database sits on a
- * Render disk, so a clearance raised on stage in act 1 is still raised in act 3
+ * persistent disk, so a clearance raised on stage in act 1 is still raised in act 3
  * and after a restart. Bootstrapping happens only when there is no schema, and
  * resetting is an explicit script (#23), never a side effect of deploying.
  *
@@ -371,7 +371,7 @@ const REVISION_TRIGGERS = ["subjects", "catalogue", "policy_rules", "output_rule
  * added column, a widened `CHECK`, a renamed index — needs a statement of its
  * own in {@link MIGRATIONS}, because shipping one without it leaves a disk that
  * opens green and fails on the first query naming the change. `governance.db`
- * sits on a Render disk (decided on #29), so every schema change after the
+ * sits on a persistent disk (decided on #29), so every schema change after the
  * first meets a database that predates it.
  *
  * Version 1 is the schema at #60. Databases written before this existed read
@@ -515,8 +515,8 @@ export function openGovernance(
       if (report !== null) onMigration?.(report);
     } else seed(db, loadSeed(seedOptions));
   } catch (cause) {
-    // Leave no half-open handle behind: the caller is about to exit, and on
-    // Render a lingering WAL lock is one more thing between a crash-looping
+    // Leave no half-open handle behind: the caller is about to exit, and on a
+    // hosted deployment a lingering WAL lock is one more thing between a crash-looping
     // service and somebody deleting the file.
     db.close();
     throw cause;
@@ -552,7 +552,7 @@ export function readSchemaVersion(db: Database): number {
  * Thrown at boot, before the port opens, when the database on disk is not one
  * this build can bring forward. Names the reset, because the alternative —
  * what #60 actually saw in production — is a `SQLiteError: no such table` from
- * a health-count helper, a crash loop, and a Render Shell that will not attach
+ * a health-count helper, a crash loop, and a remote shell that will not attach
  * to a service that keeps exiting.
  */
 export class SchemaTooNewError extends Error {

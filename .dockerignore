@@ -1,6 +1,6 @@
-# Keep build contexts small and keep host state out of the image. `packages`
-# and `apps/*` are copied wholesale in the Dockerfiles, so anything listed
-# here would otherwise ride along.
+# Keep build contexts small and keep host state out of the image. `packages`,
+# `app`, `components`, `lib` and `public` are copied wholesale by the Dockerfile, so
+# anything listed here would otherwise ride along.
 node_modules
 **/node_modules
 .next
@@ -20,6 +20,8 @@ build
 # data — bootstrapped from checked-in fixtures, never baked into an image
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 
 # local agent scratch

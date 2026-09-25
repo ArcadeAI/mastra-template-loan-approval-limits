@@ -2,8 +2,8 @@
 
 There is no live Slack in this suite. That is deliberate and it is not a gap:
 the thing worth pinning is the payload, and a payload is checkable exactly.
-Spike #3 already ran this shape past the real API and photographed the render
-(`docs/spikes/evidence/03-slack-block-kit-render.png`); what these tests defend
+Spike #3 already ran this shape past the real API and photographed the
+result; what these tests defend
 is that the message keeps saying everything the approver needs, and keeps not
 carrying authority in its link.
 """

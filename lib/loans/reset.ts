@@ -2,11 +2,11 @@
  * `POST /admin/reset` — the loan book back to the rows this build ships,
  * without a deploy and without a shell.
  *
- * `loans.db` sits on a Render disk and seeds only when it has no schema (#29),
+ * `loans.db` sits on a persistent disk and seeds only when it has no schema (#29),
  * so a loan approved on stage is still approved after a restart. That is the
  * right behaviour and it left one gap: between two takes of the demo there was
  * no way back. Deleting the file needs a shell, and the shell attaches to
- * whichever instance Render feels like — the same trap `apps/hooks` documents
+ * whichever instance the host feels like — the same trap `apps/hooks` documents
  * at length in its own `reset-api.ts`, where two of three manual reseeds wrote
  * the wrong rows because they ran against a rolled-back image. So this is an
  * endpoint, served by the process that is running, seeding from the fixture

@@ -41,7 +41,6 @@ const STREAM_KEYS = [
   "GOVERNANCE_STREAM",
   "APP_PUBLIC_HOST",
   "NODE_ENV",
-  "RENDER",
   // Identity and the agent, because `/health`'s `status` folds five fields
   // together and "degraded" proves nothing about the panel on a deployment
   // where sign-in is also unset — which is every deployment this suite builds
@@ -107,7 +106,7 @@ function text(html: string): string {
 
 /** The deployed shape, which is what the root `Dockerfile` sets on the runner. */
 const DEPLOYED = { NODE_ENV: "production" } as const;
-const HOOKS_HOST = "cg-hooks.onrender.com";
+const HOOKS_HOST = "cg-hooks.example.com";
 
 /**
  * Everything the other three capabilities need, so a `degraded` below is the
@@ -127,10 +126,10 @@ const IDENTITY = {
 } as const;
 
 describe("a deployed panel that was never told which stream to watch", () => {
-  // The measured state of https://cg-web-sa31.onrender.com/panel on
-  // 2026-09-11: `render.yaml` declared APP_PUBLIC_HOST and never declared
-  // GOVERNANCE_STREAM, so the page served `mode: "fixture"` over a live
-  // control plane and said nothing about it.
+  // The measured state of the stage demo's deployed /panel on 2026-09-11: its
+  // environment declared APP_PUBLIC_HOST and never declared GOVERNANCE_STREAM,
+  // so the page served `mode: "fixture"` over a live control plane and said
+  // nothing about it.
   const deployed = { ...DEPLOYED, APP_PUBLIC_HOST: HOOKS_HOST } as const;
 
   test("the page is an error state that names the variable", async () => {
@@ -267,50 +266,5 @@ describe("live mode", () => {
     const markup = await panel({ GOVERNANCE_STREAM: "hooks", APP_PUBLIC_HOST: "localhost:4411" });
 
     expect(text(markup)).toContain("LIVE · localhost:4411");
-  });
-});
-
-/**
- * The blueprint, because none of the above can make a deployment loud on its
- * own. `render.yaml` decides what the live cg-web's environment contains, and
- * between #21 and #81 it simply never mentioned GOVERNANCE_STREAM — which is
- * why production was in fixture replay by construction rather than by anyone's
- * choice. The panel refuses that state now instead of hiding it; this keeps the
- * blueprint from re-creating it.
- */
-describe("what render.yaml gives cg-web", () => {
-  const blueprint = Bun.YAML.parse(
-    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "render.yaml"), "utf8"),
-  ) as { services: Array<{ name: string; envVars?: Array<Record<string, unknown>> }> };
-
-  const web = blueprint.services.find((service) => service.name === "cg-web");
-  const envVars = web?.envVars ?? [];
-  const entry = (key: string) => envVars.find((each) => each["key"] === key);
-
-  test("GOVERNANCE_STREAM is declared, as a plain value, and it is hooks", () => {
-    // Not `sync: false`: this is neither a credential nor an address, and
-    // `hooks` is what a deployment of this blueprint is for every time. Left
-    // for a human to fill in, it would be blank on the first deploy — which is
-    // the exact state #81 was opened for.
-    expect(entry("GOVERNANCE_STREAM")).toEqual({ key: "GOVERNANCE_STREAM", value: "hooks" });
-  });
-
-  test("APP_PUBLIC_HOST stays sync: false, because it cannot be derived", () => {
-    // onrender.com subdomains are global and Render suffixes a name that is
-    // taken (#59: cg-web is cg-web-sa31). A value here would address somebody
-    // else's deployment.
-    expect(entry("APP_PUBLIC_HOST")).toEqual({ key: "APP_PUBLIC_HOST", sync: false });
-  });
-
-  test("and the pair is what the page reads as live", () => {
-    // The blueprint's own values, run through the resolution the page runs, so
-    // a blueprint that parses but says the wrong thing cannot pass.
-    const stream = resolvePanelStream({
-      NODE_ENV: "production",
-      GOVERNANCE_STREAM: entry("GOVERNANCE_STREAM")?.["value"] as string,
-      APP_PUBLIC_HOST: HOOKS_HOST,
-    });
-
-    expect(stream.mode).toBe("hooks");
   });
 });

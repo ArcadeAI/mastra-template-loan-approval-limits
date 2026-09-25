@@ -5,7 +5,7 @@
  * `ARCADE_GATEWAY_ID` and `ARCADE_API_KEY` absent. `/health` answered
  * `{"status":"ok", … "gateway":"missing","verifier":"missing"}` and `GET /`
  * rendered the ordinary persona buttons and `Gateway token: none` with no
- * warning anywhere. The process stayed Ready, Render kept it in rotation, and
+ * warning anywhere. The process stayed Ready, the host kept it in rotation, and
  * the only way to discover that no tool call could ever be made was to click
  * into a flow and read a 503.
  *
@@ -50,7 +50,7 @@ const GOOD_SECRET = "3f9a1c7e5b2d84069a1fe73c05b8d42e6c917ab3fd50e28c47196baf3d0
 
 /** Everything a cg-web needs. Individual tests take keys away. */
 const COMPLETE = {
-  APP_PUBLIC_HOST: "cg-web-sa31.onrender.com",
+  APP_PUBLIC_HOST: "cg-web-sa31.example.com",
   IDP_CLIENT_ID: "client-c",
   IDP_CLIENT_SECRET: "client-c-secret",
   SESSION_SECRET: GOOD_SECRET,

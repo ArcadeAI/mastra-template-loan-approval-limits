@@ -293,7 +293,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
       // nothing here is ever cached across requests (`tools.ts`).
       await client.disconnect().catch(() => undefined);
       client = null;
-      // The status, never the token. This line is the one a Render log needs,
+      // The status, never the token. This line is the one a deploy log needs,
       // and it is the first half of every sentence below: the gateway's own
       // word about the credential (#94).
       const refusal = `the gateway answered ${probe.status} to this browser's gateway token`;

@@ -131,7 +131,7 @@ const SCHEMA = `
  * Opens the loan book, bootstrapping it from the fixture only when it has no
  * schema.
  *
- * Seed-if-empty rather than seed-on-boot: `loans.db` lives on a Render disk
+ * Seed-if-empty rather than seed-on-boot: `loans.db` lives on a persistent disk
  * (decided on #29), so approvals made on stage are still there after a
  * restart. Getting back to a clean state is an explicit script (#23), never a
  * side effect of deploying.
@@ -176,7 +176,7 @@ export function readSchemaVersion(db: Database): number {
  * Thrown at boot, before the port opens, when the database on disk is not one
  * this build can bring forward. Names the file and the way out, because the
  * alternative is a `SQLiteError: no such table` from the first request that
- * needs the missing piece, a crash loop, and a Render Shell that will not
+ * needs the missing piece, a crash loop, and a remote shell that will not
  * attach to a service that keeps exiting (#60).
  */
 export class SchemaTooNewError extends Error {

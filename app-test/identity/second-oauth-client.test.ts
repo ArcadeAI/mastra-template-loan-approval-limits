@@ -15,7 +15,7 @@
  * fires and the panel stays dark.
  *
  * Two services, each on its own `:0` port and its own disk, booted the way
- * Render boots them.
+ * a deployment boots them.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Subprocess } from "bun";

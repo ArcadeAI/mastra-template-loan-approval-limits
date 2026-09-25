@@ -3,14 +3,14 @@
  *
  * Read in a **server component**, never in the browser. `.env.example` says why
  * at length: `next build` inlines `NEXT_PUBLIC_*` into the client bundle, while
- * Render supplies service environment variables at runtime, so a
+ * a deployment supplies its environment variables at runtime, so a
  * `NEXT_PUBLIC_HOOKS_HOST` would be `undefined` in the deployed browser and
  * perfectly fine under `next dev` — a difference that shows up first on stage.
  * The panel takes its stream address as a prop instead.
  *
  * **There is no silent fallback to the replay.** Until #81 there was: an
- * unset `GOVERNANCE_STREAM` — and `render.yaml` never declared it, so that was
- * every production deploy since #21 — resolved to the fixture, and the page
+ * unset `GOVERNANCE_STREAM` — and the stage demo's deployment never declared
+ * it, so that was every production deploy since #21 — resolved to the fixture, and the page
  * rendered a replay of #5's sequence with nothing on screen saying so. On
  * 2026-09-11 a human made a real governed call against the live gateway and
  * watched the panel show the demo instead. A control surface reporting
@@ -82,13 +82,13 @@ function baseUrl(host: string): string {
  * Deployed or not, which is the only thing that changes what an unset
  * `GOVERNANCE_STREAM` means.
  *
- * `NODE_ENV` is what matters in practice — the root `Dockerfile` sets it on the
- * runner stage, so every Render deploy of this service has it. `RENDER` is
- * there for a deployment that runs the Next server some other way; Render sets
- * it on every service it starts.
+ * `NODE_ENV=production` is the signal: the root `Dockerfile` sets it on the
+ * runner stage, so every deploy of the image has it. Until #11 one hosting
+ * platform's own variable counted as well; the image is the deployment now,
+ * whoever hosts it.
  */
 function isDeployed(env: Readonly<Record<string, string | undefined>>): boolean {
-  return env["NODE_ENV"] === "production" || env["RENDER"] === "true";
+  return env["NODE_ENV"] === "production";
 }
 
 function unconfigured(problem: string): UnconfiguredStream {
@@ -114,8 +114,8 @@ function fixtureRequested(params: Readonly<Record<string, string | string[] | un
  * | `fixture` | replays #5's sequence, labelled `FIXTURE REPLAY` |
  * | unset | the replay in development; **unconfigured** when deployed |
  *
- * Anything else is refused by name rather than resolved to something. A typo on
- * a Render service page would otherwise be a panel quietly showing the demo.
+ * Anything else is refused by name rather than resolved to something. A typo in
+ * a deployment's environment would otherwise be a panel quietly showing the demo.
  *
  * **The replay stays the default in development on purpose.** `apps/hooks` does
  * serve `/events` — the stream half of #20 landed on #54 — but it is a second
@@ -182,9 +182,9 @@ export function resolvePanelStream(
  *
  * The `PublicHostError` a bare service name raises is caught and reported as
  * `unconfigured` rather than propagated. `/health` must answer `200` whatever
- * it finds: Render reads a non-200 on `healthCheckPath` as a dead instance and
- * abandons the deploy, which would take away the one endpoint that says what is
- * wrong. The page still throws on that value, loudly, where a developer sees it.
+ * it finds: a hosting platform's health check reads a non-200 as a dead
+ * instance and abandons the deploy, which would take away the one endpoint that
+ * says what is wrong. The page still throws on that value, loudly, where a developer sees it.
  */
 export function panelStreamHealth(
   env: Readonly<Record<string, string | undefined>>,

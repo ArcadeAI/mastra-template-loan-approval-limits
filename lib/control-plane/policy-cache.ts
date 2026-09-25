@@ -16,7 +16,7 @@
  * `subjects`, `catalogue`, `policy_rules` or `output_rules`, from any
  * connection — every
  * `pollMs` (default 250 ms) and reloads when it has moved. An edit made with a
- * `sqlite3` shell on the Render disk is live within a quarter of a second, the
+ * `sqlite3` shell on the deployment's disk is live within a quarter of a second, the
  * reload is logged, and `/health` reports `revision`, `loaded_at` and
  * `last_poll_at`, so "did my edit take?" has an answer that is not "rerun the
  * prompt and see".

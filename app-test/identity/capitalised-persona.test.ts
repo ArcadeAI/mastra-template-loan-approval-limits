@@ -9,7 +9,7 @@
  * the row was unreachable — and `handleLogin` reports that as "That email and
  * password did not match", the same sentence it gives a wrong password.
  *
- * Booted as a subprocess, env only, the way Render boots it, so what is under
+ * Booted as a subprocess, env only, the way a deployment boots it, so what is under
  * test is the seed that really ran and the schema that really applied.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -25,7 +25,7 @@ const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-${crypto.randomUUID()}`, "idp.db");
 const SECRET = "test-secret-".padEnd(48, "x");
 
-/** As a human types it into Render's dashboard, copying the Arcade invite. */
+/** As a human types it into the deployment's environment, copying the Arcade invite. */
 const CONFIGURED = "Alice@Bank.Example";
 const STORED = CONFIGURED.toLowerCase();
 /** The fixture's password for Alice, which the override does not change. */

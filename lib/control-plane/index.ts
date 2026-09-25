@@ -27,7 +27,7 @@
  * reloads on the next edit.
  *
  * `/health` answers **200 whatever it finds** (#112). It said 503 on a failed
- * policy until 2026-09-14, when Render — which health-checks this path — read
+ * policy until 2026-09-14, when the stage demo's host — which health-checks this path — read
  * that as a dead instance and served a 502 over a service that was doing
  * exactly what it was designed to do. Readiness is "the process is up and can
  * say what is wrong"; the refusal belongs to the hooks, and they still refuse.
@@ -87,7 +87,7 @@ export function bootControlPlane(options: BootOptions = {}): BootedControlPlane 
   // A disk that predates this build is brought forward before anything else
   // happens, and says so exactly once — on the boot that did it (#103). The same
   // report stays on `/health` for the life of the process, because a boot line
-  // scrolls away and a Render deploy log is not where somebody checks whether
+  // scrolls away and a deploy log is not where somebody checks whether
   // 745,000 rows were rewritten.
   let migration: MigrationReport | null = null;
   const db = openGovernance(config.dbPath, config, (report) => {

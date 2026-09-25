@@ -42,8 +42,8 @@
  *    page waits once rather than twice.
  * 3. It resolves **one** address from the environment at request time: where
  *    #20's chat watches for an approval decision. `next build` inlines
- *    `NEXT_PUBLIC_*` into the client bundle while Render supplies service
- *    variables at runtime, so a public variable would be `undefined` in the
+ *    `NEXT_PUBLIC_*` into the client bundle while the hosting platform supplies
+ *    service variables at runtime, so a public variable would be `undefined` in the
  *    deployed browser and perfectly fine under `next dev` — see
  *    `lib/governance/stream-url.ts`.
  *

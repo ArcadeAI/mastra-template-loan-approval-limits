@@ -304,7 +304,7 @@ describe("when it cannot do its job it says so and exits non-zero", () => {
     const { code, err } = await runResetCommand({ APP_PUBLIC_HOST: "cg-hooks" });
     expect(code).toBe(78);
     expect(err).toContain("APP_PUBLIC_HOST=cg-hooks");
-    expect(err).toContain("onrender.com");
+    expect(err).toContain("has no dot and is not loopback");
   });
 
   /**
@@ -324,28 +324,6 @@ describe("when it cannot do its job it says so and exits non-zero", () => {
     expect(out).toMatch(/\[reset\] loan-app\s+UNREACHABLE/);
   });
 
-  test("--target render reads the RENDER_-prefixed addresses, and says which are missing", async () => {
-    const { code, err } = await runResetCommand({}, ["--target", "render"]);
-    expect(code).toBe(78);
-    // Not the local variable: pointing `--target render` at a localhost value
-    // would be the command silently resetting the wrong environment.
-    expect(err).toContain("RENDER_APP_PUBLIC_HOST is unset");
-    // The one service there is since #6, which holds all three modules.
-    expect(err).toContain("cg-web");
-  });
-
-  /**
-   * Until #6: "--hard --target render asks for the IdP's address too", when
-   * the IdP was a service with an address of its own. It is a module of the
-   * app now, so the hard reset asks for the same one address.
-   */
-  test("--hard --target render asks for the same one address", async () => {
-    const { code, err } = await runHardReset({}, ["--target", "render"]);
-    expect(code).toBe(78);
-    expect(err).toContain("RENDER_APP_PUBLIC_HOST is unset");
-    expect(err).toContain("cg-web");
-  });
-
   test("a misspelt --hard is refused rather than quietly read as a soft reset", async () => {
     const { code, err } = await runResetCommand({}, ["--hard-reset"]);
     expect(code).toBe(78);
@@ -356,9 +334,21 @@ describe("when it cannot do its job it says so and exits non-zero", () => {
     expect(err).toContain("#123");
   });
 
-  test("an unknown --target is refused", async () => {
-    const { code, err } = await runResetCommand({}, ["--target", "staging"]);
-    expect(code).toBe(78);
-    expect(err).toContain("--target must be one of local, render");
+  /**
+   * Until #11, `--target` chose between this checkout and the stage demo's
+   * hosted deployment, and this test refused a value it did not know. The flag
+   * is gone, and still refused, in either spelling: a presenter who typed it
+   * expects some other environment to be reset, and quietly resetting this
+   * checkout's app instead would be the half-reset believed clean.
+   */
+  test("--target is refused, and the refusal names the one address there is", async () => {
+    for (const args of [["--target", "staging"], ["--target=local"]]) {
+      const { code, out, err } = await runResetCommand({}, args);
+      expect(code).toBe(78);
+      expect(err).toContain("--target is not an option");
+      expect(err).toContain("APP_PUBLIC_HOST");
+      // Refused before anything ran, not after.
+      expect(out).toBe("");
+    }
   });
 });

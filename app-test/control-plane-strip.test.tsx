@@ -33,7 +33,7 @@ const { ControlPlaneStatus } = await import("../components/governance/ControlPla
 
 const HEALTHY: ControlPlaneReport = {
   reachable: true,
-  host: "cg-hooks.onrender.com",
+  host: "cg-hooks.example.com",
   status: "healthy",
   policy: { status: "ready", revision: 125, error: null },
   fixture_drift: null,
@@ -73,9 +73,9 @@ const LONG_POLICY_ERROR =
 
 const UNREACHABLE: ControlPlaneReport = {
   reachable: false,
-  host: "cg-hooks.onrender.com",
+  host: "cg-hooks.example.com",
   reset: "enabled",
-  problem: "cg-hooks.onrender.com did not answer GET /health (ConnectionRefused).",
+  problem: "cg-hooks.example.com did not answer GET /health (ConnectionRefused).",
 };
 
 const LONG_STATUS_PROBLEM =
@@ -173,7 +173,7 @@ describe("what it says", () => {
     const host = await mount();
 
     expect(host.textContent).toContain("HEALTHY");
-    expect(host.textContent).toContain("cg-hooks.onrender.com");
+    expect(host.textContent).toContain("cg-hooks.example.com");
     expect(host.textContent).toContain("revision 125");
     expect(host.textContent).not.toContain("Fixture drift");
     expect(host.querySelector("[data-state='healthy']")).not.toBeNull();

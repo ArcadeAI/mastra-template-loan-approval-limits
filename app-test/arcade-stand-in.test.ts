@@ -5,9 +5,9 @@
  * `harness.ts` exercises the same module in process, which proves the
  * behaviour. This file proves the *runnable* part — that
  * `bun run arcade-stand-in` starts, binds, prints the port it
- * got, says out loud that it is a stand-in, and answers `apps/web`'s own
- * client. Those are the parts the three-terminal run in `docs/app.md`
- * depends on, and none of them is covered by importing the function.
+ * got, says out loud that it is a stand-in, and answers the app's own
+ * client. Those are the parts a local run against it depends on, and none of
+ * them is covered by importing the function.
  *
  * It exists because the gap it closes was found by a human, not by a test: the
  * README told someone to open the approval page and press Approve, and pressing
@@ -187,7 +187,7 @@ describe("the stand-in a person runs", () => {
       expect(result.state).toBe("failed");
       const message = result.state === "failed" ? result.message : "";
       expect(message).toContain("ARCADE_API_KEY is unset");
-      expect(message).toContain("docs/app.md");
+      expect(message).toContain("scripts/arcade-stand-in.ts");
       expect(message).not.toContain("CHECK_FAILED");
       expect(await read()).toMatchObject({ status: "pending" });
     } finally {

@@ -1,6 +1,6 @@
 /**
  * `POST /admin/reset` (#23), over the wire against the service booted the way
- * Render boots it — `bun src/index.ts`, env only.
+ * a deployment boots it — `bun src/index.ts`, env only.
  *
  * `test/flow.test.ts` already proves the hard claim for the *script*: after
  * `scripts/reset.ts` the credentials Arcade holds still complete a whole

@@ -22,7 +22,7 @@
  * of the two cases it was, because a control that cannot be told from a
  * permission is not a control.
  *
- * Booted the way Render boots it, over real HTTP, on a port the OS chose.
+ * Booted the way a deployment boots it, over real HTTP, on a port the OS chose.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Subprocess } from "bun";
@@ -545,9 +545,8 @@ describe("refresh_token: the same four, because Arcade's Refresh Token Settings 
 /**
  * (f) The request Arcade actually sends, replayed field for field.
  *
- * From the provider configuration read back in
- * `docs/spikes/evidence/05-custom-verifier-transcript.md` §11.8, recreated
- * 2026-09-11T16:55:22Z:
+ * From the provider configuration read back from a real Arcade project
+ * while the stage demo was built, recreated 2026-09-11T16:55:22Z:
  *
  * ```json
  * "token_request": {

@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
-  // Render runs this service from a Dockerfile; standalone keeps the runtime
+  // The root Dockerfile runs this app; standalone keeps the runtime
   // image to the server plus only the dependencies it actually traced.
   output: "standalone",
   // A second build directory, for a test that boots its own `next dev` while a
@@ -67,8 +67,8 @@ const config: NextConfig = {
   // blind to because none of them ran the artifact. Carrying `public` in the
   // trace instead means `bun run build` emits a **complete**
   // `.next/standalone`, and the runner stage copies that one tree — so the
-  // thing `app-test/public-assets.test.ts` boots on a socket and the thing Render
-  // serves are the same tree, and a fast test can hold it.
+  // thing `app-test/public-assets.test.ts` boots on a socket and the thing the
+  // image serves are the same tree, and a fast test can hold it.
   //
   // The glob is relative to this package, so it lands at
   // `.next/standalone/public/` — where `server.js` looks, because

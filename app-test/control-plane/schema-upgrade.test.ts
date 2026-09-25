@@ -433,8 +433,8 @@ const TAX_ID = "86-7530912";
 
 /**
  * A disk at version 2 — the schema #16 left — carrying rows whose `before`
- * and `after` hold raw `Loan.GetLoan` output. This is the shape of the live
- * Render disk: ~745,000 rows, most of them written before #101 stopped
+ * and `after` hold raw `Loan.GetLoan` output. This is the shape of the stage
+ * demo's disk: ~745,000 rows, most of them written before #101 stopped
  * binding those columns.
  *
  * `rows` is a knob rather than a constant because two of the tests below want
@@ -716,7 +716,7 @@ describe("a database carrying the retired payload columns (#103)", () => {
 
 /**
  * The migration is not just logged: `/health` carries it over HTTP for the
- * life of the process. A boot line scrolls out of a Render deploy log; the
+ * life of the process. A boot line scrolls out of a deploy log; the
  * question "did this disk get migrated, and how big was it" outlives it.
  */
 describe("GET /health after a migration (#103)", () => {

@@ -512,7 +512,7 @@ export async function liveGatewayToken(
  *
  * `liveGatewayToken`'s trigger is `expires_at`, and `expires_at` is a number
  * this service wrote down at issue. The gateway's opinion is the only one that
- * decides anything, and #113 is the record of the two disagreeing: on Render,
+ * decides anything, and #113 is the record of the two disagreeing: on the stage demo's deployment,
  * Alice's bearer was refused with most of an hour left on the cookie's clock, so
  * the refresh was never attempted and the turn went straight to #94's
  * re-authorization card. A card is an honest answer to "the credential is

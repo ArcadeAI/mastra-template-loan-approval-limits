@@ -16,7 +16,7 @@
  *   exists it is read back, compared, and never PATCHed;
  * - the hook extension: `POST /v1/plugins` (`schemas.CreatePluginRequest`),
  *   then `PATCH /v1/plugins/{id}` to `status: active`, because a plugin is
- *   created inactive (measured, docs/spikes/02-remote-mcp-hooks-transcript.md);
+ *   created inactive (measured in the remote-MCP hooks spike);
  * - the tool secrets: `POST /v1/admin/secrets/{secret_key}`
  *   (`schemas.UpsertStoredSecretRequest`);
  * - the custom verifier: `PUT /v1/admin/settings/session_verification`, then
@@ -58,8 +58,8 @@ export interface Registration {
 
 /**
  * The hop-2 provider, in the shape the demo's working `cg-idp` registration
- * was read back in (docs/spikes/evidence/05-custom-verifier-transcript.md
- * §11.8) with only the host and the id changed: HTTP Basic on the token
+ * was read back in (the custom-verifier spike, against a real Arcade project)
+ * with only the host and the id changed: HTTP Basic on the token
  * request, the client credentials also kept as request parameters (DESIGN.md:
  * those parameters stay, and the app accepts both), PKCE S256, and the user id
  * read from userinfo at `$.email`, which is what makes the email the join key.
@@ -154,7 +154,7 @@ export function providerDifferences(existing: unknown, desired: unknown): string
  * The hook extension: three full URLs and a health path, because the
  * extension has no base URL (`schemas.WebhookEndpointRequest`, measured by #4
  * and recorded on #7). `failure_mode` is required on every endpoint
- * (docs/spikes/02-remote-mcp-hooks.md): fail closed, so an unreachable control
+ * (measured in the remote-MCP hooks spike): fail closed, so an unreachable control
  * plane refuses rather than permits.
  */
 export function pluginBody(registration: Registration) {

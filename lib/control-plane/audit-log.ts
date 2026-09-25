@@ -54,7 +54,7 @@ interface AuditRow {
  * rather than merely unread. The queries below are `SELECT *` and the shape
  * they return is `AuditRow`: a column that is not in this interface is a
  * column nothing here can leak, but until #103 it was still a column a
- * `sqlite3` shell on the Render disk could read aloud.
+ * `sqlite3` shell on the deployment's disk could read aloud.
  */
 
 /**
@@ -291,7 +291,7 @@ export interface AuditPage {
  * or a runaway loop" (#62) — and a page that stops at the bound with no count
  * beside it cannot tell the two apart. 8,278 is the measured size of one live
  * `tools/list`'s `/access` frames, across the four calls Arcade makes for it
- * (`docs/spikes/05-custom-verifier.md` §11.3); #107 is what stopped one
+ * (measured in the custom-verifier spike); #107 is what stopped one
  * listing being that many rows.
  */
 export function search(db: Database, filter: AuditFilter): AuditPage {
@@ -348,7 +348,7 @@ export function search(db: Database, filter: AuditFilter): AuditPage {
  * shortened is not one. So the bound is the disk, expressed in rows: measured
  * at **238 bytes a row** on disk (`bun run --cwd apps/hooks bench`, the
  * "audit_log on disk" section, priced on a representative mix of 50,000 real
- * rows), the 1 GB Render volume holds ~4.5 M.
+ * rows), a 1 GB disk holds ~4.5 M.
  *
  * **Two million is now conservative, and deliberately left alone.** It was set
  * on #62 against 487 bytes a row, which was the average when `/access` wrote

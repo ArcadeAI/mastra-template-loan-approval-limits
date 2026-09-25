@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "mastra-contextual-governance",
+      "name": "arcade-governance",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.61",
         "@better-auth/oauth-provider": "1.7.5",

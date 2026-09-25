@@ -12,8 +12,9 @@
  * A **server** component, and that is the point: it reads the environment here
  * and hands the stream's address down as a prop. `.env.example` explains at
  * length why the alternative is a trap — `next build` inlines `NEXT_PUBLIC_*`
- * into the client bundle while Render supplies service variables at runtime, so
- * a public variable would be `undefined` in the browser on Render and perfectly
+ * into the client bundle while the hosting platform supplies service variables
+ * at runtime, so a public variable would be `undefined` in the deployed browser
+ * and perfectly
  * fine under `next dev`.
  */
 import type { Metadata } from "next";

@@ -61,8 +61,6 @@ const code = files.flatMap((file) =>
 const SET_ELSEWHERE: Record<string, string> = {
   NODE_ENV: "set by Next and by the Dockerfile",
   NEXT_RUNTIME: "set by Next",
-  RENDER: "set by Render on its own services",
-  RENDER_APP_PUBLIC_HOST: "Render only: `bun run reset --target render`",
   CG_NEXT_DIST_DIR: "set by test harnesses, to run a second `next dev`",
   SLACK_API_BASE_URL: "the approvals toolkit's test override, in Arcade's worker, not the app",
 };

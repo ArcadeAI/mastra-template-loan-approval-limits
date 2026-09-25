@@ -38,11 +38,11 @@ export function codePrefix(code: string | null): string {
 }
 
 /**
- * The client's address as Render reports it: the **first** hop of
+ * The client's address as a reverse proxy reports it: the **first** hop of
  * `X-Forwarded-For`.
  *
- * Render's proxy appends, so the header reads `<client>, <proxy>, …` and the
- * left-most entry is the caller. Taking the last would name Render's own edge on
+ * The proxy appends, so the header reads `<client>, <proxy>, …` and the
+ * left-most entry is the caller. Taking the last would name the proxy's own edge on
  * every line, which is the same value every time and therefore attributes
  * nothing. The header is spoofable by a direct caller, but cg-idp is only
  * reachable through that proxy, which overwrites the hop it adds.

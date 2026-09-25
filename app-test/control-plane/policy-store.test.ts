@@ -50,7 +50,7 @@ describe("the seed", () => {
    * The stage-edit case, which is the one that would actually bite.
    *
    * `governance.db` is editable live and `DESIGN.md` says so — that is the
-   * point of the rule editor and of the `sqlite3` shell on the Render disk. So
+   * point of the rule editor and of a `sqlite3` shell on the deployment's disk. So
    * "the seed spells it right" is a weaker claim than it looks: the rule that
    * fires on stage is whatever the row says at that moment. Put the dot back
    * and the control plane refuses the whole policy and fails closed, which is
@@ -273,7 +273,7 @@ describe("the audit log", () => {
     // old write is no longer a thing the database will accept at all. Stated
     // as the insert the old code used to make, because "nothing writes it any
     // more" is a claim about this repo and "the column is gone" is a claim
-    // about every connection — including a `sqlite3` shell on the Render disk.
+    // about every connection — including a `sqlite3` shell on the deployment's disk.
     const db = fresh();
 
     expect(() =>

@@ -5,7 +5,7 @@
  *    someone edits generated output by hand, it works, and the next regeneration
  *    silently reverts it.
  * 2. Payloads Arcade actually sent parse. The shapes below are the ones captured
- *    in `docs/spikes/evidence/02-remote-mcp-hooks-transcript.md`, with the
+ *    in spike #2's transcript against a real Arcade project, with the
  *    toolkit and tool names replaced by neutral ones (`packages/` carries no
  *    business-domain vocabulary — see `src/domain.ts`). Everything structural is
  *    verbatim, including the parts that look like mistakes and are not.

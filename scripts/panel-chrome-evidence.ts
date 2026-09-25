@@ -13,7 +13,7 @@
  * Usage:
  *
  *     bun scripts/panel-chrome-evidence.ts \
- *       --out docs/evidence --prefix 158-after --label "slice/158-panel-restyle"
+ *       --out /tmp/panel-evidence --prefix 158-after --label "slice/158-panel-restyle"
  *
  * `--web-dir` runs a different checkout's app (`apps/web` before #3), which is how the "before"
  * half is produced without editing anything:
@@ -21,7 +21,7 @@
  *     git worktree add --detach /tmp/cg-before f4130c3
  *     (cd /tmp/cg-before && bun install)
  *     bun scripts/panel-chrome-evidence.ts \
- *       --web-dir /tmp/cg-before/apps/web --out docs/evidence \
+ *       --web-dir /tmp/cg-before/apps/web --out /tmp/panel-evidence \
  *       --prefix 158-before --label "main at f4130c3"
  *
  * It starts a Next dev server and a headless Chrome on OS-assigned ports and

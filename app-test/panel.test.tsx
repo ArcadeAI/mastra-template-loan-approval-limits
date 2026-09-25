@@ -566,9 +566,9 @@ describe("the connection, said out loud", () => {
   test("the live stream says LIVE and names the host it is watching", () => {
     // #81: "Live" alone is a word a replay could print. The host is the part
     // somebody at the back of the room can check against the deployment.
-    const markup = render([], { source: { mode: "hooks", host: "cg-hooks.onrender.com" } });
+    const markup = render([], { source: { mode: "hooks", host: "cg-hooks.example.com" } });
 
-    expect(markup).toContain("LIVE · cg-hooks.onrender.com");
+    expect(markup).toContain("LIVE · cg-hooks.example.com");
     expect(markup).not.toContain("FIXTURE REPLAY");
   });
 });
@@ -576,7 +576,7 @@ describe("the connection, said out loud", () => {
 describe("no prose on the projector", () => {
   // The layer-2 caveat (DESIGN.md open risk 2) was a paragraph in the bottom
   // left. Design review cut it: nobody at the back of a room reads a footnote,
-  // and the space belonged to the lanes. It lives in docs/app.md now.
+  // and the space belonged to the lanes. DESIGN.md's open risk 2 is where it lives.
   test("the bottom-left paragraph is gone", () => {
     const markup = render(aGovernanceEventSequence());
 
@@ -871,10 +871,10 @@ describe("the chrome is one row", () => {
   });
 
   test("the stream badge and the connection are inside that row", () => {
-    const markup = render([], { source: { mode: "hooks", host: "cg-hooks.onrender.com" } });
+    const markup = render([], { source: { mode: "hooks", host: "cg-hooks.example.com" } });
     const header = markup.slice(markup.indexOf("<header"), markup.indexOf("</header>"));
 
-    expect(header).toContain("LIVE · cg-hooks.onrender.com");
+    expect(header).toContain("LIVE · cg-hooks.example.com");
     expect(header).toContain("Live");
     expect(header).toContain("Control plane");
   });
@@ -890,7 +890,7 @@ describe("the chrome is one row", () => {
       <ControlPlanePanelView
         timeline={appendEvents(emptyTimeline(), [])}
         status="live"
-        source={{ mode: "hooks", host: "cg-hooks.onrender.com" }}
+        source={{ mode: "hooks", host: "cg-hooks.example.com" }}
         controlPlane={<section className="cg-control-plane">HEALTHY</section>}
       />,
     );

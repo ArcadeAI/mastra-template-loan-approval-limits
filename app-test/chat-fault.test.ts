@@ -4,7 +4,7 @@
  * #92's symptom was a browser reading *"The chat route answered 500."* — every
  * word of which came from `components/chat/Chat.tsx`'s fallback, because the
  * response was Next's stock HTML error page and carried nothing to render. The
- * cause (`Cannot find module 'ws'`) existed only in a Render log.
+ * cause (`Cannot find module 'ws'`) existed only in a deploy log.
  *
  * So the claim under test is: **whatever throws, the response is JSON and it
  * names the step.** Three throws, at three different depths:

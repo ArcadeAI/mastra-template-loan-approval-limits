@@ -21,8 +21,9 @@
  *    and `APPROVALS_STORE_TOKEN`, the hook extension (three URLs and
  *    `health_check_path`), and the custom verifier, which it reads back.
  * 6. **Prints** the two dashboard forms the API cannot fill, the User Source
- *    and the gateway, and what is left: restart the app, start the tunnel,
- *    `arcade deploy` both toolkits.
+ *    and the gateway, and what is left, in the README Quickstart's order:
+ *    restart the app, start the tunnel, fill in the User Source form,
+ *    `arcade deploy` both toolkits, fill in the gateway form, open the app.
  *
  * `--dry-run` writes nothing and sends nothing: it prints every request a real
  * run makes, in order, with the key and every secret as a placeholder. Which
@@ -39,7 +40,7 @@ import { join } from "node:path";
 
 import { ArcadeAdmin, ArcadeError, pluginBody, PLUGIN_NAME, PROVIDER_ID, providerBody, providerDifferences, type Registration, verifierBody } from "./setup-arcade/arcade.ts";
 import { fillBlanks, parseEnv, readEnvFile, writeEnvFile } from "./setup-arcade/env-file.ts";
-import { gatewayForm, userSourceForm } from "./setup-arcade/forms.ts";
+import { gatewayForm, nextSteps, userSourceForm } from "./setup-arcade/forms.ts";
 
 const USER_SOURCE_CALLBACK = "https://cloud.arcade.dev/oauth2/intermediate_callback";
 const CLIENT_KEYS = ["arcade", "arcade-user-source", "web"] as const;
@@ -219,6 +220,8 @@ if (dryRun) {
   out(userSourceForm({ origin, clientId: "<the arcade-user-source client id>", clientSecret: "<its secret, minted by this run>" }));
   out();
   out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
+  out();
+  out(nextSteps({ host, origin, port: effective("PORT") || "3000" }));
   process.exit(0);
 }
 
@@ -346,8 +349,9 @@ if (!providerExists) {
   provider = await step("creating the provider", () => admin.expect("POST", "/v1/admin/auth_providers", providerBody(registration)));
 }
 
-// Arcade generates the provider's callback, one per provider (docs/spikes/05:
-// `…/oauth/<id>/callback`), and the `arcade` client must allowlist it exactly.
+// Arcade generates the provider's callback, one per provider (measured in the
+// custom-verifier spike: `…/oauth/<id>/callback`), and the `arcade` client must
+// allowlist it exactly.
 const callback = (provider as { oauth2?: { redirect_uri?: string } } | null)?.oauth2?.redirect_uri;
 if (callback && !client("arcade").redirect_uris.includes(callback)) {
   const key = "IDP_OAUTH_REDIRECT_URIS_ARCADE";
@@ -420,9 +424,5 @@ out("\nTwo dashboard forms are left. Arcade's API cannot fill these:\n");
 out(userSourceForm({ origin, clientId: client("arcade-user-source").client_id, clientSecret: userSourceSecret }));
 out();
 out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
-out(`
-Then:
-  1. Restart \`bun run dev\`, so the app reads the new .env.
-  2. Start the tunnel: ngrok http --url=${host} ${effective("PORT") || "3000"}
-  3. Deploy the toolkits (their secrets are set above): arcade deploy, in tools/loan and in tools/approvals.
-  4. Open ${origin}, never localhost, and sign in.`);
+out();
+out(nextSteps({ host, origin, port: effective("PORT") || "3000" }));

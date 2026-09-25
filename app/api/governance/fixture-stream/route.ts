@@ -140,8 +140,8 @@ export function GET(request: Request): Response {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
-      // Render sits behind a proxy that will otherwise buffer the whole
-      // response and deliver the acts all at once, at the end.
+      // A hosted deployment sits behind a reverse proxy that will otherwise
+      // buffer the whole response and deliver the acts all at once, at the end.
       "x-accel-buffering": "no",
     },
   });

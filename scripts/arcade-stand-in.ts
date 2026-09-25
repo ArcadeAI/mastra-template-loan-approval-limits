@@ -2,7 +2,7 @@
  * A stand-in for Arcade's tool-execution endpoint, runnable by a person.
  *
  * **This is not the product.** It is a development fixture, in the same
- * category as the persona switcher and `apps/idp`: it exists so the two beats
+ * category as the persona switcher and `scripts/dev-idp.ts`: it exists so the two beats
  * of the approval flow can be driven on a laptop, and a forker can delete it.
  * Nothing under `app/` imports it, and it is never in the deployed image.
  *
@@ -10,9 +10,9 @@
  *
  * Pressing Approve calls `Approvals.Decide` **through Arcade**, as the clicking
  * user. That is the point of the slice and it is not negotiable — there is no
- * privileged path in `apps/web` that records a decision without a hook. But
+ * privileged path in the app that records a decision without a hook. But
  * until #13 registers the gateway and the provider there is no Arcade to call,
- * so `apps/web` pointed at `api.arcade.dev` with no key and the page said
+ * so the app pointed at `api.arcade.dev` with no key and the page said
  * "Arcade answered 401". The behaviour was correct and the demo was
  * unrunnable, which is its own kind of wrong: this file was already the fix,
  * living inside `app-test/harness.ts` where only `bun test` could reach it.
@@ -48,8 +48,8 @@
  */
 /**
  * The two bearers the stand-in needs, and the development values it falls back
- * to — the same ones `apps/hooks` falls back to outside production, so the
- * local three-terminal run in `docs/app.md` needs no secrets at all.
+ * to — the same ones the control plane falls back to outside production, so a
+ * local run against this stand-in needs neither secret.
  * `app-test/config.test.ts` reads the control plane's source and fails if either
  * literal drifts.
  */

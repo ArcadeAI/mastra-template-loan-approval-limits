@@ -136,7 +136,7 @@ console.log(
 // The rows above are real ones, written by the real handlers, so the cheapest
 // honest way to price the table is to vacuum this database into a file and
 // compare it with an empty one. `VACUUM INTO` writes the compacted on-disk
-// form, which is what a Render volume actually holds.
+// form, which is what a deployment's disk actually holds.
 
 const { statSync, mkdtempSync, rmSync } = await import("node:fs");
 const { tmpdir } = await import("node:os");

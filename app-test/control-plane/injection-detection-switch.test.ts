@@ -148,7 +148,7 @@ async function health(base: string): Promise<{
 describe("the setting the demo path runs on", () => {
   test("unset is armed — losing act 4 has to be something somebody typed", () => {
     // The whole point of "off-by-default-safe". A rehearsal that forgets the
-    // variable, a Render service whose env was never edited, a fresh clone:
+    // variable, a deployment whose env was never edited, a fresh clone:
     // all of them run the control.
     expect(readConfig({ APP_PUBLIC_HOST: "localhost:1" }).injectionDetection).toBe("armed");
   });
@@ -236,7 +236,7 @@ describe("disarmed by the switch, which is the control run", () => {
     expect(body.override).toBeUndefined();
 
     // 200 with `degraded` (#112). The refusal is the /post above, not the
-    // status code Render reads.
+    // status code a host's health check reads.
     const health = await fetch(`${instance.base}/health`);
     expect(health.status).toBe(200);
     expect(((await health.json()) as { status: string }).status).toBe("degraded");

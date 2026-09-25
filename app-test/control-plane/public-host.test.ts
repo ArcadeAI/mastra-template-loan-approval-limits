@@ -2,10 +2,10 @@
  * A cross-service address this service cannot possibly reach is a startup
  * failure.
  *
- * The measurement behind it is #59: `render.yaml` derived every cross-service
- * host with `fromService … property: host`, and Render emitted the bare service
- * name — `IDENTITY_HOST` on `cg-loan-app` was `cg-idp-or5b`, not
- * `cg-idp-or5b.onrender.com`. Consumers prepend a scheme and nothing else, so
+ * The measurement behind it is #59: the stage demo's deployment derived every
+ * cross-service host from its host's service references, and what arrived was
+ * the bare service name — `IDENTITY_HOST` on `cg-loan-app` was `cg-idp-or5b`,
+ * not its FQDN. Consumers prepend a scheme and nothing else, so
  * the request went somewhere DNS cannot resolve and surfaced as "the dependency
  * could not be reached" against a dependency that was up.
  *
@@ -93,15 +93,16 @@ const ACCEPTED = [
   "[::1]",
   "[::1]:9000",
   "[::1]:4412",
-  "cg-loan-app.onrender.com",
-  "cg-web-sa31.onrender.com",
-  "cg-hooks.onrender.com:443",
+  "cg-loan-app.example.com",
+  "cg-web-sa31.example.com",
+  "cg-hooks.example.com:443",
   "example.test",
 ];
 
 /**
  * Nothing here is reachable. The first five are bare service names — what
- * `fromService` produced, and what a hand-typed key produces again.
+ * a derived service reference produced (#59), and what a hand-typed key
+ * produces again.
  *
  * The rest are round 1 of #67. The first cut of this check let any value
  * through once bracket-stripping left a colon in it, so `[::2]` — no dot, not
@@ -124,8 +125,8 @@ const REFUSED = [
   "localhost:bad",
   "localhost:0",
   "localhost:65536",
-  "cg-hooks.onrender.com:bad",
-  "https://cg-hooks.onrender.com",
+  "cg-hooks.example.com:bad",
+  "https://cg-hooks.example.com",
 ];
 
 test.each(ACCEPTED)("%p is a host something can resolve", (value) => {
@@ -142,7 +143,7 @@ test.each(REFUSED)("%p is refused: it is a service name, not a hostname", (value
 
 test("the refusal names the variable, its value, and where the real one comes from", () => {
   // The whole worth of this check is the message: whoever reads it is about to
-  // go and find the right string, and the right string is on one specific page.
+  // go and find the right string, and the right string is the app's own public host.
   try {
     assertPublicHost("APP_PUBLIC_HOST", "cg-loan-app");
     throw new Error("expected a refusal");
@@ -150,8 +151,8 @@ test("the refusal names the variable, its value, and where the real one comes fr
     expect(cause).toBeInstanceOf(PublicHostError);
     const { message } = cause as Error;
     expect(message).toContain("APP_PUBLIC_HOST=cg-loan-app");
-    expect(message).toContain("Render dashboard");
-    expect(message).toContain("cg-web-sa31");
+    expect(message).toContain("the host part of its public URL");
+    expect(message).toContain("Never derive or guess it");
   }
 });
 
@@ -162,7 +163,7 @@ test("the refusal names the variable, its value, and where the real one comes fr
  */
 test("readConfig refuses a bare service name, and passes a hostname through", () => {
   expect(() => readConfig({ APP_PUBLIC_HOST: "cg-loan-app" })).toThrow(PublicHostError);
-  expect(() => readConfig({ APP_PUBLIC_HOST: "cg-loan-app.onrender.com" })).not.toThrow();
+  expect(() => readConfig({ APP_PUBLIC_HOST: "cg-loan-app.example.com" })).not.toThrow();
   expect(() => readConfig({})).not.toThrow();
 });
 
@@ -195,7 +196,7 @@ test.each(["cg-loan-app", "[::2]", "cg-loan-app:bad", "foo:bar"])(
       // 78 is sysexits' EX_CONFIG, the same status `apps/loan-app/scripts/dev-idp.ts` uses.
       expect(status).toBe(78);
       expect(stderr).toContain(`APP_PUBLIC_HOST=${host}`);
-      expect(stderr).toContain("Render dashboard");
+      expect(stderr).toContain("the host part of its public URL");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -204,7 +205,7 @@ test.each(["cg-loan-app", "[::2]", "cg-loan-app:bad", "foo:bar"])(
 );
 
 /** The other side of the line: each accepted shape still boots and serves. */
-test.each(["cg-loan-app.onrender.com", "localhost:8082", "127.0.0.1:1234", "[::1]:9000"])(
+test.each(["cg-loan-app.example.com", "localhost:8082", "127.0.0.1:1234", "[::1]:9000"])(
   "the control plane starts on %p",
   async (host) => {
     const dir = mkdtempSync(join(tmpdir(), "cg-public-host-"));
@@ -253,7 +254,7 @@ test("an unrelated configuration error still fails, and not as EX_CONFIG", async
         NODE_ENV: "production",
         GOVERNANCE_DB_PATH: join(dir, "governance.db"),
         ARCADE_HOOK_SIGNING_SECRET: "",
-        APP_PUBLIC_HOST: "cg-loan-app.onrender.com",
+        APP_PUBLIC_HOST: "cg-loan-app.example.com",
       },
       stdout: "pipe",
       stderr: "pipe",

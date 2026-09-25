@@ -283,6 +283,17 @@ describe("each check bites on a planted violation", () => {
     expect(brokenRelativeLinks(`${README}\n[start](#quickstart-)\n`)).toEqual([]);
   });
 
+  test("a link into a doc #11 deleted, planted in the README itself", () => {
+    // The README linked into all three until #11 removed them; each one is now
+    // a dead link the check has to catch.
+    const planted = `${README}\n[runbook](./docs/RUNBOOK.md), [app](./docs/app.md) and [spikes](./docs/spikes/04-user-source.md)\n`;
+    expect(brokenRelativeLinks(planted)).toEqual([
+      "./docs/RUNBOOK.md: no such file",
+      "./docs/app.md: no such file",
+      "./docs/spikes/04-user-source.md: no such file",
+    ]);
+  });
+
   test("a URL nobody verified", () => {
     expect(unverifiedUrls("[keys](https://console.anthropic.com/) and [studio](http://localhost:4111)")).toEqual([
       "https://console.anthropic.com/",

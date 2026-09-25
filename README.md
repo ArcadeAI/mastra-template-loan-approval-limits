@@ -149,27 +149,28 @@ The three databases are SQLite files on disk, gitignored, and seeded from their 
 
 ## What we measured
 
-Some questions could not be answered from documentation, so they were spiked against a real Arcade project. The transcripts are in [`docs/spikes/`](./docs/spikes/).
+Some questions could not be answered from documentation, so they were spiked against a real Arcade project.
 
-- **Do contextual-access hooks fire for tools we do not host ourselves?** Yes. `/access`, `/pre` and `/post` fire for a remote MCP server's tools with a payload identical in shape to a hosted toolkit's, and Arcade confirmed they apply to `arcade deploy`'d toolkits, which is the path this template runs on. The same spike found that layer-2 refusals fire no hook. See [`02-remote-mcp-hooks.md`](./docs/spikes/02-remote-mcp-hooks.md).
-- **Does Arcade's stock Slack provider grant a user token that can post?** Yes, a delegated user token, so the approval DM arrives under the requester's own name with no app badge, and there is no custom Slack app and no bot fallback. The toolkit requests four scopes, not three: `users:read` is a prerequisite for `users:read.email`, and Slack refuses the authorize request without it. See [`03-slack-scopes.md`](./docs/spikes/03-slack-scopes.md).
+- **Do contextual-access hooks fire for tools we do not host ourselves?** Yes. `/access`, `/pre` and `/post` fire for a remote MCP server's tools with a payload identical in shape to a hosted toolkit's, and Arcade confirmed they apply to `arcade deploy`'d toolkits, which is the path this template runs on. The same spike found that layer-2 refusals fire no hook.
+- **Does Arcade's stock Slack provider grant a user token that can post?** Yes, a delegated user token, so the approval DM arrives under the requester's own name with no app badge, and there is no custom Slack app and no bot fallback. The toolkit requests four scopes, not three: `users:read` is a prerequisite for `users:read.email`, and Slack refuses the authorize request without it.
 - **What survives a hook denial, over MCP, all the way to the UI?** Enough to tell a decision from an outage. The `[ref evt_…]` token survives every layer, so the chat draws a denial card only on positive evidence of a hook decision, and every other tool failure is a fault card that says no decision was made. A control surface must never assert a control-plane action that did not happen.
 - **The model reads an injected note and stops.** With `LN-2291`'s pasted instruction visible, the $95K request reached `/pre` roughly 5 times in 17: the model read the injection, refused it, and ended the turn asking whether to proceed. With `/hooks/post` stripping the note first, 5 of 5. Act 4's control is act 2's prerequisite, and the fix was removing what the model was reading, never steering it.
-- The two identity spikes, [`04-user-source.md`](./docs/spikes/04-user-source.md) and [`05-custom-verifier.md`](./docs/spikes/05-custom-verifier.md), are the working record of the two-hop design, including OAuth misconfigurations that each fire no hook and leave the control plane dark.
+- **Can the control plane see an OAuth misconfiguration?** No. The two identity spikes found several, and each one fired no hook and left the control plane dark. The two-hop design they led to is in [`DESIGN.md`](./DESIGN.md#identity-and-oauth).
 
-## Deploying to Render
+## Deploying
 
-The Quickstart runs on your machine behind ngrok. [`render.yaml`](./render.yaml) is the stage demo's Render blueprint, reshaped for the one app: a single service, `cg-web`, built from the root `Dockerfile` with `runtime: docker` (Render does not detect Bun) and holding all three databases on one 1 GB disk. The toolkits are not in it, because they ship with `arcade deploy`. Secrets are `sync: false`, so a blueprint sync prompts for them rather than committing them.
+The Quickstart runs the app on your machine behind ngrok. To host it instead, build the root `Dockerfile`. It makes one image, running on Bun, that serves everything on one host: the pages, the hooks under `/hooks`, the loan API under `/bank` and the identity provider. The two toolkits are not in it, because they ship with `arcade deploy`. CI builds the image and boots it on every push.
 
-- **A redeploy is not a reset.** The databases seed from their fixtures only when empty, and the disk survives a deploy, so every stage edit and every approval carries forward.
-- **The disk holds the OAuth clients Arcade is registered against.** Without it, `idp.db` is recreated on every restart, the clients change, and the registration in Arcade goes stale.
-- **A service with a disk gives up zero-downtime deploys.** Render stops the old instance before starting the new one.
+- **The variables are the ones in `.env.example`.** Set `APP_PUBLIC_HOST` to the deployment's own host. The image runs in production mode, so nothing falls back to a development value: without `ARCADE_HOOK_SIGNING_SECRET`, `APPROVALS_STORE_TOKEN` and `BETTER_AUTH_SECRET` the app still starts, but the control plane and the identity provider refuse to, and `/health` names the refusal.
+- **One persistent disk holds all three databases.** Point `GOVERNANCE_DB_PATH`, `LOANS_DB_PATH` and `IDP_DB_PATH` at files on it, for example under `/data`. Without it the databases are recreated with every new container.
+- **A redeploy is not a reset.** The databases seed from their fixtures only when empty, and the disk survives a deploy, so every edit and every approval carries forward. `bun run reset` is the way back.
+- **The disk holds the OAuth clients Arcade is registered against.** If `idp.db` is recreated, the clients change and the registration in Arcade goes stale.
 
 ## Further reading
 
 - [`DESIGN.md`](./DESIGN.md) is the authoritative record: architecture, contracts, and the reasoning behind each decision.
-- [`docs/RUNBOOK.md`](./docs/RUNBOOK.md) is the rehearsal script for all four acts, with the prompts as measured and a failure playbook. It was written for the stage demo's Render deployment, so its hostnames and service names predate the one-app shape.
-- [`docs/DOMAIN-SWAP.md`](./docs/DOMAIN-SWAP.md) walks through pointing the template at your own business system. Its `apps/*` paths predate the one-app shape: `apps/loan-app` is now `lib/loans/`, `apps/idp` is `lib/identity/provider/`, and `apps/web` is the repo root.
+- [`docs/DOMAIN-SWAP.md`](./docs/DOMAIN-SWAP.md) walks through pointing the template at your own business system.
+- [`docs/control-plane.md`](./docs/control-plane.md) is the control plane's own reference: the hooks, `governance.db`, drift and reset, the live stream and the audit log.
 
 ## About Mastra templates
 

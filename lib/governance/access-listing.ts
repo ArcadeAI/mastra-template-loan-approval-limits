@@ -62,7 +62,7 @@ const GOVERNED: ReadonlyArray<{ tool: string; hidden: boolean }> = [
  *
  * The count is the deployed measurement: one `tools/list` produced 8,278
  * `/access` frames, six of them this project's tools and **8,272** denials of
- * everything else (`docs/spikes/05-custom-verifier.md`, quoted in
+ * everything else (the custom-verifier spike, quoted in
  * `lib/control-plane/access-audit.ts`). So the card shows the order of magnitude
  * a real listing carries rather than a rounded stand-in.
  *

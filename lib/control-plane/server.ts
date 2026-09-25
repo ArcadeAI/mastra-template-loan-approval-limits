@@ -330,8 +330,8 @@ export function createControlPlane(deps: ServerDeps) {
    *
    * This endpoint used to answer 503 while the policy failed to compile, which
    * read correctly as "the control plane is unhealthy" and worked out badly:
-   * `render.yaml` points `healthCheckPath` here, so on 2026-09-14 a stale rule
-   * that #89's guard refuses took cg-hooks out of rotation and Render served
+   * the stage demo's host health-checked this path, so on 2026-09-14 a stale rule
+   * that #89's guard refuses took cg-hooks out of rotation and the host served
    * its own 502 page over the top. The control plane was not failing closed,
    * it was unreachable — Arcade reported "tool access policy service could not
    * be reached", the panel went dark, and the one-off fix could not even be

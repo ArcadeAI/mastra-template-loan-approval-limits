@@ -26,7 +26,7 @@
  * answers 401, and `apps/loan-app` reports "The identity provider rejected the
  * token." from a request nobody made twice on purpose.
  *
- * **Measured on Render, 2026-09-14.** cg-web fetched `next_uri` exactly once
+ * **Measured on the stage demo's deployment, 2026-09-14.** cg-web fetched `next_uri` exactly once
  * (`21:05:28.094Z [verifier] next_uri answered 200, location (none)`) and cg-idp
  * rejected a second `authorization_code` exchange 290 ms later
  * (`21:05:28.383Z … code=already_consumed`). The second hit is Arcade's, not the

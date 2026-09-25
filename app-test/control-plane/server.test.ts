@@ -97,7 +97,7 @@ describe("bearer auth", () => {
     expect(auditCount(db)).toBe(before);
   });
 
-  test("/health needs no token: Render and Arcade both probe it bare", async () => {
+  test("/health needs no token: a host's health check and Arcade both probe it bare", async () => {
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -261,7 +261,7 @@ describe("fails closed, and the failure is audited", () => {
   });
 
   // /health answers 200 here, and that is #112 rather than a weakened
-  // assertion: Render health-checks this path, and the 503 this test used to
+  // assertion: a host health-checks this path, and the 503 this test used to
   // require is what turned a control plane correctly failing closed into a 502
   // page nobody could read the reason off. The refusal moved into the body and
   // stayed on the three hooks, which the rest of this test still holds.
@@ -462,7 +462,7 @@ describe("a cold cache fails closed", () => {
       expect(recent(real, 1)[0]).toMatchObject({ hook: "post", execution_id: "tc_cold_post", decision: "deny", rule_id: null });
 
       // 200 with `degraded`, not 503 (#112): a cold cache is a process that is
-      // up and refusing, and Render must be able to read that rather than
+      // up and refusing, and the host must be able to read that rather than
       // replace it with its own 502.
       const health = await fetch(`http://localhost:${srv.port}/health`);
       expect(health.status).toBe(200);
@@ -552,7 +552,7 @@ describe("latency", () => {
 
     // #107, and the number this whole slice exists for. The same call used to
     // append one audit row per catalogue entry — more than ten thousand of
-    // them, each one an SSE frame as well — which is how the Render disk got
+    // them, each one an SSE frame as well — which is how the stage demo's disk got
     // to 413,832 rows with nothing looping. Now it is one row per governed
     // tool plus one summary row for everything else.
     const entries = Object.values(toolkits).reduce((n, t) => n + Object.keys(t.tools).length, 0);

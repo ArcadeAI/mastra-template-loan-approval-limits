@@ -5,7 +5,7 @@
  * reached the live disk, so the service ran one output rule and one injection
  * pattern for a fortnight while `/health` reported `armed`. Then #89 added a
  * compile guard, the disk still held the text it refuses, cg-hooks came up
- * fail-closed, `/health` answered 503, and Render turned that into a 502 over
+ * fail-closed, `/health` answered 503, and the host turned that into a 502 over
  * the whole control plane. Recovery took three manual reseeds — two of them
  * against a rolled-back image, so they wrote the old text back — and a
  * hand-written `UPDATE`.
@@ -64,7 +64,7 @@ const baseConfig: HooksConfig = {
  * The fixture as it read before #89: the remediation sentence naming its tools
  * the way a hook payload spells them rather than the way the model's own tool
  * list does. Byte for byte the difference a789e63 landed, and byte for byte
- * what the Render disk still held when that commit deployed.
+ * what the stage demo's disk still held when that commit deployed.
  *
  * Derived from the shipped fixture rather than checked in as a copy, so it
  * cannot rot into a file nobody edits: if the rule is reworded, this reproduces

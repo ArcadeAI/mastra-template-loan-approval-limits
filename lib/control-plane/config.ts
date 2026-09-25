@@ -15,7 +15,7 @@ import { readPersonaEmailOverrides } from "@cg/policy-schema/contract/persona-em
 
 /**
  * The bearer token Arcade presents on every hook call. Refused under
- * NODE_ENV=production — Render prompts for the real one (`sync: false`).
+ * NODE_ENV=production — a deployment sets the real one.
  */
 const DEV_SECRET = "cg-hooks-dev-secret-not-for-production";
 

@@ -24,7 +24,7 @@
  *    instead — which is where every `/pre` row on a live panel comes from now.
  *
  * It also **measures the burst**, and prints the spread, which is the number
- * `ACCESS_GROUP_WINDOW_MS` is justified against in `docs/app.md`. The
+ * `ACCESS_GROUP_WINDOW_MS` is justified against. The
  * window is asserted to be comfortably wider than what a real listing spreads
  * over rather than assumed to be.
  */
