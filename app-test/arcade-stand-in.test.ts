@@ -23,6 +23,7 @@ import { ApprovalRecord } from "@cg/policy-schema";
 import { readWebConfig, type WebConfig } from "../lib/config.ts";
 import { submitDecision } from "../lib/decide.ts";
 import { spawnChild } from "./child.ts";
+import { childEnv } from "./child-env.ts";
 import {
   DANA,
   HOOK_SECRET,
@@ -43,19 +44,18 @@ let banner = "";
 beforeAll(async () => {
   hooks = await startHooks();
 
-  // No PORT in the environment on purpose: the script must bind :0 and print
-  // what it got, which is the contract the README's three-terminal run leans
-  // on when a reader has not exported one.
+  // No ARCADE_API_URL on purpose, set empty so a root `.env.local` cannot
+  // supply one: the script must bind :0 and print what it got, which is the
+  // contract a local run leans on when a reader has not configured one.
   standIn = spawnChild({
     cmd: ["bun", join(REPO, "scripts", "arcade-stand-in.ts")],
     cwd: REPO,
-    env: {
-      ...process.env,
-      PORT: "",
+    env: childEnv({
+      ARCADE_API_URL: "",
       APP_PUBLIC_HOST: hooks.host,
       ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
       APPROVALS_STORE_TOKEN: STORE_TOKEN,
-    },
+    }),
     stdout: "pipe",
     stderr: "pipe",
   });
