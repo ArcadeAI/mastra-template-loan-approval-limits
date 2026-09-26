@@ -38,10 +38,14 @@
  *
  * **One grant per Studio process**, held in memory and gone on restart. That is
  * the browser rule restated for a process that serves one developer: one
- * persona per browser there, one per Studio here, no fourth database. Signing
- * in again replaces the grant. The redirect must be loopback, so this is a
- * local development surface and nothing else; the routes refuse any other
- * origin rather than hold a bearer for whoever reached them.
+ * persona per browser there, one per Studio here, and no database holds it.
+ * Signing in again replaces the grant. The redirect must be loopback, so this
+ * is a local development surface and nothing else; the routes refuse any
+ * other origin rather than hold a bearer for whoever reached them.
+ *
+ * Studio's thread memory (#36) is a file, `memory.db` (`memory.ts`), and it
+ * keeps conversations, never the grant: every message is written with its
+ * secrets withheld, this grant's tokens first among them (`studioSecrets`).
  *
  * What this rests on that only a real Arcade account can confirm is listed on
  * #7, and the first line of it is that Arcade's gateway authorization server
