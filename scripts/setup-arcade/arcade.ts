@@ -28,15 +28,33 @@
  *   `GET` on the same path, because a verifier that did not take is open
  *   risk 2 (DESIGN.md) and fails where no hook fires.
  *
- * The User Source, the hooks and the gateway are printed as dashboard forms
- * instead (`forms.ts`): the spec has no User Source endpoint, and
- * `POST /v1/gateways` has no field that attaches one. The hooks were sent to
- * `/v1/plugins` until #28, and real Arcade has no such route: plugins and hooks
- * live only under `/v1/orgs/{org_id}/projects/{project_id}/…`, and a project
- * key has no route that names its org or project. Nothing here calls a plugins
- * or hooks route, nothing ever creates a gateway, and
- * nothing names the header auth type, which is Arcade Headers mode (DESIGN.md
- * rules it out); `app-test/setup-arcade.test.ts` fails if either appears.
+ * Since #30 two more go through the API, under the org and project
+ * `context.ts` resolves, because the human measured that a project key is
+ * answered there (`GET …/plugins` and `GET …/gateways`, 200). Field names are
+ * the live swagger's (`api.arcade.dev/v1/swagger`, fetched on #30); methods
+ * are the swagger's too, and unproven until the live run, which is how the
+ * secrets' POST turned out wrong (#26):
+ *
+ * - the hooks: one webhook plugin, `POST /v1/orgs/{org_id}/projects/{project_id}/plugins`
+ *   (`schemas.CreatePluginRequest`), whose `webhook_config.endpoints` are the
+ *   three inline hooks. Found by name first (`GET …/plugins`), and `PATCH`ed
+ *   (`schemas.PatchPluginRequest`) when it differs: hooks are not the access
+ *   model the way the provider is. Read back with `GET …/plugins/{id}` and the
+ *   hooks it made, `GET …/hooks?plugin_id=`, which is where a hook's phase and
+ *   failure mode are reported;
+ * - the gateway: `POST /v1/orgs/{org_id}/projects/{project_id}/gateways`
+ *   (`schemas.CreateGatewayRequest`), in the shape the Arcade CLI sends it
+ *   (`arcade_cli/connect.py` `create_gateway`: `tool_filter.allowed_tools`,
+ *   qualified `Toolkit.Tool` names), with `auth_type: "user_source"` and the
+ *   User Source's `us_` id. Found by slug first, and create-only like the
+ *   provider: the gateway's authentication is hop 1, the access model itself.
+ *   Read back with `GET …/gateways/{id}`.
+ *
+ * The User Source stays a dashboard form (`forms.ts`): the spec has no User
+ * Source route at all. Nothing here calls the bare `/v1/plugins`, which real
+ * Arcade answers 404 (#28), and nothing names the header auth type, which is
+ * Arcade Headers mode (DESIGN.md rules it out); `app-test/setup-arcade.test.ts`
+ * fails if either appears.
  *
  * Auth is `Authorization: Bearer <ARCADE_API_KEY>`, a project key, which
  * selects the project (spec `securitySchemes.Bearer`).
@@ -249,4 +267,151 @@ export class ArcadeAdmin {
     }
     return answer.json;
   }
+}
+
+// --- The org and project routes (#30) ---------------------------------------
+
+export interface ProjectScope {
+  orgId: string;
+  projectId: string;
+}
+
+/** `/v1/orgs/{org_id}/projects/{project_id}<suffix>`. */
+export function projectPath(scope: ProjectScope, suffix: string): string {
+  return `/v1/orgs/${encodeURIComponent(scope.orgId)}/projects/${encodeURIComponent(scope.projectId)}${suffix}`;
+}
+
+/** The name the hooks go by in Arcade, which is how a rerun finds them. */
+export const HOOKS_NAME = "loan-approval-limits-hooks";
+
+/**
+ * The three hook points, each a full URL because the extension has no base
+ * URL (`schemas.WebhookEndpointRequest`, measured by #4 and recorded on #7).
+ * `phase` is what the remote-MCP hooks spike registered, and `failure_mode` is
+ * required on every endpoint: fail closed, so an unreachable control plane
+ * refuses rather than permits.
+ */
+export const HOOK_POINTS = [
+  { point: "access", hookPoint: "tool.access", phase: "before" },
+  { point: "pre", hookPoint: "tool.pre", phase: "before" },
+  { point: "post", hookPoint: "tool.post", phase: "after" },
+] as const;
+
+export const HEALTH_CHECK_PATH = "/hooks/health";
+
+/** The webhook plugin, with the three hooks inline and `.env`'s bearer. */
+export function pluginBody(origin: string, hookToken: string) {
+  return {
+    name: HOOKS_NAME,
+    description: "The Loan Approval Limits control plane: /hooks/access, /hooks/pre, /hooks/post",
+    plugin_type: "webhook",
+    status: "active",
+    webhook_config: webhookConfig(origin, hookToken),
+  };
+}
+
+/** The same configuration as a `PATCH` (`schemas.PatchPluginRequest`), which has no `name` or `plugin_type` to change. */
+export function pluginPatch(origin: string, hookToken: string) {
+  const { description, status, webhook_config } = pluginBody(origin, hookToken);
+  return { description, status, webhook_config };
+}
+
+function webhookConfig(origin: string, hookToken: string) {
+  return {
+    auth: { type: "bearer", token: hookToken },
+    health_check_path: HEALTH_CHECK_PATH,
+    endpoints: Object.fromEntries(
+      HOOK_POINTS.map(({ point, phase }) => [
+        point,
+        { url: `${origin}/hooks/${point}`, phase, failure_mode: "fail_closed", status: "active" },
+      ]),
+    ),
+  };
+}
+
+/**
+ * `path: Arcade has X, this app needs Y`, one line per difference between a
+ * plugin as Arcade reads it back (`schemas.PluginResponse`) plus the hooks it
+ * made (`schemas.HookResponse`), and what this app needs. The bearer cannot be
+ * read back (`schemas.SecretResponse`), so only its presence is compared.
+ */
+export function pluginDifferences(plugin: unknown, hooks: unknown[], origin: string): string[] {
+  const differences: string[] = [];
+  const compare = (path: string, have: unknown, want: unknown) => {
+    if (JSON.stringify(have) !== JSON.stringify(want)) {
+      differences.push(`${path}: Arcade has ${JSON.stringify(have) ?? "nothing"}, this app needs ${JSON.stringify(want)}`);
+    }
+  };
+  compare("plugin_type", at(plugin, "plugin_type"), "webhook");
+  compare("status", at(plugin, "status"), "active");
+  compare("webhook_config.health_check_path", at(plugin, "webhook_config.health_check_path"), HEALTH_CHECK_PATH);
+  compare("webhook_config.auth.type", at(plugin, "webhook_config.auth.type"), "bearer");
+  if (at(plugin, "webhook_config.auth.token.exists") !== true) differences.push("webhook_config.auth.token: Arcade holds no bearer token");
+  for (const { point, hookPoint, phase } of HOOK_POINTS) {
+    compare(`webhook_config.endpoints.${point}.url`, at(plugin, `webhook_config.endpoints.${point}.url`), `${origin}/hooks/${point}`);
+    const hook = hooks.find((each) => at(each, "hook_point") === hookPoint);
+    if (hook === undefined) {
+      differences.push(`hooks: Arcade has no ${hookPoint} hook on this plugin`);
+      continue;
+    }
+    compare(`${hookPoint}.phase`, at(hook, "phase"), phase);
+    compare(`${hookPoint}.failure_mode`, at(hook, "failure_mode"), "fail_closed");
+    compare(`${hookPoint}.status`, at(hook, "status"), "active");
+  }
+  return differences;
+}
+
+/** The six tools the agent is given, as a gateway's `tool_filter` names them: `Toolkit.Tool`. */
+export function gatewayTools(loanToolkit: string, approvalsToolkit: string): string[] {
+  return [
+    ...["SearchLoans", "GetLoan", "ApproveLoan", "DenyLoan"].map((tool) => `${loanToolkit}.${tool}`),
+    ...["RequestApproval", "Decide"].map((tool) => `${approvalsToolkit}.${tool}`),
+  ];
+}
+
+/** The authentication hop 1 needs: the app's own sign-in, through the User Source. */
+export const GATEWAY_AUTH_TYPE = "user_source";
+
+export interface GatewaySpec {
+  slug: string;
+  userSourceId: string;
+  loanToolkit: string;
+  approvalsToolkit: string;
+}
+
+export function gatewayBody(spec: GatewaySpec) {
+  return {
+    name: "Loan Approval Limits",
+    description: "The loan officer's agent",
+    slug: spec.slug,
+    auth_type: GATEWAY_AUTH_TYPE,
+    user_source_id: spec.userSourceId,
+    tool_filter: { allowed_tools: gatewayTools(spec.loanToolkit, spec.approvalsToolkit) },
+  };
+}
+
+/** The same form of report as {@link pluginDifferences}, for a gateway read back (`schemas.GatewayResponse`). */
+export function gatewayDifferences(gateway: unknown, spec: GatewaySpec): string[] {
+  const differences: string[] = [];
+  const compare = (path: string, have: unknown, want: unknown) => {
+    if (JSON.stringify(have) !== JSON.stringify(want)) {
+      differences.push(`${path}: Arcade has ${JSON.stringify(have) ?? "nothing"}, this app needs ${JSON.stringify(want)}`);
+    }
+  };
+  compare("slug", at(gateway, "slug"), spec.slug);
+  compare("auth_type", at(gateway, "auth_type"), GATEWAY_AUTH_TYPE);
+  compare("user_source_id", at(gateway, "user_source_id"), spec.userSourceId);
+  const tools = at(gateway, "tool_filter.allowed_tools");
+  compare(
+    "tool_filter.allowed_tools",
+    Array.isArray(tools) ? [...tools].sort() : tools,
+    [...gatewayTools(spec.loanToolkit, spec.approvalsToolkit)].sort(),
+  );
+  return differences;
+}
+
+/** The `items` of one of Arcade's offset pages (`schemas.OffsetPage-*`). */
+export function pageItems(json: unknown): unknown[] {
+  const items = at(json, "items");
+  return Array.isArray(items) ? items : [];
 }

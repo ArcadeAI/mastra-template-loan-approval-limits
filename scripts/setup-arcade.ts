@@ -1,5 +1,5 @@
 /**
- * `bun run setup-arcade <ngrok-host> [--dry-run] [--gateway <slug>]` (#9)
+ * `bun run setup-arcade <ngrok-host> [--dry-run] [--user-source <id>] [--skip-deploy] [--gateway <slug>]` (#9, #30)
  *
  * Everything the Arcade side of this template needs, from one command, after
  * the developer has filled in the few required values in `.env`
@@ -7,24 +7,35 @@
  *
  * 1. **Refuses** to go on if `.env` is tracked by git or not gitignored: this
  *    command writes secrets into it.
- * 2. **Reads** the hop-2 provider `app-identity` back from Arcade. It is
+ * 2. **Resolves the Arcade org and project** (`setup-arcade/context.ts`):
+ *    `ARCADE_ORG_ID` and `ARCADE_PROJECT_ID`, else the Arcade CLI's active
+ *    context. Then, before anything is written, **one read-only call** under
+ *    them with the key, `GET …/plugins`: a 401, 403 or 404 means the key and
+ *    the resolved project disagree, and the run stops (#30).
+ * 3. **Reads** the hop-2 provider `app-identity` back from Arcade. It is
  *    create-only (DESIGN.md → "Arcade config is read-only"): if it exists and
  *    differs from what this app needs, the differences are printed and the run
  *    stops, having written nothing.
- * 3. **Mints** the app's three OAuth clients in `idp.db`: `arcade` (hop 2),
+ * 4. **Mints** the app's three OAuth clients in `idp.db`: `arcade` (hop 2),
  *    `arcade-user-source` (hop 1) and `web` (the app's own sign-in).
- * 4. **Fills in `.env`**, blanks only, never overwriting: `APP_PUBLIC_HOST`,
+ * 5. **Fills in `.env`**, blanks only, never overwriting: `APP_PUBLIC_HOST`,
  *    `SESSION_SECRET`, `BETTER_AUTH_SECRET`, `ARCADE_HOOK_SIGNING_SECRET`, `APPROVALS_STORE_TOKEN`,
  *    `IDP_OAUTH_CLIENTS` and the clients' redirect URIs, `IDP_CLIENT_ID` and
- *    `IDP_CLIENT_SECRET`, `ARCADE_GATEWAY_ID`, and `GOVERNANCE_STREAM=hooks`.
- * 5. **Registers by API**: the provider, the tool secrets `APP_PUBLIC_HOST`
- *    and `APPROVALS_STORE_TOKEN`, and the custom verifier, which it reads back.
- *    No plugins or hooks route (#28): real Arcade has no `/v1/plugins`.
- * 6. **Prints** the three dashboard forms the API cannot fill, the User Source,
- *    the gateway and the contextual access hooks, and what is left, in the
- *    README Quickstart's order (#30): start the app, start the tunnel,
- *    `arcade deploy` both toolkits, fill in the User Source form, the gateway
- *    form and the hooks form, open the app.
+ *    `IDP_CLIENT_SECRET`, `ARCADE_GATEWAY_ID`, `GOVERNANCE_STREAM=hooks`, and
+ *    `ARCADE_USER_SOURCE_ID` when `--user-source` gave one.
+ * 6. **Registers by API**: the provider, the tool secrets `APP_PUBLIC_HOST`
+ *    and `APPROVALS_STORE_TOKEN`, the custom verifier, and the contextual
+ *    access hooks (#30), each read back.
+ * 7. **Deploys both toolkits**: `arcade deploy` in `tools/loan`, then in
+ *    `tools/approvals`, streaming their output and stopping on a failure
+ *    (#30). `--skip-deploy` leaves them to the developer.
+ * 8. **Creates the gateway** by API, through the User Source, once it has the
+ *    User Source's id (`--user-source`, or `ARCADE_USER_SOURCE_ID`). Without
+ *    one it prints the User Source form, the one registration Arcade's API
+ *    cannot make, and the exact command that finishes the job.
+ *
+ * With no org and project to be found, the hooks and the gateway are printed as
+ * the dashboard forms they were before #30, and the run says why.
  *
  * `--dry-run` writes nothing and sends nothing: it prints every request a real
  * run would make from the state on disk, in order, with the key and every
@@ -33,10 +44,12 @@
  * holds the callback Arcade returns when it creates the provider, and `idp.db`
  * holds the clients (#28). Which registration goes which way, and the spec
  * path of each call, is in `scripts/setup-arcade/arcade.ts`.
- * `app-test/setup-arcade.test.ts` runs this against a local stand-in. Its
+ * `app-test/setup-arcade.test.ts` runs this against a local stand-in, with the
+ * Arcade CLI faked on `PATH` and its context faked in a throwaway `HOME`. Its
  * first run against the real API (#7) stopped at the tool secrets, sent as
  * POST; they are PUT since #26. The second stopped at `GET /v1/plugins`; the
- * hooks are a form since #28. A rerun picks up from either state.
+ * hooks are registered under the project since #30. A rerun picks up from
+ * either state.
  *
  * Run it with `--no-env-file` (the package script does): it reads `.env` and
  * `.env.local` itself, so it knows which values `.env` holds and which come
@@ -48,6 +61,16 @@ import { join, resolve } from "node:path";
 import {
   ArcadeAdmin,
   ArcadeError,
+  gatewayBody,
+  gatewayDifferences,
+  type GatewaySpec,
+  HOOKS_NAME,
+  pageItems,
+  pluginBody,
+  pluginDifferences,
+  pluginPatch,
+  type ProjectScope,
+  projectPath,
   PROVIDER_ID,
   providerBody,
   providerDifferences,
@@ -56,12 +79,15 @@ import {
   toolSecrets,
   verifierBody,
 } from "./setup-arcade/arcade.ts";
+import { type ArcadeContext, resolveContext } from "./setup-arcade/context.ts";
 import { fillBlanks, parseEnv, readEnvFile, writeEnvFile } from "./setup-arcade/env-file.ts";
-import { gatewayForm, hooksForm, nextSteps, userSourceForm } from "./setup-arcade/forms.ts";
+import { gatewayForm, hooksForm, nextSteps, userSourceCommand, userSourceForm } from "./setup-arcade/forms.ts";
 
 const USER_SOURCE_CALLBACK = "https://cloud.arcade.dev/oauth2/intermediate_callback";
 const CLIENT_KEYS = ["arcade", "arcade-user-source", "web"] as const;
 const DEFAULT_GATEWAY = "loan-approval-limits";
+/** The toolkits `arcade deploy` ships, in order: the gateway lists their tools. */
+const TOOLKIT_DIRS = ["tools/loan", "tools/approvals"] as const;
 
 const out = (line = "") => console.log(line);
 function fail(message: string, code = 1): never {
@@ -73,19 +99,28 @@ function fail(message: string, code = 1): never {
 
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
-const gatewayFlag = argv.indexOf("--gateway");
-const gatewaySlug = gatewayFlag === -1 ? null : argv[gatewayFlag + 1];
-const positional = argv.filter((arg, i) => !arg.startsWith("--") && !(gatewayFlag !== -1 && i === gatewayFlag + 1));
+const skipDeploy = argv.includes("--skip-deploy");
+/** The value after a flag that takes one, or `null` when the flag is absent. */
+const valueOf = (flag: string): string | null => (argv.includes(flag) ? (argv[argv.indexOf(flag) + 1] ?? "") : null);
+const gatewaySlug = valueOf("--gateway");
+const userSourceFlag = valueOf("--user-source");
+const valued = new Set(["--gateway", "--user-source"].filter((flag) => argv.includes(flag)).map((flag) => argv.indexOf(flag) + 1));
+const positional = argv.filter((arg, i) => !arg.startsWith("--") && !valued.has(i));
 
 if (positional.length !== 1) {
   fail(
-    "usage: bun run setup-arcade <ngrok-host> [--dry-run] [--gateway <slug>]\n" +
+    "usage: bun run setup-arcade <ngrok-host> [--dry-run] [--user-source <id>] [--skip-deploy] [--gateway <slug>]\n" +
       "  <ngrok-host> is the public host Arcade reaches this app at, e.g. my-app.ngrok.app",
     64,
   );
 }
-if (gatewaySlug !== null && !/^[a-z0-9][a-z0-9-]*$/.test(gatewaySlug ?? "")) {
-  fail(`--gateway ${gatewaySlug ?? "(missing)"}: a slug is lowercase letters, digits and hyphens`, 64);
+if (gatewaySlug !== null && !/^[a-z0-9][a-z0-9-]*$/.test(gatewaySlug)) {
+  fail(`--gateway ${gatewaySlug || "(missing)"}: a slug is lowercase letters, digits and hyphens`, 64);
+}
+/** A User Source id is a `us_`-prefixed KSUID (the swagger's `CreateGatewayRequest` description). */
+const USER_SOURCE_ID = /^us_[A-Za-z0-9]+$/;
+if (userSourceFlag !== null && !USER_SOURCE_ID.test(userSourceFlag)) {
+  fail(`--user-source ${userSourceFlag || "(missing)"}: a User Source id starts with us_, as shown on the User Source's page`, 64);
 }
 
 // A pasted URL is accepted and cut down to the host form everything else uses.
@@ -101,6 +136,9 @@ const origin = `https://${host}`;
 // --- The environment, the way Bun would load it for the app -----------------
 
 const cwd = process.cwd();
+// The environment this command was started in, before `.env` is read into it:
+// what `arcade deploy` runs with, the way it runs from the developer's shell.
+const shellEnv: Record<string, string | undefined> = { ...process.env };
 const envPath = join(cwd, ".env");
 const examplePath = join(cwd, ".env.example");
 let envText = readEnvFile(envPath);
@@ -156,6 +194,28 @@ if (gatewaySlug !== null && onFileGateway !== "" && onFileGateway !== gatewaySlu
   fail(`.env has ARCADE_GATEWAY_ID=${onFileGateway}, and this run was given --gateway ${gatewaySlug}. Blank it in .env to use ${gatewaySlug}.`);
 }
 
+const userSourceId = userSourceFlag ?? (effective("ARCADE_USER_SOURCE_ID") || null);
+if (userSourceId !== null && !USER_SOURCE_ID.test(userSourceId)) {
+  fail(`ARCADE_USER_SOURCE_ID=${userSourceId} is not a User Source id, which starts with us_`);
+}
+const onFileUserSource = fileEnv.ARCADE_USER_SOURCE_ID?.trim() ?? "";
+if (userSourceFlag !== null && onFileUserSource !== "" && onFileUserSource !== userSourceFlag) {
+  fail(`.env has ARCADE_USER_SOURCE_ID=${onFileUserSource}, and this run was given --user-source ${userSourceFlag}. Blank it in .env to use ${userSourceFlag}.`);
+}
+
+// The org and project the hooks and the gateway are registered in (#30).
+const resolution = resolveContext(loaded);
+const scope: (ArcadeContext & ProjectScope) | null = resolution.context;
+if (scope !== null) {
+  out(`  arcade        org ${scope.orgId}, project ${scope.projectId} (from ${scope.source})`);
+} else {
+  out(`  arcade        no org and project: ${"why" in resolution ? resolution.why : "unknown"}.`);
+  out("                The hooks and the gateway are printed as dashboard forms instead. Set ARCADE_ORG_ID and");
+  out("                ARCADE_PROJECT_ID in .env, or make the project the Arcade CLI's active one, to register them by API.");
+}
+const loanToolkit = effective("ARCADE_LOAN_TOOLKIT") || "Loan";
+const approvalsToolkit = effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals";
+
 const configuredClients = effective("IDP_OAUTH_CLIENTS");
 if (configuredClients !== "") {
   const listed = configuredClients.split(",").map((each) => each.trim());
@@ -196,6 +256,8 @@ const planned: Record<string, string> = {
   // Arcade calls the hooks from here on, so the panel watches them rather
   // than the fixture replay a blank value means under `next dev`.
   GOVERNANCE_STREAM: "hooks",
+  // Kept, so a later run can re-check the gateway without the flag.
+  ...(userSourceFlag === null ? {} : { ARCADE_USER_SOURCE_ID: userSourceFlag }),
 };
 // The identity module reads these from the environment when it mints. The
 // host is always this run's: an `.env.local` naming localhost must not make
@@ -204,6 +266,39 @@ for (const [key, value] of Object.entries(planned)) if (effective(key) === "") p
 process.env.APP_PUBLIC_HOST = host;
 
 const admin = new ArcadeAdmin(apiUrl, apiKey, dryRun, out);
+
+/** Where the gateway will stand when this run ends; see `forms.ts` `NextSteps`. */
+const gatewayState: "created" | "needs-user-source" | "form" = scope === null ? "form" : userSourceId === null ? "needs-user-source" : "created";
+const gatewaySpec = (id: string): GatewaySpec => ({ slug, userSourceId: id, loanToolkit, approvalsToolkit });
+
+/** The forms left for the dashboard, and the steps after them. The last thing every run prints. */
+function finish(userSource: { clientId: string; clientSecret: string | null }): never {
+  if (gatewayState === "form") {
+    out("\nThree dashboard forms are left, in the order you fill them in:\n");
+  } else if (gatewayState === "needs-user-source") {
+    out("\nOne dashboard form is left, the User Source, which Arcade's API cannot create:\n");
+  }
+  if (gatewayState !== "created") out(userSourceForm({ origin, ...userSource }));
+  if (gatewayState === "form") {
+    out();
+    out(gatewayForm({ slug, loanToolkit, approvalsToolkit }));
+    out();
+    out(hooksForm({ origin }));
+  }
+  out();
+  out(nextSteps({ host, origin, port: effective("PORT") || "3000", gateway: gatewayState, deployed: !skipDeploy }));
+  if (gatewayState === "needs-user-source") {
+    out("\nOnce the User Source exists, finish with this, and the id shown on the User Source's page (us_…):");
+    out(`  ${userSourceCommand(host)}`);
+    out(`  (or set ARCADE_USER_SOURCE_ID in .env and run bun run setup-arcade ${host})`);
+  }
+  process.exit(0);
+}
+
+/** `arcade deploy`, as printed by the dry run and run by a real one. */
+function deployLine(dir: string): string {
+  return `  arcade deploy   (in ${dir})`;
+}
 
 // --- Dry run: the whole sequence, nothing sent ------------------------------
 
@@ -241,6 +336,10 @@ if (dryRun) {
   }
 
   out(`\nRequests, in order (${apiUrl}):`);
+  if (scope !== null) {
+    await admin.request("GET", projectPath(scope, "/plugins?limit=100"));
+    out("    (before anything is written: a 401, 403 or 404 stops the run, because the key and this project disagree)");
+  }
   const registration: Registration = {
     host,
     origin,
@@ -263,15 +362,24 @@ if (dryRun) {
   }
   await admin.request("PUT", "/v1/admin/settings/session_verification", verifierBody(origin));
   await admin.request("GET", "/v1/admin/settings/session_verification");
-  out("\nThen three dashboard forms, which Arcade's API cannot fill:\n");
-  out(userSourceForm({ origin, clientId: "<the arcade-user-source client id in idp.db>", clientSecret: clientsOnDisk ? null : "<its secret, minted by this run>" }));
-  out();
-  out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
-  out();
-  out(hooksForm({ origin }));
-  out();
-  out(nextSteps({ host, origin, port: effective("PORT") || "3000" }));
-  process.exit(0);
+  if (scope !== null) {
+    const token = hookToken.generated ? hookToken.value : "<ARCADE_HOOK_SIGNING_SECRET from .env>";
+    out(`    (the hooks: the list above is searched for ${HOOKS_NAME}. With none, it is created:)`);
+    await admin.request("POST", projectPath(scope, "/plugins"), pluginBody(origin, token));
+    out(`    (one that differs is updated instead, PATCH ${projectPath(scope, "/plugins/<plugin_id>")}, and one that matches is`);
+    out("    left as it is. A created or updated one is read back:)");
+    await admin.request("GET", projectPath(scope, "/plugins/<plugin_id>"));
+    await admin.request("GET", projectPath(scope, "/hooks?plugin_id=<plugin_id>"));
+  }
+  if (scope !== null && userSourceId !== null) {
+    await admin.request("GET", projectPath(scope, "/gateways?limit=100"));
+    out(`    (searched for the slug ${slug}. With none, it is created; one that differs stops the run, and one that matches is left:)`);
+    await admin.request("POST", projectPath(scope, "/gateways"), gatewayBody(gatewaySpec(userSourceId)));
+    await admin.request("GET", projectPath(scope, "/gateways/<gateway_id>"));
+  }
+  out(skipDeploy ? "\nDeploys: skipped (--skip-deploy)." : "\nDeploys, after the hooks and before the gateway, each stopping the run if it fails:");
+  if (!skipDeploy) for (const dir of TOOLKIT_DIRS) out(deployLine(dir));
+  finish({ clientId: "<the arcade-user-source client id in idp.db>", clientSecret: clientsOnDisk ? null : "<its secret, minted by this run>" });
 }
 
 // --- 2. The provider is read back before anything is written ----------------
@@ -308,6 +416,26 @@ async function oauthClient(...args: string[]): Promise<MintedClient[]> {
 const minted = new Map<string, string>();
 
 out(`\nArcade (${apiUrl}):`);
+
+// The key's check, before anything is written (#30): one read-only call under
+// the org and project this run resolved. Its list is the hooks' search too.
+let listedPlugins: unknown[] = [];
+if (scope !== null) {
+  const path = projectPath(scope, "/plugins?limit=100");
+  const answer = await admin.request("GET", path);
+  if (answer.status === 401 || answer.status === 403 || answer.status === 404) {
+    fail(
+      `ARCADE_API_KEY and the Arcade project this run resolved disagree: GET ${path} answered ${answer.status}.\n` +
+        `  The project is ${scope.projectId} in the org ${scope.orgId} (from ${scope.source}).\n` +
+        "  Either make the key's own project the active one, `arcade project set <project_id>` (`arcade project list` shows the ids),\n" +
+        `  or create an API key in the project ${scope.projectId} and put it in ARCADE_API_KEY. Nothing was written.`,
+    );
+  }
+  if (answer.status !== 200) fail(new ArcadeError("GET", path, answer.status, JSON.stringify(answer.json)).message);
+  listedPlugins = pageItems(answer.json);
+  out(`  the key answers for the project ${scope.projectId}`);
+}
+
 const existingProvider = await admin.request("GET", `/v1/admin/auth_providers/${PROVIDER_ID}`);
 if (existingProvider.status !== 200 && existingProvider.status !== 404) {
   fail(new ArcadeError("GET", `/v1/admin/auth_providers/${PROVIDER_ID}`, existingProvider.status, JSON.stringify(existingProvider.json)).message);
@@ -380,12 +508,13 @@ const registration: Registration = {
   approvalsStoreToken: storeToken.value,
 };
 
-async function step<T>(what: string, run: () => Promise<T>): Promise<T> {
+async function step<T>(what: string, run: () => Promise<T>, hint?: string): Promise<T> {
   try {
     return await run();
   } catch (error) {
     fail(
       `${what} failed: ${(error as Error).message}\n` +
+        (hint ? `${hint}\n` : "") +
         `.env and idp.db keep what this run wrote, so running the same command again picks up from here.`,
     );
   }
@@ -417,7 +546,6 @@ for (const secret of toolSecrets(host, storeToken.value)) {
   const { method, path, body } = secretRequest(secret);
   await step(`setting the tool secret ${secret.key}`, () => admin.expect(method, path, body));
 }
-out("  hooks: not by API, which a project key cannot reach (#28); the form below");
 
 const verifier = await step("setting the custom verifier", async () => {
   await admin.expect("PUT", "/v1/admin/settings/session_verification", verifierBody(origin));
@@ -432,13 +560,114 @@ if (verifier?.verifier_url !== verifierBody(origin).verifier_url || verifier?.un
 }
 out(`  custom verifier: ${verifier.verifier_url} (read back)`);
 
-// --- 6. What the API cannot do ----------------------------------------------
+// --- 6. The hooks (#30) -----------------------------------------------------
 
-out("\nThree dashboard forms are left. Arcade's API cannot fill these:\n");
-out(userSourceForm({ origin, clientId: client("arcade-user-source").client_id, clientSecret: userSourceSecret }));
-out();
-out(gatewayForm({ slug, loanToolkit: effective("ARCADE_LOAN_TOOLKIT") || "Loan", approvalsToolkit: effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals" }));
-out();
-out(hooksForm({ origin }));
-out();
-out(nextSteps({ host, origin, port: effective("PORT") || "3000" }));
+const objectField = (value: unknown, key: string): unknown =>
+  value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+
+if (scope === null) {
+  out("  hooks: no org and project, so the form below");
+} else {
+  const existing = listedPlugins.find((each) => objectField(each, "name") === HOOKS_NAME);
+  const hooksOf = async (id: string) =>
+    pageItems(await step("reading the hooks back", () => admin.expect("GET", projectPath(scope, `/hooks?plugin_id=${encodeURIComponent(id)}`))));
+  let id = typeof objectField(existing, "id") === "string" ? (objectField(existing, "id") as string) : "";
+  let wrote = false;
+  if (existing === undefined) {
+    const created = await step(
+      "creating the contextual access hooks",
+      () => admin.expect("POST", projectPath(scope, "/plugins"), pluginBody(origin, hookToken.value)),
+      `If Arcade could not reach ${origin}/hooks/health, start \`bun run dev\` and the tunnel first.`,
+    );
+    id = typeof objectField(created, "id") === "string" ? (objectField(created, "id") as string) : "";
+    if (id === "") fail(`Arcade created the hooks and answered with no id: ${JSON.stringify(created)}`);
+    out(`  hooks: created ${HOOKS_NAME}`);
+    wrote = true;
+  } else {
+    const differences = pluginDifferences(existing, await hooksOf(id), origin);
+    if (differences.length === 0) {
+      out(`  hooks: ${HOOKS_NAME} is already registered and matches; it is left as it is`);
+    } else {
+      out(`  hooks: ${HOOKS_NAME} is registered and differs from what this app needs, so it is updated:`);
+      for (const line of differences) out(`    - ${line}`);
+      await step("updating the contextual access hooks", () =>
+        admin.expect("PATCH", projectPath(scope, `/plugins/${encodeURIComponent(id)}`), pluginPatch(origin, hookToken.value)),
+      );
+      wrote = true;
+    }
+  }
+  if (wrote) {
+    const plugin = await step("reading the hooks back", () => admin.expect("GET", projectPath(scope, `/plugins/${encodeURIComponent(id)}`)));
+    const differences = pluginDifferences(plugin, await hooksOf(id), origin);
+    if (differences.length > 0) {
+      fail(`the hooks did not take: Arcade reads back\n${differences.map((line) => `  - ${line}`).join("\n")}`);
+    }
+    out(`  hooks: ${origin}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check /hooks/health (read back)`);
+  }
+}
+
+// --- 7. The deploys (#30) ---------------------------------------------------
+
+if (skipDeploy) {
+  out("\nDeploys: skipped (--skip-deploy). Deploy both toolkits before the gateway: arcade deploy, in tools/loan and in tools/approvals.");
+} else {
+  for (const dir of TOOLKIT_DIRS) {
+    const where = join(cwd, dir);
+    if (!existsSync(where)) fail(`there is no ${dir} under ${cwd} to deploy. Run this from the project's root, or pass --skip-deploy.`);
+    out(`\n${deployLine(dir).trim()}:`);
+    let code: number;
+    try {
+      // The developer's own environment, not this run's: `arcade deploy`
+      // reads its login and active project the way it does from their shell.
+      const child = Bun.spawn(["arcade", "deploy"], { cwd: where, env: shellEnv, stdio: ["inherit", "inherit", "inherit"] });
+      code = await child.exited;
+    } catch (error) {
+      fail(
+        `could not run arcade deploy: ${(error as Error).message}. Install the Arcade CLI (uv tool install arcade-mcp) and ` +
+          "run `arcade login`, or pass --skip-deploy and deploy the toolkits yourself.",
+      );
+    }
+    if (code !== 0) {
+      fail(
+        `arcade deploy in ${dir} exited ${code}; its output is above, and nothing after it ran. Fix that and run this again ` +
+          "(every step before it checks what is already there), or pass --skip-deploy and deploy it yourself.",
+      );
+    }
+  }
+}
+
+// --- 8. The gateway (#30) ---------------------------------------------------
+
+if (scope !== null && userSourceId !== null) {
+  out(`\nThe gateway (${apiUrl}):`);
+  const spec = gatewaySpec(userSourceId);
+  const listed = pageItems(await step("listing the gateways", () => admin.expect("GET", projectPath(scope, "/gateways?limit=100"))));
+  const existing = listed.find((each) => objectField(each, "slug") === slug);
+  if (existing !== undefined) {
+    const differences = gatewayDifferences(existing, spec);
+    if (differences.length > 0) {
+      out(`\nThe gateway ${slug} already exists in this Arcade project, and it is not what this app needs:`);
+      for (const line of differences) out(`  - ${line}`);
+      fail(
+        "nothing was changed in Arcade. This command never edits an existing gateway: its authentication is hop 1, the " +
+          "access model itself. Correct it in the dashboard, or blank ARCADE_GATEWAY_ID in .env and run this with --gateway <another-slug>.",
+      );
+    }
+    out(`  gateway: ${slug} is already registered and matches; it is left as it is`);
+  } else {
+    const path = projectPath(scope, "/gateways");
+    const created = await admin.request("POST", path, gatewayBody(spec));
+    if (created.status === 409) {
+      fail(`Arcade says the gateway slug ${slug} is taken. Blank ARCADE_GATEWAY_ID in .env and run this with --gateway <another-slug>.`);
+    }
+    if (created.status < 200 || created.status >= 300) fail(new ArcadeError("POST", path, created.status, JSON.stringify(created.json)).message);
+    const id = objectField(created.json, "id");
+    if (typeof id !== "string" || id === "") fail(`Arcade created the gateway and answered with no id: ${JSON.stringify(created.json)}`);
+    const readBack = await step("reading the gateway back", () => admin.expect("GET", projectPath(scope, `/gateways/${encodeURIComponent(id)}`)));
+    const differences = gatewayDifferences(readBack, spec);
+    if (differences.length > 0) fail(`the gateway did not take: Arcade reads back\n${differences.map((line) => `  - ${line}`).join("\n")}`);
+    out(`  gateway: created ${slug}, through the User Source ${userSourceId}, with the six tools of ${spec.loanToolkit} and ${spec.approvalsToolkit} (read back)`);
+  }
+}
+
+finish({ clientId: client("arcade-user-source").client_id, clientSecret: userSourceSecret });
