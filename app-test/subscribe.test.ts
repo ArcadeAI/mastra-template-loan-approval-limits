@@ -26,9 +26,24 @@ afterEach(() => {
   while (servers.length > 0) servers.pop()?.stop(true);
 });
 
-/** A server whose handler writes SSE bytes. Returns its address. */
+/**
+ * A server whose handler writes SSE bytes. Returns its address.
+ *
+ * **The stream stays open after the handler returns**, until the client goes
+ * away or the server is stopped, the way the control plane's live stream does.
+ * It used to close, and a closed stream is a reconnect: the client comes back
+ * `retryMs` (20ms) later, the handler writes the same frames again, and
+ * `subscribeToGovernanceEvents` delivers them again, because the real server
+ * would have resumed from `Last-Event-ID` and this one did not. Measured on the
+ * old fixture: the same event every ~22ms, so `events.length === 1` held for
+ * about 22ms and a test waiting for it passed only if its 5ms poll landed in
+ * that window. A full `env -i` run on a loaded machine missed it once (the
+ * #33 review): the count went past 1, never came back, and the test timed out
+ * at 5000ms. `close: true` is for the tests that are about reconnecting.
+ */
 function serve(
   handler: (request: Request, write: (text: string) => void) => void | Promise<void>,
+  { close = false }: { close?: boolean } = {},
 ): {
   url: string;
   requests: Request[];
@@ -38,6 +53,10 @@ function serve(
     port: 0,
     fetch(request) {
       requests.push(request.clone());
+      let cancelled: () => void = () => {};
+      const gone = new Promise<void>((resolve) => {
+        cancelled = resolve;
+      });
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           const encoder = new TextEncoder();
@@ -47,10 +66,18 @@ function serve(
           };
           try {
             await handler(request, write);
+            if (!close) await gone;
           } finally {
             open = false;
-            controller.close();
+            try {
+              controller.close();
+            } catch {
+              // Already cancelled by the client going away.
+            }
           }
+        },
+        cancel() {
+          cancelled();
         },
       });
       return new Response(stream, {
@@ -127,6 +154,10 @@ describe("events reach the panel", () => {
 
     const run = collect(url);
     await until(() => run.events.length === 1, "the modify event");
+    // Delivered once, and not again: a fixture that closed the stream here
+    // would reconnect and re-send it every ~22ms (see `serve`).
+    await Bun.sleep(100);
+    expect(run.events).toHaveLength(1);
     run.controller.abort();
     await run.done;
 
@@ -243,10 +274,13 @@ describe("frames the panel cannot use", () => {
 describe("reconnecting", () => {
   test("an initial replay anchor is sent once, then normal resume takes over", async () => {
     let connections = 0;
-    const { url, requests } = serve((_request, write) => {
-      connections += 1;
-      write(frame(aGovernanceEvent({ id: `evt_initial_${connections}` })));
-    });
+    const { url, requests } = serve(
+      (_request, write) => {
+        connections += 1;
+        write(frame(aGovernanceEvent({ id: `evt_initial_${connections}` })));
+      },
+      { close: true },
+    );
 
     const controller = new AbortController();
     const events: GovernanceEvent[] = [];
@@ -267,26 +301,34 @@ describe("reconnecting", () => {
 
   test("the stream reopens after the server closes it", async () => {
     let connections = 0;
-    const { url } = serve((_request, write) => {
-      connections += 1;
-      write(frame(aGovernanceEvent({ id: `evt_conn_${connections}` })));
-    });
+    const { url } = serve(
+      (_request, write) => {
+        connections += 1;
+        write(frame(aGovernanceEvent({ id: `evt_conn_${connections}` })));
+      },
+      { close: true },
+    );
 
     const run = collect(url);
     await until(() => run.events.length >= 2, "an event from a second connection");
     run.controller.abort();
     await run.done;
 
-    expect(run.events.map((event) => event.id)).toEqual(["evt_conn_1", "evt_conn_2"]);
+    // The first two connections, in order. A third may have opened before the
+    // abort landed: each closed stream is another reconnect, by design here.
+    expect(run.events.slice(0, 2).map((event) => event.id)).toEqual(["evt_conn_1", "evt_conn_2"]);
   });
 
   test("the resume asks to continue from the last id it saw", async () => {
     let connections = 0;
-    const { url, requests } = serve((_request, write) => {
-      connections += 1;
-      if (connections === 1) write(frame(aGovernanceEvent({ id: "evt_4k7xq2m9hz" })));
-      else write(frame(aGovernanceEvent({ id: "evt_8t3zh6vd2m" })));
-    });
+    const { url, requests } = serve(
+      (_request, write) => {
+        connections += 1;
+        if (connections === 1) write(frame(aGovernanceEvent({ id: "evt_4k7xq2m9hz" })));
+        else write(frame(aGovernanceEvent({ id: "evt_8t3zh6vd2m" })));
+      },
+      { close: true },
+    );
 
     const run = collect(url);
     await until(() => run.events.length >= 2, "the resumed event");
@@ -304,9 +346,14 @@ describe("reconnecting", () => {
       fetch() {
         attempts += 1;
         if (attempts < 3) return new Response("nope", { status: 503 });
-        return new Response(frame(aGovernanceEvent({ id: "evt_eventually" })), {
-          headers: { "content-type": "text/event-stream" },
+        // Held open, as the live stream is: a body that ended would be a
+        // reconnect, and the same event delivered again (see `serve`).
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(frame(aGovernanceEvent({ id: "evt_eventually" }))));
+          },
         });
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
       },
     });
     servers.push(server);
@@ -352,7 +399,7 @@ describe("what the panel can say about its own connection", () => {
   });
 
   test("reconnecting is reported after a drop", async () => {
-    const { url } = serve((_request, write) => write(frame(aGovernanceEvent({ id: "evt_drop" }))));
+    const { url } = serve((_request, write) => write(frame(aGovernanceEvent({ id: "evt_drop" }))), { close: true });
 
     const run = collect(url);
     await until(() => run.statuses.includes("reconnecting"), "a reconnect");
