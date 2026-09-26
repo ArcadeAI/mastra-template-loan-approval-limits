@@ -8,6 +8,8 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { hashPassword } from "better-auth/crypto";
+
 import { createAuth, hashClientSecret } from "../../lib/identity/provider/auth.ts";
 import { ensureOAuthClient } from "../../lib/identity/provider/client.ts";
 import type { PersonSeed } from "../../lib/identity/provider/db.ts";
@@ -193,6 +195,72 @@ describe("resetPeople", () => {
     expect(db.query('SELECT COUNT(*) AS n FROM "session"').get()).toEqual({ n: 0 });
     expect(db.query('SELECT COUNT(*) AS n FROM "oauthConsent"').get()).toEqual({ n: 0 });
     expect(db.query('SELECT COUNT(*) AS n FROM "oauthAccessToken"').get()).toEqual({ n: 0 });
+  });
+
+  /**
+   * #32: somebody `bun run users add` put in is not the demo's to reset. Their
+   * user row, their credential and its password hash are exactly what they
+   * were; only their sessions go, with everybody else's.
+   */
+  test("leaves a user outside the demo cast in place, and signs them out with everyone", async () => {
+    const db = await openPeople(":memory:");
+    const now = new Date().toISOString();
+    const hash = await hashPassword("priya-chose-this-one");
+    db.query(
+      `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+       VALUES ('u-priya', 'Priya', 'priya@company.test', 1, $now, $now)`,
+    ).run({ $now: now });
+    db.query(
+      `INSERT INTO "account" ("id", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt")
+       VALUES ('a-priya', 'u-priya', 'credential', 'u-priya', $hash, $now, $now)`,
+    ).run({ $hash: hash, $now: now });
+    const alice = listPeople(db).find((p) => p.email === "alice@bank.example")!;
+    for (const [id, user] of [["s-priya", "u-priya"], ["s-alice", alice.id]] as const) {
+      db.query(
+        `INSERT INTO "session" ("id", "expiresAt", "token", "createdAt", "updatedAt", "userId")
+         VALUES ($id, $now, $id, $now, $now, $user)`,
+      ).run({ $id: id, $now: now, $user: user });
+    }
+
+    const result = await resetPeople(db);
+
+    expect(result.kept).toEqual(["priya@company.test"]);
+    expect(result.demoCast).toEqual(fixture.map((p) => p.email).sort());
+    expect(db.query('SELECT "id", "name" FROM "user" WHERE "email" = \'priya@company.test\'').get()).toEqual({
+      id: "u-priya",
+      name: "Priya",
+    });
+    expect(db.query('SELECT "id", "password" FROM "account" WHERE "userId" = \'u-priya\'').get()).toEqual({
+      id: "a-priya",
+      password: hash,
+    });
+    expect(db.query('SELECT COUNT(*) AS n FROM "session"').get()).toEqual({ n: 0 });
+    // The demo persona was replaced, the added user was not.
+    expect(listPeople(db).find((p) => p.email === "alice@bank.example")!.id).not.toBe(alice.id);
+    expect(countPeople(db)).toBe(5);
+  });
+
+  test("a demo persona that is not on disk is not added back", async () => {
+    const db = await openPeople(":memory:");
+    db.exec('DELETE FROM "user" WHERE "email" = \'bob@bank.example\'');
+
+    const result = await resetPeople(db);
+
+    expect(result.demoCast).toEqual(["alice@bank.example", "charlie@bank.example", "michael@bank.example"]);
+    expect(listPeople(db).map((p) => p.email)).toEqual([
+      "alice@bank.example",
+      "charlie@bank.example",
+      "michael@bank.example",
+    ]);
+  });
+
+  test("a demo persona's edited name and password go back to the fixture's", async () => {
+    const db = await openPeople(":memory:");
+    db.exec(`UPDATE "user" SET "name" = 'Alice (edited)' WHERE "email" = 'alice@bank.example'`);
+
+    await resetPeople(db);
+
+    expect(listPeople(db).find((p) => p.email === "alice@bank.example")?.name).toBe("Alice");
   });
 
   test("the client is unowned, so deleting every user cannot cascade into it", async () => {

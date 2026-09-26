@@ -347,7 +347,7 @@ describe("--hard invalidates it, deliberately, and says so", () => {
     const { code, out, err } = await runResetCommand(["--hard"]);
     expect(err).toBe("");
     expect(code).toBe(0);
-    expect(out).toMatch(/\[reset\] idp\s+OK\s+people \d+→\d+, OAuth client \S+ unchanged/);
+    expect(out).toMatch(/\[reset\] idp\s+OK\s+everyone signed out;.*; people \d+→\d+, OAuth client \S+ unchanged/);
 
     const refused = await approveAsArcade();
     expect(refused.status).toBe(401);
@@ -377,7 +377,7 @@ describe("--hard invalidates it, deliberately, and says so", () => {
 
   test("the presenter is told everyone is signed out, and what that costs", async () => {
     const { out } = await runResetCommand(["--hard"]);
-    expect(out).toContain("All four personas are signed out");
+    expect(out).toContain("Everyone is signed out");
     expect(out).toContain("authorize, then Continue");
     // Named as the point of this reset rather than as a malfunction: `--hard`
     // exists so the auth flow can be shown again (#174).

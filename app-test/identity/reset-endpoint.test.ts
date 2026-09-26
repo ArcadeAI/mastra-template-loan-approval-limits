@@ -203,6 +203,19 @@ describe("the reset the root command calls", () => {
     expect(twice.oauth.client_id).toBe(once.oauth.client_id);
   });
 
+  test("the response says who was re-seeded, who was kept, and that everyone was signed out (#32)", async () => {
+    const body = (await (await reset(live.baseUrl)).json()) as ResetBody & {
+      demo_cast: string[];
+      kept: string[];
+      signed_out: string;
+    };
+    expect(body.demo_cast).toEqual(people.map((person) => person.email).sort());
+    // Nobody but the demo cast on this disk; `test/reset-real-users.test.ts`
+    // adds somebody and watches them survive.
+    expect(body.kept).toEqual([]);
+    expect(body.signed_out).toBe("everyone");
+  });
+
   test("the response names what it did not touch, the client row first", async () => {
     const body = (await (await reset(live.baseUrl)).json()) as ResetBody;
     expect(body.reset).toBe("idp.db");

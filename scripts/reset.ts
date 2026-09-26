@@ -13,9 +13,15 @@
  *                                         until #4)
  *     loan module     POST /bank/admin/reset   the loan book, LN-2291 unapproved
  *                                         (`apps/loan-app` until #5)
- *     identity        POST /identity/admin/reset   people, sessions, tokens,
- *                                         consents — `--hard` only
+ *     identity        POST /identity/admin/reset   everyone's sessions,
+ *                                         tokens and consents, and the demo
+ *                                         cast re-seeded — `--hard` only
  *                                         (`apps/idp` until #6)
+ *
+ * **Neither scope deletes a real user** (#32). Somebody added with
+ * `bun run users` keeps their `subjects` row through both, and their
+ * identity account through `--hard`; only the demo cast — the addresses the
+ * fixtures seed — is put back, and each line of output names who was kept.
  *
  * All three at one address since #6: `APP_PUBLIC_HOST`. To reset a deployment
  * rather than this checkout's app, run the command with that deployment's
@@ -180,10 +186,11 @@ export const SOFT_SKIP_LINE =
  * would have sent someone to a dashboard to fix something that was not broken.
  */
 export const HARD_SIGNOUT_NOTICE =
-  "All four personas are signed out and their consents are gone. Each one now needs a sign-in " +
-  "login, and their first governed tool call raises the hop-2 authorization card — authorize, " +
-  "then Continue. That is the flow this reset exists to make demonstrable (#174); budget the " +
-  "clicks before you are on stage.";
+  "Everyone is signed out and every consent is gone — the demo cast and every user added by " +
+  "`bun run users`, whose accounts and passwords are otherwise untouched. Each one now needs a " +
+  "sign-in login, and their first governed tool call raises the hop-2 authorization card — " +
+  "authorize, then Continue. That is the flow this reset exists to make demonstrable (#174); " +
+  "budget the clicks before you are on stage.";
 
 const LOOPBACK = /^(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[?::1\]?)(:\d+)?$/i;
 
@@ -333,11 +340,17 @@ async function resetOne(
       };
     }
     const people = body.people as { before: number; after: number };
+    const demoCast = (body.demo_cast ?? []) as string[];
+    const kept = (body.kept ?? []) as string[];
     return {
       label: spec.label,
       ok: true,
       line:
-        `${label} OK  people ${people.before}→${people.after}, ` +
+        `${label} OK  everyone signed out; ` +
+        (demoCast.length === 0 ? "no demo cast on disk" : `demo cast re-seeded (${demoCast.join(", ")})`) +
+        `; ${kept.length} user${kept.length === 1 ? "" : "s"} added by \`bun run users\` kept` +
+        (kept.length === 0 ? "" : ` (${kept.join(", ")})`) +
+        `; people ${people.before}→${people.after}, ` +
         `OAuth client${after.length > 1 ? "s" : ""} ${after.map((each) => each.client_id).join(", ")} unchanged`,
     };
   }
@@ -347,10 +360,14 @@ async function resetOne(
       before: Record<string, number>;
       after: Record<string, number>;
     };
+    const kept = ((body.kept as { subjects?: string[] } | undefined)?.subjects ?? []) as string[];
     return {
       label: spec.label,
       ok: true,
-      line: `${label} OK  ${String(body.mode)} at revision ${String(body.revision)} — ${deltas(counts.before, counts.after)}`,
+      line:
+        `${label} OK  ${String(body.mode)} at revision ${String(body.revision)} — ${deltas(counts.before, counts.after)}` +
+        `; demo cast's subjects re-seeded, ${kept.length} added by \`bun run users\` kept` +
+        (kept.length === 0 ? "" : ` (${kept.join(", ")})`),
     };
   }
 

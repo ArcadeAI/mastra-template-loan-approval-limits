@@ -73,9 +73,10 @@ export function loadPeople(env: Record<string, string | undefined> = process.env
 }
 
 /**
- * Tables that hold *people and their state*, in an order that respects the
- * foreign keys. `resetPeople` clears exactly these. Two tables are off the
- * list on purpose:
+ * Tables that hold a person's *state* — how they are signed in, what they
+ * consented to — in an order that respects the foreign keys. `resetPeople`
+ * empties every one of them, for everybody. Two tables are off the list on
+ * purpose:
  *
  *   - `oauthClient` — the credentials Arcade holds. Rotating them breaks OAuth
  *     right after a reset, at the authorize step, where no hook fires and
@@ -83,15 +84,16 @@ export function loadPeople(env: Record<string, string | undefined> = process.env
  *   - `jwks` — the ID-token signing keys (#70). Clearing them mints a new key
  *     pair on the next signature, and an Arcade User Source that had cached
  *     the old key set would reject the ID token. Same failure, one layer down.
+ *
+ * `user` and `account` — who somebody *is*, and their password — are not here
+ * either: since #32 the reset deletes those only for the demo cast.
  */
-const PEOPLE_TABLES = [
+const STATE_TABLES = [
   "oauthAccessToken",
   "oauthRefreshToken",
   "oauthConsent",
   "verification",
   "session",
-  "account",
-  "user",
 ] as const;
 
 /**
@@ -332,24 +334,71 @@ export async function seed(db: Database, people: PersonSeed[]): Promise<void> {
   })();
 }
 
+/** What a reset did to the people, by address. */
+export interface PeopleReset {
+  /** The demo cast members who were on disk, deleted and seeded again from the fixture. */
+  demoCast: string[];
+  /** Everybody else — added by `bun run users` — whose account was left as it was. */
+  kept: string[];
+}
+
 /**
- * Clears everything about people — users, credentials, sessions, tokens,
- * consents — and seeds the personas again, in one transaction. **The OAuth
- * client is untouched**, so the `client_id` and `client_secret` registered in
- * the Arcade dashboard keep working across a reset.
+ * Signs **everybody** out — every session, token, consent and verification row
+ * — and puts the demo cast back the way the fixture seeds it, in one
+ * transaction. **The OAuth client is untouched**, so the `client_id` and
+ * `client_secret` registered in the Arcade dashboard keep working across a
+ * reset.
  *
- * Deleting the people also deletes their consents, so the first authorize
- * after a reset shows the login page and the consent page again. That is what
- * a rehearsal from clean should look like.
+ * ## The demo cast, and only the demo cast (#32)
+ *
+ * The demo cast is the people whose address the fixture seeds (after the
+ * `PERSONA_*` overrides, the same `loadPeople` the first boot used). Each one
+ * that is on disk is deleted and inserted again, so a changed password or name
+ * goes back to the fixture's. One that is *not* on disk stays absent: the cast
+ * is optional since #31, and a reset that invited four people into a
+ * deployment that never had them would be a reset adding accounts.
+ *
+ * Everyone else was added by `bun run users`, and their `user` and credential
+ * `account` rows are left exactly as they were — a hard reset is for
+ * rehearsing the demo from clean, not for deleting the people who use it. They
+ * are signed out with everybody else, and sign in again with the password they
+ * already had.
+ *
+ * Deleting the state also deletes every consent, so the first authorize after
+ * a reset shows the login page and the consent page again. That is what a
+ * rehearsal from clean should look like.
  *
  * Exported for `scripts/reset.ts` and the test that asserts the client survives.
  */
-export async function resetPeople(db: Database, people: PersonSeed[] = loadPeople()): Promise<void> {
+export async function resetPeople(db: Database, people: PersonSeed[] = loadPeople()): Promise<PeopleReset> {
+  const cast = new Map(people.map((person) => [person.email.toLowerCase(), person]));
   const hashed = await hashAll(people);
 
-  db.transaction(() => {
-    for (const table of PEOPLE_TABLES) db.exec(`DELETE FROM "${table}"`);
-    insertPeople(db, hashed);
+  return db.transaction(() => {
+    for (const table of STATE_TABLES) db.exec(`DELETE FROM "${table}"`);
+
+    const onDisk = db.query<{ id: string; email: string }, []>('SELECT "id", "email" FROM "user"').all();
+    const present = onDisk.filter((row) => cast.has(row.email.toLowerCase()));
+    const kept = onDisk
+      .filter((row) => !cast.has(row.email.toLowerCase()))
+      .map((row) => row.email.toLowerCase())
+      .sort();
+
+    const deleteAccounts = db.prepare<unknown, [string]>('DELETE FROM "account" WHERE "userId" = ?');
+    const deleteUser = db.prepare<unknown, [string]>('DELETE FROM "user" WHERE "id" = ?');
+    try {
+      for (const row of present) {
+        deleteAccounts.run(row.id);
+        deleteUser.run(row.id);
+      }
+    } finally {
+      deleteAccounts.finalize();
+      deleteUser.finalize();
+    }
+
+    const reseeded = new Set(present.map((row) => row.email.toLowerCase()));
+    insertPeople(db, hashed.filter((person) => reseeded.has(person.email.toLowerCase())));
+    return { demoCast: [...reseeded].sort(), kept };
   })();
 }
 
