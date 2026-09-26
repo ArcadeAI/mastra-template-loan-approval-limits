@@ -4,6 +4,7 @@
  */
 
 import { readPersonaEmailOverrides } from "../../../packages/policy-schema/contract/persona-email-contract.ts";
+import { registerSecretFingerprint } from "../../secret-fingerprints.ts";
 
 /** Arcade Cloud's OAuth callback. Confirm against the "Redirect URL" the Arcade dashboard shows (#13). */
 export const DEFAULT_ARCADE_REDIRECT_URI = "https://cloud.arcade.dev/api/v1/oauth/callback";
@@ -178,6 +179,10 @@ export function readConfig(env: Record<string, string | undefined> = process.env
 
   const redirectUris = splitList(env.IDP_OAUTH_REDIRECT_URIS ?? DEFAULT_ARCADE_REDIRECT_URI);
   const clients = readClients(env, redirectUris);
+
+  // The chat must withhold this from anything it shows of a tool call, and
+  // may not read it (#37): it gets a fingerprint, never the value.
+  registerSecretFingerprint(secret || DEV_SECRET);
 
   return {
     port,

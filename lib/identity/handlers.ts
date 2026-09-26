@@ -482,6 +482,26 @@ export async function gatewayCallback(request: Request, config: IdentitySurface 
  */
 export type GatewayBearer = { token: string; session: Session } | { token: null; reason: string };
 
+/**
+ * Every token this browser's sealed session holds, for the chat to withhold
+ * from what it shows of a tool call (#37).
+ *
+ * Here because this file is the one audited reader of a stored token
+ * (`app-test/studio-entry.test.ts`, "one token seam"). The chat gets the
+ * values to match against and nothing to present anywhere.
+ * `app-test/chat-leak-probes.test.ts` builds a session with every token field
+ * filled, typed so that a new field cannot be left out, and fails if one is
+ * missing here.
+ */
+export function sessionSecrets(session: Session): string[] {
+  return [
+    session.gateway?.access_token,
+    session.gateway?.refresh_token,
+    session.idp?.access_token,
+    session.idp?.refresh_token,
+  ].filter((value): value is string => typeof value === "string" && value !== "");
+}
+
 export async function liveGatewayToken(
   session: Session,
   config: IdentitySurface = readIdentitySurface(),

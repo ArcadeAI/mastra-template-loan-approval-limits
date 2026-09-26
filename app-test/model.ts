@@ -47,7 +47,11 @@ export interface ScriptedCall {
 export type Turn =
   | ({ call: string; input: Record<string, unknown>; before?: string } & { calls?: never })
   | { calls: readonly ScriptedCall[]; before?: string }
-  | { say: string };
+  /**
+   * A final answer. An array is streamed as that many `text-delta` parts, the
+   * way a provider streams (#37); a string is one.
+   */
+  | { say: string | readonly string[] };
 
 export interface ScriptedModel {
   /** Hand to `buildAgent({ model })`. Typed loosely — the provider spec is the contract. */
@@ -103,7 +107,7 @@ export function scriptedModel(turns: readonly Turn[], modelId = "scripted"): Scr
           : [];
       const calls: readonly ScriptedCall[] =
         "calls" in turn ? turn.calls : "call" in turn ? [{ call: turn.call, input: turn.input }] : [];
-      const say = "say" in turn ? turn.say : "";
+      const say: readonly string[] = "say" in turn ? (typeof turn.say === "string" ? [turn.say] : turn.say) : [""];
       const parts: Array<Record<string, unknown>> =
         calls.length > 0
           ? [
@@ -126,7 +130,7 @@ export function scriptedModel(turns: readonly Turn[], modelId = "scripted"): Scr
             ]
           : [
               { type: "text-start", id },
-              { type: "text-delta", id, delta: say },
+              ...say.map((delta) => ({ type: "text-delta", id, delta })),
               { type: "text-end", id },
               { type: "finish", finishReason: "stop", usage: USAGE },
             ];

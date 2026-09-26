@@ -66,7 +66,7 @@ const BLOCKED: ChatEvent[] = [
     ref: "evt_4k7xq2m9hz",
   },
   { kind: "tool-call", tool: "Approvals_RequestApproval", inputs: { resource_id: "LN-2291" } },
-  { kind: "tool-result", tool: "Approvals_RequestApproval" },
+  { kind: "tool-result", tool: "Approvals_RequestApproval", result: { request_id: REQUEST_ID, approver: "Charlie" } },
   {
     kind: "waiting",
     tool: "Approvals_RequestApproval",
@@ -92,7 +92,7 @@ const RESUMED: ChatEvent[] = [
     message: RESUME_MESSAGE,
   },
   { kind: "tool-call", tool: "Loan_ApproveLoan", inputs: { loan_id: "LN-2291", amount: 95000 } },
-  { kind: "tool-result", tool: "Loan_ApproveLoan" },
+  { kind: "tool-result", tool: "Loan_ApproveLoan", result: { loan_id: "LN-2291", status: "approved" } },
   { kind: "text", text: "Approved: LN-2291 for $95,000." },
   { kind: "done", calls: 1 },
 ];
