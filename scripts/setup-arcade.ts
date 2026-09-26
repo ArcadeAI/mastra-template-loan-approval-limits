@@ -61,10 +61,13 @@ import { join, resolve } from "node:path";
 import {
   ArcadeAdmin,
   ArcadeError,
+  arcadeMessage,
   gatewayBody,
   gatewayDifferences,
   type GatewaySpec,
+  healthCheckUrl,
   HOOKS_NAME,
+  isReachabilityError,
   pageItems,
   pluginBody,
   pluginDifferences,
@@ -80,7 +83,7 @@ import {
   verifierBody,
 } from "./setup-arcade/arcade.ts";
 import { type ArcadeContext, resolveContext } from "./setup-arcade/context.ts";
-import { fillBlanks, parseEnv, readEnvFile, writeEnvFile } from "./setup-arcade/env-file.ts";
+import { fillBlanks, MANAGED_KEYS, parseEnv, readEnvFile, shellConflicts, writeEnvFile } from "./setup-arcade/env-file.ts";
 import { gatewayForm, hooksForm, nextSteps, userSourceCommand, userSourceForm } from "./setup-arcade/forms.ts";
 
 const USER_SOURCE_CALLBACK = "https://cloud.arcade.dev/oauth2/intermediate_callback";
@@ -151,11 +154,20 @@ for (const source of [localEnv, fileEnv]) {
   for (const [key, value] of Object.entries(source)) if (process.env[key] === undefined) process.env[key] = value;
 }
 // What the app would see, frozen before this run adds its own values to
-// `process.env` for the identity module below.
+// `process.env` for the identity module below. Used for the settings this run
+// only reads (`ARCADE_API_URL`, `PORT`, `IDP_DB_PATH`, the toolkit names).
 const loaded: Record<string, string | undefined> = { ...process.env };
 const effective = (key: string): string => loaded[key]?.trim() ?? "";
-/** Set somewhere other than `.env`, which is where the app will read it from. */
-const setElsewhere = (key: string): boolean => effective(key) !== "" && (fileEnv[key]?.trim() ?? "") !== effective(key);
+/**
+ * A variable this run manages, as `.env` holds it, and nothing else (#30).
+ * What to fill, and what is "already set", is decided from the file alone,
+ * because the file is what this run writes and what `bun run dev` reads. On
+ * the fourth live run the shell still exported an old `.env`, the shell won,
+ * and the run reported "nothing to fill" into a fresh `.env`: the app then
+ * booted with no BETTER_AUTH_SECRET, and the provider was created with the
+ * shell's old client. `shellConflicts` below refuses that state instead.
+ */
+const fromFile = (key: string): string => fileEnv[key]?.trim() ?? "";
 
 out(dryRun ? "setup-arcade --dry-run: nothing is written and nothing is sent.\n" : "setup-arcade");
 out(`  public host   ${host}  (${origin})`);
@@ -178,17 +190,34 @@ if (git("rev-parse", "--is-inside-work-tree") === 0) {
 
 // --- Inputs -----------------------------------------------------------------
 
+// A managed variable the shell exports with another value than `.env`'s, or
+// that `.env` leaves blank, stops the run before anything is sent or written
+// (#30). At runtime a real environment variable still wins over `.env`, for
+// the app as in `scripts/next.ts`, and that is the reason: whatever this run
+// registered from `.env`, the app would run on the shell's value instead. So
+// the shell is not overridden here and not ignored either: it has to agree.
+const exported = shellConflicts(shellEnv, fileEnv);
+if (exported.length > 0) {
+  fail(
+    `${exported.join(", ")} ${exported.length === 1 ? "is" : "are"} exported in this shell with a value .env does not hold ` +
+      "(different, or blank in .env). This command decides what to write from .env alone, and the app would run on the " +
+      "shell's values rather than the ones registered in Arcade. Nothing was sent or written.\n" +
+      `  Open a new terminal, or run: unset ${exported.join(" ")}`,
+  );
+}
+
 const onFile = fileEnv.APP_PUBLIC_HOST?.trim() ?? "";
 if (onFile !== "" && onFile.toLowerCase() !== host) {
   fail(`.env has APP_PUBLIC_HOST=${onFile}, and this run was given ${host}. Pass ${onFile}, or blank it in .env to use ${host}.`);
 }
-if (setElsewhere("APP_PUBLIC_HOST") && effective("APP_PUBLIC_HOST").toLowerCase() !== host) {
-  out(`  warning       APP_PUBLIC_HOST=${effective("APP_PUBLIC_HOST")} is set outside .env (.env.local or the shell) and wins over it when the app runs`);
+const onLocal = localEnv.APP_PUBLIC_HOST?.trim() ?? "";
+if (onLocal !== "" && onLocal.toLowerCase() !== host) {
+  out(`  warning       APP_PUBLIC_HOST=${onLocal} is set in .env.local, and wins over .env when the app runs`);
 }
-const apiKey = effective("ARCADE_API_KEY");
+const apiKey = fromFile("ARCADE_API_KEY");
 if (apiKey === "" && !dryRun) fail("ARCADE_API_KEY is blank. Fill it in .env (Arcade dashboard → API keys), then run this again.");
 const apiUrl = (effective("ARCADE_API_URL") || "https://api.arcade.dev").replace(/\/+$/, "");
-const slug = gatewaySlug ?? (effective("ARCADE_GATEWAY_ID") || DEFAULT_GATEWAY);
+const slug = gatewaySlug ?? (fromFile("ARCADE_GATEWAY_ID") || DEFAULT_GATEWAY);
 const onFileGateway = fileEnv.ARCADE_GATEWAY_ID?.trim() ?? "";
 if (gatewaySlug !== null && onFileGateway !== "" && onFileGateway !== gatewaySlug) {
   fail(`.env has ARCADE_GATEWAY_ID=${onFileGateway}, and this run was given --gateway ${gatewaySlug}. Blank it in .env to use ${gatewaySlug}.`);
@@ -221,7 +250,7 @@ if (scope !== null) {
 const loanToolkit = effective("ARCADE_LOAN_TOOLKIT") || "Loan";
 const approvalsToolkit = effective("ARCADE_APPROVALS_TOOLKIT") || "Approvals";
 
-const configuredClients = effective("IDP_OAUTH_CLIENTS");
+const configuredClients = fromFile("IDP_OAUTH_CLIENTS");
 if (configuredClients !== "") {
   const listed = configuredClients.split(",").map((each) => each.trim());
   const missing = CLIENT_KEYS.filter((key) => key !== "arcade" && !listed.includes(key));
@@ -232,7 +261,7 @@ if (configuredClients !== "") {
 
 /** A value this run needs: what the app already has, else a fresh one. */
 function secretFor(key: string): { value: string; generated: boolean } {
-  const existing = effective(key);
+  const existing = fromFile(key);
   if (existing !== "") return { value: existing, generated: false };
   if (dryRun) return { value: `<generated ${key}>`, generated: true };
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -267,7 +296,13 @@ const planned: Record<string, string> = {
 // The identity module reads these from the environment when it mints. The
 // host is always this run's: an `.env.local` naming localhost must not make
 // it mint for another issuer.
-for (const [key, value] of Object.entries(planned)) if (effective(key) === "") process.env[key] = value;
+// Every managed variable is `.env`'s value or this run's, whatever .env.local
+// or the shell had.
+for (const key of MANAGED_KEYS) {
+  const value = fromFile(key) || planned[key];
+  if (value) process.env[key] = value;
+  else delete process.env[key];
+}
 process.env.APP_PUBLIC_HOST = host;
 
 const admin = new ArcadeAdmin(apiUrl, apiKey, dryRun, out);
@@ -308,7 +343,7 @@ function deployLine(dir: string): string {
 // --- Dry run: the whole sequence, nothing sent ------------------------------
 
 /** `.env` has the app's own sign-in client, so a real run leaves the `web` client's secret alone. */
-const webConfigured = effective("IDP_CLIENT_ID") !== "" && effective("IDP_CLIENT_SECRET") !== "";
+const webConfigured = fromFile("IDP_CLIENT_ID") !== "" && fromFile("IDP_CLIENT_SECRET") !== "";
 if (dryRun) {
   // What a real run would find, read off the disk alone: a dry run sends
   // nothing, so it cannot ask Arcade (#28). `IDP_OAUTH_REDIRECT_URIS_ARCADE`
@@ -316,10 +351,10 @@ if (dryRun) {
   // provider, and `idp.db` is where the clients are minted.
   const idpDb = resolve(cwd, effective("IDP_DB_PATH") || "./idp.db");
   const clientsOnDisk = existsSync(idpDb);
-  const callbackRecorded = effective("IDP_OAUTH_REDIRECT_URIS_ARCADE") !== "";
+  const callbackRecorded = fromFile("IDP_OAUTH_REDIRECT_URIS_ARCADE") !== "";
   const registered = clientsOnDisk && callbackRecorded;
 
-  const keys = Object.keys(planned).filter((key) => (fileEnv[key]?.trim() ?? "") === "" && !setElsewhere(key));
+  const keys = Object.keys(planned).filter((key) => fromFile(key) === "");
   if (!webConfigured) keys.push("IDP_CLIENT_ID", "IDP_CLIENT_SECRET");
   if (!callbackRecorded) keys.push("IDP_OAUTH_REDIRECT_URIS_ARCADE (with the callback Arcade generates for the provider)");
   out(
@@ -483,8 +518,8 @@ async function secretOf(key: string, rotate: boolean): Promise<string | null> {
 const arcadeSecret = await secretOf("arcade", !providerExists);
 // `web`: its credentials live in .env, so rotating is safe whenever .env has none.
 const webSecret = webConfigured ? null : await secretOf("web", true);
-if (webConfigured && effective("IDP_CLIENT_ID") !== client("web").client_id) {
-  out(`  warning       IDP_CLIENT_ID is ${effective("IDP_CLIENT_ID")}, but idp.db's web client is ${client("web").client_id}; sign-in will fail until they match`);
+if (webConfigured && fromFile("IDP_CLIENT_ID") !== client("web").client_id) {
+  out(`  warning       IDP_CLIENT_ID is ${fromFile("IDP_CLIENT_ID")}, but idp.db's web client is ${client("web").client_id}; sign-in will fail until they match`);
 }
 // `arcade-user-source`: shown when minted now; never rotated behind a User Source that may exist.
 const userSourceSecret = client("arcade-user-source").client_secret;
@@ -492,7 +527,7 @@ const userSourceSecret = client("arcade-user-source").client_secret;
 // --- 4. .env, blanks only ---------------------------------------------------
 
 const toWrite: Record<string, string> = {};
-for (const [key, value] of Object.entries(planned)) if (!setElsewhere(key)) toWrite[key] = value;
+for (const [key, value] of Object.entries(planned)) toWrite[key] = value;
 if (webSecret !== null) {
   toWrite.IDP_CLIENT_ID = client("web").client_id;
   toWrite.IDP_CLIENT_SECRET = webSecret;
@@ -513,13 +548,16 @@ const registration: Registration = {
   approvalsStoreToken: storeToken.value,
 };
 
-async function step<T>(what: string, run: () => Promise<T>, hint?: string): Promise<T> {
+async function step<T>(what: string, run: () => Promise<T>, hint?: (error: unknown) => string | undefined): Promise<T> {
   try {
     return await run();
   } catch (error) {
+    const said = arcadeMessage(error);
+    const advice = hint?.(error);
     fail(
       `${what} failed: ${(error as Error).message}\n` +
-        (hint ? `${hint}\n` : "") +
+        (said ? `Arcade says: ${said}\n` : "") +
+        (advice ? `${advice}\n` : "") +
         `.env and idp.db keep what this run wrote, so running the same command again picks up from here.`,
     );
   }
@@ -536,7 +574,7 @@ if (!providerExists) {
 const callback = (provider as { oauth2?: { redirect_uri?: string } } | null)?.oauth2?.redirect_uri;
 if (callback && !client("arcade").redirect_uris.includes(callback)) {
   const key = "IDP_OAUTH_REDIRECT_URIS_ARCADE";
-  if (setElsewhere(key) || (fileEnv[key]?.trim() ?? "") !== "") {
+  if (fromFile(key) !== "") {
     out(`  warning       the provider's callback is ${callback}; add it to ${key} yourself, it is already set and never overwritten`);
   } else {
     filled = fillBlanks(filled.text, { [key]: callback });
@@ -582,7 +620,10 @@ if (scope === null) {
     const created = await step(
       "creating the contextual access hooks",
       () => admin.expect("POST", projectPath(scope, "/plugins"), pluginBody(origin, hookToken.value)),
-      `If Arcade could not reach ${origin}/hooks/health, start \`bun run dev\` and the tunnel first.`,
+      (error) =>
+        isReachabilityError(error)
+          ? `Arcade could not reach ${healthCheckUrl(origin)}: start \`bun run dev\` and the tunnel first.`
+          : undefined,
     );
     id = typeof objectField(created, "id") === "string" ? (objectField(created, "id") as string) : "";
     if (id === "") fail(`Arcade created the hooks and answered with no id: ${JSON.stringify(created)}`);
@@ -607,7 +648,7 @@ if (scope === null) {
     if (differences.length > 0) {
       fail(`the hooks did not take: Arcade reads back\n${differences.map((line) => `  - ${line}`).join("\n")}`);
     }
-    out(`  hooks: ${origin}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check /hooks/health (read back)`);
+    out(`  hooks: ${origin}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check ${healthCheckUrl(origin)} (read back)`);
   }
 }
 

@@ -299,6 +299,15 @@ export const HOOK_POINTS = [
 
 export const HEALTH_CHECK_PATH = "/hooks/health";
 
+/**
+ * The health check as Arcade takes it: a full URL on the public host. The
+ * field is named a path, and the fourth live run (#7) sent the path: Arcade
+ * answered 400 `malformed_request`, "health_check_path must be a valid URL".
+ */
+export function healthCheckUrl(origin: string): string {
+  return `${origin}${HEALTH_CHECK_PATH}`;
+}
+
 /** The webhook plugin, with the three hooks inline and `.env`'s bearer. */
 export function pluginBody(origin: string, hookToken: string) {
   return {
@@ -319,7 +328,7 @@ export function pluginPatch(origin: string, hookToken: string) {
 function webhookConfig(origin: string, hookToken: string) {
   return {
     auth: { type: "bearer", token: hookToken },
-    health_check_path: HEALTH_CHECK_PATH,
+    health_check_path: healthCheckUrl(origin),
     endpoints: Object.fromEntries(
       HOOK_POINTS.map(({ point, phase }) => [
         point,
@@ -344,7 +353,7 @@ export function pluginDifferences(plugin: unknown, hooks: unknown[], origin: str
   };
   compare("plugin_type", at(plugin, "plugin_type"), "webhook");
   compare("status", at(plugin, "status"), "active");
-  compare("webhook_config.health_check_path", at(plugin, "webhook_config.health_check_path"), HEALTH_CHECK_PATH);
+  compare("webhook_config.health_check_path", at(plugin, "webhook_config.health_check_path"), healthCheckUrl(origin));
   compare("webhook_config.auth.type", at(plugin, "webhook_config.auth.type"), "bearer");
   if (at(plugin, "webhook_config.auth.token.exists") !== true) differences.push("webhook_config.auth.token: Arcade holds no bearer token");
   for (const { point, hookPoint, phase } of HOOK_POINTS) {
@@ -414,4 +423,36 @@ export function gatewayDifferences(gateway: unknown, spec: GatewaySpec): string[
 export function pageItems(json: unknown): unknown[] {
   const items = at(json, "items");
   return Array.isArray(items) ? items : [];
+}
+
+/** Arcade's own `message` out of an error answer, verbatim, or `null` when it sent none. */
+export function arcadeMessage(error: unknown): string | null {
+  if (!(error instanceof ArcadeError)) return null;
+  try {
+    const body = JSON.parse(error.body) as { message?: unknown } | null;
+    return typeof body?.message === "string" && body.message !== "" ? body.message : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether an answer is about Arcade failing to reach the app, which the tunnel
+ * fixes, rather than a request it refused, which it does not. A validation
+ * error is never one: the fourth live run's 400 on `health_check_path` came
+ * with a hint to start the tunnel, and the tunnel was not the problem (#30).
+ * Nobody has seen Arcade's answer for an unreachable health check, so this
+ * reads the words it would have to use.
+ */
+export function isReachabilityError(error: unknown): boolean {
+  if (!(error instanceof ArcadeError)) return false;
+  let validation = false;
+  try {
+    const body = JSON.parse(error.body) as { name?: unknown; field_errors?: unknown } | null;
+    validation = body?.name === "malformed_request" || (Array.isArray(body?.field_errors) && body.field_errors.length > 0);
+  } catch {
+    validation = false;
+  }
+  if (validation) return false;
+  return /unreachable|could not (be )?reach|cannot reach|connection refused|failed to connect|timed out|timeout|no such host|dial tcp|health check failed/i.test(error.body);
 }

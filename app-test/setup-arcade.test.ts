@@ -61,6 +61,26 @@ interface Recorded {
  */
 const ROUTE_NOT_FOUND = { name: "route_not_found", message: "requested route is not found or method is not allowed" };
 
+/**
+ * What Arcade answered the fourth live run's `POST …/plugins` with, byte for
+ * byte (#30, F6): the body sent `health_check_path: "/hooks/health"`.
+ */
+const HEALTH_CHECK_NOT_A_URL = {
+  name: "malformed_request",
+  message: "failed to validate request body: webhook_config: health_check_path must be a valid URL",
+  field_errors: [{ field: "webhook_config.health_check_path", rule: "url", message: "health_check_path must be a valid URL" }],
+};
+
+/** Arcade's `url` rule, as far as anyone has seen it: an absolute http(s) URL. */
+function isUrl(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    return ["http:", "https:"].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
 type Json = Record<string, any>;
 
 /** Arcade's admin API, as far as setup-arcade uses it (the table is on #26's PR; the org routes on #30's). */
@@ -76,6 +96,8 @@ class StandIn {
   gateways = new Map<string, Json>();
   /** Slugs another project already holds: a POST for one answers 409. */
   takenSlugs = new Set<string>();
+  /** When set, the next plugin create answers this instead of creating anything. */
+  nextPluginCreate: { status: number; body: Json } | null = null;
   /** When set, a PUT to the verifier settings is accepted and ignored. */
   verifierIgnoresPut = false;
   /**
@@ -196,6 +218,15 @@ class StandIn {
     const pluginId = /^\/plugins\/([^/]+)$/.exec(rest)?.[1];
     const gatewayId = /^\/gateways\/([^/]+)$/.exec(rest)?.[1];
     if (method === "GET" && rest === "/plugins") return page([...this.plugins.values()].map((each) => this.pluginResponse(each)));
+    if ((method === "POST" && rest === "/plugins") || (pluginId !== undefined && method === "PATCH")) {
+      const health = body?.webhook_config?.health_check_path;
+      if ((method === "POST" || health !== undefined) && !isUrl(health)) return Response.json(HEALTH_CHECK_NOT_A_URL, { status: 400 });
+    }
+    if (method === "POST" && rest === "/plugins" && this.nextPluginCreate !== null) {
+      const { status, body: answer } = this.nextPluginCreate;
+      this.nextPluginCreate = null;
+      return Response.json(answer, { status });
+    }
     if (method === "POST" && rest === "/plugins") {
       if (!body?.name || !body.plugin_type || !body.webhook_config?.endpoints) {
         return Response.json({ name: "malformed_request", message: "name, plugin_type and webhook_config.endpoints are required" }, { status: 400 });
@@ -349,16 +380,17 @@ function project(
   return dir;
 }
 
-async function setupArcade(
-  cwd: string,
-  ...args: Array<string | { failDeployIn?: string }>
-): Promise<{ code: number; stdout: string; stderr: string }> {
+/** `failDeployIn`: the toolkit directory the fake CLI fails in. `shell`: variables the developer's shell exports. */
+type RunOptions = { failDeployIn?: string; shell?: Record<string, string> };
+
+async function setupArcade(cwd: string, ...args: Array<string | RunOptions>): Promise<{ code: number; stdout: string; stderr: string }> {
   const project = projects.get(cwd);
   if (!project) throw new Error(`${cwd} was not made by project()`);
-  const options = args.find((arg): arg is { failDeployIn?: string } => typeof arg === "object") ?? {};
+  const options = args.find((arg): arg is RunOptions => typeof arg === "object") ?? {};
   const child = spawnChild(["bun", "--no-env-file", SCRIPT, HOST, ...args.filter((arg): arg is string => typeof arg === "string")], {
     cwd,
     env: childEnv({
+      ...options.shell,
       ARCADE_API_URL: arcade.url,
       HOME: project.home,
       PATH: `${FAKE_BIN}:${process.env.PATH ?? ""}`,
@@ -441,7 +473,7 @@ function hooksAreRegistered(dir: string): void {
   const [plugin] = plugins as [Json];
   expect(plugin.plugin_type).toBe("webhook");
   expect(plugin.status).toBe("active");
-  expect(plugin.webhook_config.health_check_path).toBe("/hooks/health");
+  expect(plugin.webhook_config.health_check_path).toBe(`${ORIGIN}/hooks/health`);
   expect(plugin.webhook_config.auth).toEqual({ type: "bearer", token: envOf(dir).ARCADE_HOOK_SIGNING_SECRET });
   expect(plugin.webhook_config.endpoints).toEqual({
     access: { url: `${ORIGIN}/hooks/access`, phase: "before", failure_mode: "fail_closed", status: "active" },
@@ -476,7 +508,7 @@ function hooksFormIsComplete(stdout: string): void {
     expect(block).toMatch(/│ {4}failure_mode +fail_closed$/m);
     expect(block).toMatch(/│ {4}status +active$/m);
   }
-  expect(form).toMatch(/│ {2}webhook_config\.health_check_path +\/hooks\/health$/m);
+  expect(form).toMatch(new RegExp(`│ {2}webhook_config\\.health_check_path +${ORIGIN.replace(/\./g, "\\.")}/hooks/health$`, "m"));
   expect(form).toMatch(/│ {2}webhook_config\.auth\.type +bearer$/m);
   expect(form).toMatch(/│ {2}webhook_config\.auth\.token +the value of ARCADE_HOOK_SIGNING_SECRET in \.env \(not printed here\)$/m);
 }
@@ -520,7 +552,7 @@ test("a real run registers every API-able piece, deploys both toolkits, and prin
 
   // The hooks: by API since #30, with the bearer the app checks, which is never printed.
   hooksAreRegistered(dir);
-  expect(run.stdout).toContain(`hooks: ${ORIGIN}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check /hooks/health (read back)`);
+  expect(run.stdout).toContain(`hooks: ${ORIGIN}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check ${ORIGIN}/hooks/health (read back)`);
   expect(`${run.stdout}${run.stderr}`).not.toContain(env.ARCADE_HOOK_SIGNING_SECRET!);
 
   // The deploys: both toolkits, in order, streamed, after the hooks.
@@ -1283,3 +1315,121 @@ test("from the live project's state after run 3, the dry run tells the truth, th
     `loan-approval-limits user_source ${USER_SOURCE}`,
   ]);
 }, 120_000);
+
+// --- What the run is told, and by whom (#30, F6 and F7) ----------------------
+
+test("the stand-in refuses a health_check_path that is not a URL with the body Arcade sent the fourth live run", async () => {
+  const create = (health: string) =>
+    fetch(`${arcade.url}${SCOPED}/plugins`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "x", plugin_type: "webhook", webhook_config: { health_check_path: health, endpoints: {} } }),
+    });
+  const path = await create("/hooks/health");
+  expect(path.status).toBe(400);
+  expect(await path.text()).toBe(
+    '{"name":"malformed_request","message":"failed to validate request body: webhook_config: health_check_path must be a valid URL","field_errors":[{"field":"webhook_config.health_check_path","rule":"url","message":"health_check_path must be a valid URL"}]}',
+  );
+  expect((await create(`${ORIGIN}/hooks/health`)).status).toBe(201);
+});
+
+test("a refusal that is not about reaching the app prints Arcade's own message, and no advice about the tunnel", async () => {
+  const dir = project("hooks-refused");
+  arcade.nextPluginCreate = { status: 400, body: HEALTH_CHECK_NOT_A_URL };
+  const run = await setupArcade(dir);
+  expect(run.code).toBe(1);
+  expect(run.stderr).toContain("creating the contextual access hooks failed: POST");
+  expect(run.stderr).toContain("Arcade says: failed to validate request body: webhook_config: health_check_path must be a valid URL");
+  expect(run.stderr).not.toMatch(/tunnel|bun run dev/);
+});
+
+test("a refusal about reaching the app says to start it and the tunnel", async () => {
+  const dir = project("hooks-unreachable");
+  // Nobody has seen Arcade's answer for an unreachable health check: this is the wording the check looks for.
+  arcade.nextPluginCreate = { status: 422, body: { name: "health_check_failed", message: `health check failed: dial tcp: lookup ${HOST}: no such host` } };
+  const run = await setupArcade(dir);
+  expect(run.code).toBe(1);
+  expect(run.stderr).toContain(`Arcade says: health check failed: dial tcp: lookup ${HOST}: no such host`);
+  expect(run.stderr).toContain(`Arcade could not reach ${ORIGIN}/hooks/health: start \`bun run dev\` and the tunnel first.`);
+});
+
+test("setup-arcade manages exactly .env.example's required values and its second block", async () => {
+  const { REQUIRED_KEYS, WRITTEN_KEYS } = await import("../scripts/setup-arcade/env-file.ts");
+  const example = readFileSync(join(ROOT, ".env.example"), "utf8");
+  const block = (from: string, to: string) =>
+    [...example.slice(example.indexOf(from), example.indexOf(to)).matchAll(/^([A-Z_][A-Z0-9_]*)=/gm)].map(([, key]) => key!).sort();
+  expect([...REQUIRED_KEYS].sort()).toEqual(block("# --- Required", "# --- Filled in by `bun run setup-arcade"));
+  expect([...WRITTEN_KEYS].sort()).toEqual(block("# --- Filled in by `bun run setup-arcade", "# --- Optional"));
+});
+
+/**
+ * The fourth live run (#7, F7): a fresh clone, a fresh `.env` with its second
+ * block blank, and a shell that still exported the previous clone's `.env`
+ * (`set -a; . ./.env`). The shell won, the run said ".env: nothing to fill",
+ * the provider was created with the shell's old `arcade` client, and
+ * `bun run dev`, which reads `.env`, had no BETTER_AUTH_SECRET. The run now
+ * stops before it sends or writes anything, and names the keys, never the values.
+ */
+test("a shell that still exports an old .env is refused before anything is sent or written, naming the keys and not the values", async () => {
+  const old = project("old-clone");
+  expect((await setupArcade(old)).code).toBe(0);
+  const exported = envOf(old);
+  const managed = (await import("../scripts/setup-arcade/env-file.ts")).MANAGED_KEYS;
+  const shell = Object.fromEntries(Object.entries(exported).filter(([key, value]) => managed.includes(key) && value !== ""));
+  expect(Object.keys(shell)).toContain("BETTER_AUTH_SECRET");
+  arcade.requests = [];
+
+  // The seven filled in, as the human's were, and the second block blank.
+  const dir = project("fresh-clone", (env) => env.replace(/^APP_PUBLIC_HOST=$/m, `APP_PUBLIC_HOST=${HOST}`));
+  const before = readFileSync(join(dir, ".env"), "utf8");
+  const run = await setupArcade(dir, { shell });
+  console.log(`--- setup-arcade ${HOST}, with the old clone's .env exported ---\n${run.stdout}${run.stderr}`);
+  expect(run.code).toBe(1);
+  const refused = Object.keys(shell).filter((key) => (envOf(dir)[key] ?? "") !== shell[key]);
+  expect(refused.length).toBeGreaterThan(5);
+  expect(run.stderr).toContain(`${refused.join(", ")} are exported in this shell with a value .env does not hold`);
+  expect(run.stderr).toContain(`Open a new terminal, or run: unset ${refused.join(" ")}`);
+  expect(run.stderr).toContain("Nothing was sent or written.");
+  // The keys an old .env shares with this one (the API key, the host, the personas) are no conflict.
+  expect(run.stderr).not.toMatch(/\bARCADE_API_KEY\b|\bAPP_PUBLIC_HOST\b/);
+  // Names only.
+  for (const key of refused) expect(`${run.stdout}${run.stderr}`, `the run printed ${key}'s value`).not.toContain(shell[key]!);
+  expect(arcade.requests).toEqual([]);
+  expect(readFileSync(join(dir, ".env"), "utf8")).toBe(before);
+  expect(existsSync(join(dir, "idp.db"))).toBe(false);
+  expect(projects.get(dir)!.deploys()).toEqual([]);
+  // A dry run says the same.
+  expect((await setupArcade(dir, "--dry-run", { shell })).code).toBe(1);
+
+  // In a new terminal: the second block is filled into this .env, BETTER_AUTH_SECRET included,
+  // and the provider's callback is allowlisted with no "add it yourself" warning. The
+  // provider the old clone made names the old client, so it is taken away first, as a
+  // human would delete it in the dashboard (the next test is what happens if not).
+  arcade.providers.clear();
+  arcade.plugins.clear();
+  const clean = await setupArcade(dir);
+  expect(clean.code, `${clean.stdout}\n${clean.stderr}`).toBe(0);
+  const env = envOf(dir);
+  expect(env.BETTER_AUTH_SECRET).toMatch(/^[0-9a-f]{64}$/);
+  expect(env.BETTER_AUTH_SECRET).not.toBe(exported.BETTER_AUTH_SECRET);
+  expect(env.IDP_OAUTH_REDIRECT_URIS_ARCADE).toBe(CALLBACK);
+  expect(clean.stdout).not.toContain("add it to IDP_OAUTH_REDIRECT_URIS_ARCADE yourself");
+  expect(clean.stdout).toContain("allowlisted the provider's callback on the arcade client");
+  expect((arcade.providers.get("app-identity") as Json).oauth2.client_id).toBe(clientsIn(dir).arcade!.clientId);
+}, 120_000);
+
+test("in a new terminal, a provider the old clone created is reported, and never edited", async () => {
+  expect((await setupArcade(project("old-clone-2"))).code).toBe(0);
+  const run = await setupArcade(project("fresh-clone-2"));
+  expect(run.code).toBe(1);
+  expect(run.stdout).toContain("The provider app-identity already exists in this Arcade project, and it is not what this app needs:");
+  expect(run.stdout).toContain("oauth2.client_id: Arcade has");
+  expect(run.stderr).toContain("never edits an existing provider");
+}, 60_000);
+
+test("a shell that exports the same values as .env is no conflict", async () => {
+  const dir = project("shell-agrees");
+  const run = await setupArcade(dir, { shell: { ARCADE_API_KEY: KEY, SESSION_SECRET: "" } });
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  expect(envOf(dir).SESSION_SECRET).toMatch(/^[0-9a-f]{64}$/);
+}, 60_000);

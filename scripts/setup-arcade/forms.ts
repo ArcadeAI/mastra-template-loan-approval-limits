@@ -15,7 +15,7 @@
  *   docs.arcade.dev "MCP Gateways → Create via dashboard", under a slug this
  *   script picks and writes as `ARCADE_GATEWAY_ID`.
  */
-import { HOOKS_NAME, HOOK_POINTS } from "./arcade.ts";
+import { healthCheckUrl, HOOKS_NAME, HOOK_POINTS } from "./arcade.ts";
 
 export interface UserSourceForm {
   origin: string;
@@ -65,7 +65,7 @@ export function hooksForm({ origin }: { origin: string }): string {
       "│    failure_mode        fail_closed",
       "│    status              active",
     ]),
-    "│  webhook_config.health_check_path   /hooks/health",
+    `│  webhook_config.health_check_path   ${healthCheckUrl(origin)}`,
     "│  webhook_config.auth.type           bearer",
     "│  webhook_config.auth.token          the value of ARCADE_HOOK_SIGNING_SECRET in .env (not printed here)",
     "│",
