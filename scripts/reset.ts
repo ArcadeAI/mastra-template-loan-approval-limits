@@ -17,6 +17,18 @@
  *                                         tokens and consents — `--hard` only
  *                                         (`apps/idp` until #6)
  *
+ * And one file on this machine, on **every** run:
+ *
+ *     Studio's memory memory.db (MEMORY_DB_PATH) — every thread and message
+ *                                         Mastra Studio remembers, emptied in
+ *                                         place (#36)
+ *
+ * `--hard` does nothing more to the memory than the default does: both empty
+ * it, and neither deletes the file. It holds conversations, not people,
+ * sessions or grants, so there is no second tier of it to reserve for a hard
+ * reset, and a take that left last take's thread in Studio would start with
+ * the agent remembering an approval that no longer exists in the loan book.
+ *
  * **Neither scope deletes a user** (#32, #33). Somebody added with
  * `bun run users` keeps their `subjects` row through both, and their
  * identity account through `--hard`. Only the demo cast's subjects — the
@@ -71,6 +83,16 @@
  * It also means this command needs no SSH, no shell on the host and no
  * `sqlite3`: just one bearer and one address.
  *
+ * ## Why the memory is a file and not a route
+ *
+ * Studio's memory belongs to Studio, a separate Node process that is only ever
+ * run on a developer's own machine, never deployed, and often not running when
+ * somebody resets. So there is no endpoint to call: the file is emptied in place
+ * with `bun:sqlite`, table by table inside one transaction, and never deleted,
+ * because a Studio that is running keeps its handle on the file it opened.
+ * Rows only, never the file, and only tables whose names are Mastra's: a
+ * `MEMORY_DB_PATH` pointed at some other database is refused, not emptied.
+ *
  * ## Two things this is not
  *
  * **A redeploy is not a reset.** All three databases sit on a persistent disk
@@ -97,6 +119,10 @@
  * a presenter who typed it expects some other environment to be reset, and
  * quietly resetting this one instead is the half-reset believed clean.
  */
+import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
+
+import { IN_MEMORY, memoryDbPath } from "../lib/agent/memory-path.ts";
 import { assertPublicHost, PublicHostError } from "../lib/control-plane/public-host.ts";
 
 /** sysexits: the environment is wrong, not the invocation. */
@@ -208,6 +234,8 @@ export interface ResetOptions {
   env: Record<string, string | undefined>;
   /** Injected in tests; `fetch` in anger. */
   fetch?: typeof fetch;
+  /** Studio's memory store. Unset, `MEMORY_DB_PATH` from `env`, else `./memory.db`. */
+  memoryDbPath?: string;
   log?: (line: string) => void;
   timeoutMs?: number;
 }
@@ -416,6 +444,78 @@ async function readJson(url: string, options: ResetOptions & { fetch: typeof fet
   }
 }
 
+/** Mastra's own tables are all named this way; anything else in the file is somebody else's. */
+const MASTRA_TABLE = /^mastra_/;
+
+/**
+ * Empty Studio's memory store (#36), on this machine, in place.
+ *
+ * Every Mastra table in the file, in one transaction, so a failure part-way
+ * leaves last take's threads whole rather than half-gone. The file itself
+ * stays: a running Studio holds it open, and would go on writing to a file
+ * nobody can see if it were unlinked. A file with a table that is not Mastra's
+ * is refused untouched, because that is a `MEMORY_DB_PATH` pointed at another
+ * database, and emptying `loans.db` table by table is not a reset.
+ */
+export function clearMemory(path: string): ServiceOutcome {
+  const label = "memory".padEnd(8);
+  if (path === IN_MEMORY) {
+    return { label: "memory", ok: true, line: `${label} OK  nothing on disk: MEMORY_DB_PATH is ${IN_MEMORY}, which lasts as long as Studio's process` };
+  }
+  if (!existsSync(path)) {
+    return {
+      label: "memory",
+      ok: true,
+      line: `${label} OK  nothing to clear: no ${path} yet. Studio creates it on the first turn of a thread`,
+    };
+  }
+
+  let db: Database | undefined;
+  try {
+    db = new Database(path, { readwrite: true, create: false });
+    const opened = db;
+    // A Studio mid-write holds the lock for milliseconds; wait for it rather than fail.
+    opened.exec("PRAGMA busy_timeout = 5000");
+    const tables = opened
+      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+      .all()
+      .map((row) => row.name);
+    const foreign = tables.filter((table) => !MASTRA_TABLE.test(table));
+    if (foreign.length > 0) {
+      return {
+        label: "memory",
+        ok: false,
+        line:
+          `${label} REFUSED  ${path} holds tables that are not Mastra's (${foreign.join(", ")}), so MEMORY_DB_PATH ` +
+          "points at some other database. Nothing in it was deleted.",
+      };
+    }
+    const count = () =>
+      Object.fromEntries(
+        tables.map((table) => [
+          table,
+          opened.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM "${table}"`).get()?.n ?? 0,
+        ]),
+      );
+    const before = count();
+    opened.transaction(() => {
+      for (const table of tables) opened.run(`DELETE FROM "${table}"`);
+    })();
+    const after = count();
+    return {
+      label: "memory",
+      ok: true,
+      line:
+        `${label} OK  Studio's threads and messages emptied at ${path}` +
+        (tables.length === 0 ? " (no tables yet)" : ` — ${deltas(before, after)}`),
+    };
+  } catch (cause) {
+    return { label: "memory", ok: false, line: `${label} FAILED  ${path} — ${String(cause)}` };
+  } finally {
+    db?.close();
+  }
+}
+
 /**
  * All three, in order, one line each. Exported so the test drives exactly what
  * the command does rather than a re-implementation of it.
@@ -451,13 +551,17 @@ export async function runReset(options: ResetOptions): Promise<ResetOutcome> {
     log(`[reset] ${outcome.line}`);
     services.push(outcome);
   }
+  // Both scopes: see "And one file on this machine" at the top of this file.
+  const memory = clearMemory(options.memoryDbPath ?? memoryDbPath(options.env));
+  log(`[reset] ${memory.line}`);
+  services.push(memory);
   if (!hard) log(`[reset] ${SOFT_SKIP_LINE}`);
 
   const ok = services.every((service) => service.ok);
   const ms = Math.round(performance.now() - started);
   log(
     ok
-      ? `[reset] done in ${ms}ms — ${specs.length} services back to the seeded state. A redeploy is not a reset; a reset is not a re-registration.`
+      ? `[reset] done in ${ms}ms — ${specs.length} services back to the seeded state and Studio's memory empty. A redeploy is not a reset; a reset is not a re-registration.`
       : `[reset] FAILED in ${ms}ms — ${services.filter((service) => !service.ok).map((service) => service.label).join(", ")}. The demo is NOT in a known state.`,
   );
   // After the verdict, not before it: the grant warning is the consequence of

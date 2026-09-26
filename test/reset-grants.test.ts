@@ -89,6 +89,7 @@ async function runResetCommand(args: string[] = []): Promise<{ code: number; out
       ...process.env,
       RESET_TOKEN,
       APP_PUBLIC_HOST: app.host,
+      MEMORY_DB_PATH: app.databases.memory,
     },
     stdout: "pipe",
     stderr: "pipe",

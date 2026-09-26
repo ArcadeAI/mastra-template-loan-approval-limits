@@ -54,7 +54,7 @@ let userinfo: Server<unknown>;
 async function runReset(args: string[] = []): Promise<{ code: number; out: string; err: string }> {
   const proc = spawnChild(["bun", join(ROOT, "scripts", "reset.ts"), ...args], {
     cwd: ROOT,
-    env: { ...process.env, RESET_TOKEN, APP_PUBLIC_HOST: app.host },
+    env: { ...process.env, RESET_TOKEN, APP_PUBLIC_HOST: app.host, MEMORY_DB_PATH: app.databases.memory },
     stdout: "pipe",
     stderr: "pipe",
   });
