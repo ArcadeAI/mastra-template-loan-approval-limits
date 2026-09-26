@@ -7,7 +7,10 @@
  * dropped, or one that died while it was imported, leaves every job green. So
  * the check is shown red here on exactly that — a split that drops one file —
  * and on the other ways a shard can run less than it was given, and the record
- * it reads is shown catching the two files Bun's own JUnit report leaves out.
+ * it reads is shown catching the two files Bun's own JUnit report leaves out,
+ * both in one shared global and under the `--isolate` the shards run with.
+ * The last test is the reason for `--isolate`: a file that passes only through
+ * what an earlier file leaked passes in a shared global and fails isolated.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -152,38 +155,57 @@ describe("the check", () => {
   });
 });
 
-describe("the record, from a real bun test", () => {
-  // Four files, two of which Bun's JUnit report omits: one that throws while
-  // it is imported, and one that registers no test at all.
-  const files = {
-    "slow.test.ts": `import { beforeAll, expect, test } from "bun:test";\nbeforeAll(() => Bun.sleep(400));\ntest("one", () => expect(1).toBe(1));\n`,
-    "broken.test.ts": `throw new Error("fails while it is imported");\n`,
-    "empty.test.ts": `export {};\n`,
-    "late.test.ts": `import { test } from "bun:test";\ntest("throws after it returns", () => { setTimeout(() => { throw new Error("between tests"); }, 0); });\ntest("waits", () => Bun.sleep(50));\n`,
-  };
-  for (const [name, source] of Object.entries(files)) writeFileSync(join(scratch, name), source);
-  const record = join(scratch, "loaded.txt");
-  const ran = Bun.spawnSync(
-    ["bun", "test", "--preload", RECORDER, ...Object.keys(files).map((name) => `./${name}`)],
-    { cwd: scratch, env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? scratch, CG_SHARD_RECORD: record } },
-  );
-  const log = `${ran.stdout.toString()}${ran.stderr.toString()}`;
+// Four files, two of which Bun's JUnit report omits: one that throws while it
+// is imported, and one that registers no test at all. Then a pair where the
+// second passes only because of what the first left in the global object —
+// the "works because of what ran before it" bug, planted on purpose.
+const PLANTED = {
+  "slow.test.ts": `import { beforeAll, expect, test } from "bun:test";\nbeforeAll(() => Bun.sleep(400));\ntest("one", () => expect(1).toBe(1));\n`,
+  "broken.test.ts": `throw new Error("fails while it is imported");\n`,
+  "empty.test.ts": `export {};\n`,
+  "late.test.ts": `import { test } from "bun:test";\ntest("throws after it returns", () => { setTimeout(() => { throw new Error("between tests"); }, 0); });\ntest("waits", () => Bun.sleep(50));\n`,
+  "leaks.test.ts": `import { test } from "bun:test";\ntest("leaves a global behind", () => { (globalThis as { leaked?: boolean }).leaked = true; });\n`,
+  "needs-the-leak.test.ts": `import { expect, test } from "bun:test";\ntest("passes only through the leak", () => expect((globalThis as { leaked?: boolean }).leaked).toBe(true));\n`,
+};
+for (const [name, source] of Object.entries(PLANTED)) writeFileSync(join(scratch, name), source);
+
+/** `bun test` on the planted files, in that order, with the recorder: what the shards run, minus the split. */
+function runPlanted(flags: string[]): { loaded: string; log: string; exitCode: number } {
+  const record = join(scratch, `loaded${flags.join("")}.txt`);
+  writeFileSync(record, "");
+  const ran = Bun.spawnSync(["bun", "test", ...flags, "--preload", RECORDER, ...Object.keys(PLANTED).map((name) => `./${name}`)], {
+    cwd: scratch,
+    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? scratch, CG_SHARD_RECORD: record },
+  });
+  return { loaded: readFileSync(record, "utf8"), log: `${ran.stdout.toString()}${ran.stderr.toString()}`, exitCode: ran.exitCode };
+}
+
+describe.each([
+  ["in one shared global, as a local bun test runs", [] as string[]],
+  ["with --isolate, as the shards run", ["--isolate"]],
+])("the record, from a real bun test %s", (_mode, flags) => {
+  const { loaded, log, exitCode } = runPlanted(flags);
 
   test("lists every file Bun loaded, the two JUnit omits included, with beforeAll in its time", () => {
-    const { loaded, complete } = parseRecord(readFileSync(record, "utf8"));
-    expect(complete).toBe(true);
-    const names = loaded.map(({ file }) => file.split("/").at(-1)).sort();
-    expect(names).toEqual(Object.keys(files).sort());
-    const slow = loaded.find(({ file }) => file.endsWith("slow.test.ts"));
+    const record = parseRecord(loaded);
+    expect(record.complete).toBe(true);
+    const names = record.loaded.map(({ file }) => file.split("/").at(-1));
+    expect(names).toEqual(Object.keys(PLANTED));
+    const slow = record.loaded.find(({ file }) => file.endsWith("slow.test.ts"));
     expect(slow?.seconds).toBeGreaterThanOrEqual(0.4);
   });
 
   test("reads Bun's summary, the error count apart from the failures", () => {
     const summary = parseSummary(log);
-    expect(ran.exitCode).not.toBe(0);
-    expect(summary.files).toBe(4);
+    expect(exitCode).not.toBe(0);
+    expect(summary.files).toBe(Object.keys(PLANTED).length);
     expect(summary.pass).toBeGreaterThanOrEqual(1);
     expect(summary.error).toBeGreaterThanOrEqual(1);
     expect(summary.fail).toBeGreaterThanOrEqual(1);
   });
+});
+
+test("a test that passes only through an earlier file's leak passes in a shared global and fails under --isolate", () => {
+  expect(runPlanted([]).log).not.toContain("(fail) passes only through the leak");
+  expect(runPlanted(["--isolate"]).log).toContain("(fail) passes only through the leak");
 });

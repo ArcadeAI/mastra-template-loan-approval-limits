@@ -118,17 +118,24 @@ export interface Loaded {
 export function parseRecord(text: string): { loaded: Loaded[]; complete: boolean } {
   const rows: { file: string; at: number }[] = [];
   let end: number | undefined;
+  let endedLast = false;
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     const [first = "", second = ""] = line.split("\t");
-    if (first === "END") end = Number(second);
-    else rows.push({ at: Number(first), file: second });
+    if (first === "END") {
+      end = Number(second);
+      endedLast = true;
+    } else {
+      rows.push({ at: Number(first), file: second });
+      endedLast = false;
+    }
   }
   const loaded = rows.map((row, index) => ({
     file: row.file,
     seconds: ((rows[index + 1]?.at ?? end ?? row.at) - row.at) / 1000,
   }));
-  return { loaded, complete: end !== undefined };
+  // Complete when an `END` follows the last file: its `afterAll` ran.
+  return { loaded, complete: endedLast };
 }
 
 /** What Bun's closing summary says. Any count Bun left out is zero; `files` is `null` if there was no summary at all. */
@@ -263,11 +270,24 @@ async function runShard(shard: number, of: number, dir: string): Promise<number>
   const files = shardFiles(shard, of);
   writeFileSync(join(dir, "assigned.txt"), files.map((file) => `${file}\n`).join(""));
   console.log(`shard ${shard}/${of}: ${files.length} files`);
+  // The record is appended to, by every file's own copy of the preload.
+  writeFileSync(join(dir, "loaded.txt"), "");
   // `./` on every path: a bare `test/x.test.ts` is a substring filter, and
   // also runs `app-test/x.test.ts` (.orca/project.md, "run the root group as
   // bun test ./test/"). `check` would catch it as a duplicate; this avoids it.
+  //
+  // `--isolate`: every file gets a fresh global object, so no file can depend
+  // on which files the split put before it. Without it the split surfaced
+  // leaks the serial order had always hidden, measured on 1.3.14 by running
+  // one file before another: `chat-rendering`, `chat-resume` and
+  // `control-plane-strip` each leave React DOM bound to a closed happy-dom
+  // window, and `panel-live` then times out; `panel-keyboard` does the same to
+  // `chat-resume`. #142 fixed two such files by moving their DOM into an
+  // isolated worker (`chat-conversation.test.tsx`); this does it for every file,
+  // at no measured cost (a 75-file shard, 53.2s without, 53.7s with). A local
+  // `bun test` still runs everything in one shared global, in Bun's order.
   const child = spawn(
-    ["bun", "test", "--preload", "./scripts/test-shards-record.ts", ...files.map((file) => `./${file}`)],
+    ["bun", "test", "--isolate", "--preload", "./scripts/test-shards-record.ts", ...files.map((file) => `./${file}`)],
     {
       cwd: ROOT,
       env: { ...process.env, CG_SHARD_RECORD: join(dir, "loaded.txt") },

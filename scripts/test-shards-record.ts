@@ -13,14 +13,20 @@
  * without this preload. An `onLoad` would have to return the file's contents
  * and a loader, which is a second transpiler path for every test in the suite.
  *
- * Each line is `<ms since the process started>\t<path from the repo root>`, and
- * the last is `END\t<ms>`: a file's wall time is the next line's time minus
- * its own, `beforeAll` and `afterAll` included. Only CI's shard runner passes
- * this preload, so a local `bun test` is untouched by it.
+ * Each line is `<epoch ms>\t<path from the repo root>` when a file is loaded,
+ * or `END\t<epoch ms>` when a preload's `afterAll` runs. The shards run with
+ * `--isolate`, which gives every file a fresh global object and so runs this
+ * preload again for each one: that is why it only ever appends (the runner
+ * creates the file empty), why the clock is the epoch rather than
+ * `performance.now()`, and why there is an `END` after every file there rather
+ * than one at the very end. `parseRecord` reads both shapes: a file's wall time
+ * is the next file's start, or the last `END`, minus its own start, its
+ * `beforeAll` and `afterAll` included. Only CI's shard runner passes this
+ * preload, so a local `bun test` is untouched by it.
  */
 import { plugin } from "bun";
 import { afterAll } from "bun:test";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 
 import { TEST_FILE } from "./test-shards.ts";
@@ -31,9 +37,8 @@ if (out === undefined || out === "") {
 }
 
 const ROOT = join(import.meta.dir, "..");
-const started = performance.now();
+// Bun resolves a test file more than once as it loads it; one line each.
 const seen = new Set<string>();
-writeFileSync(out, "");
 
 plugin({
   name: "cg-shard-record",
@@ -43,15 +48,16 @@ plugin({
       const file = relative(ROOT, path);
       if (!seen.has(file)) {
         seen.add(file);
-        appendFileSync(out, `${(performance.now() - started).toFixed(0)}\t${file}\n`);
+        appendFileSync(out, `${Date.now()}\t${file}\n`);
       }
       return undefined;
     });
   },
 });
 
-// A preload's `afterAll` runs once, after the last file's own. Not
+// A preload's `afterAll` runs after the last file this global object ran: once
+// at the very end without `--isolate`, after every file with it. Not
 // `process.on("exit")`: under `bun test` it never fires (measured, 1.3.14).
 afterAll(() => {
-  appendFileSync(out, `END\t${(performance.now() - started).toFixed(0)}\n`);
+  appendFileSync(out, `END\t${Date.now()}\n`);
 });

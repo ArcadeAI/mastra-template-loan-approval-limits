@@ -102,9 +102,11 @@ jobs:
         with:
           node-version: 22
 
-      # `run` is `bun test` on this shard's files with a preload that writes
-      # down every file Bun loaded (`scripts/test-shards-record.ts`), and it
-      # keeps Bun's output. Its exit status is Bun's.
+      # `run` is `bun test --isolate` on this shard's files, with a preload that
+      # writes down every file Bun loaded (`scripts/test-shards-record.ts`), and
+      # it keeps Bun's output. Its exit status is Bun's. `--isolate` gives each
+      # file a fresh global object, so a file cannot pass or fail because of
+      # which files the split put before it; `runShard` has the measured case.
       - name: Test
         run: bun scripts/test-shards.ts run ${{ matrix.shard }} 4 test-shard-${{ matrix.shard }}
         env:
