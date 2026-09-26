@@ -98,6 +98,7 @@ import { gatewayClient, governedToolset } from "./tools.ts";
 import { createNativeElicitationBridge } from "./native-elicitation.ts";
 import { gatewayTokenRejected, readSession, writeSession, type Session } from "../identity/session.ts";
 import { runTurn, type Streamable } from "./run.ts";
+import { environmentSecrets, secretValues } from "./withhold.ts";
 
 // Defined in `events.ts` — the client component needs it too, and importing it
 // from here dragged `@mastra/mcp` into the browser bundle. Re-exported so a
@@ -478,6 +479,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
       requestApprovalTool: escalationTool,
       nativeElicitation,
       onAuthorization: closure.close,
+      secrets: turnSecrets(current, bearer, config, { storeToken: options.store?.approvalsStoreToken }),
     });
   } catch (cause) {
     // The connection belongs to a turn that will never happen. Same reason the
@@ -531,6 +533,46 @@ async function reauthorize(
   ];
 
   return new Response(events.map(encodeEvent).join(""), { headers });
+}
+
+/**
+ * Every value this turn holds that the page must never be shown inside a tool
+ * call's arguments or result (#37): the bearer the turn runs with, the rest of
+ * this persona's sealed tokens, and the service's own secrets, from the
+ * config and from the environment. `withhold.ts` does the withholding.
+ */
+export function turnSecrets(
+  session: Session,
+  bearer: string,
+  config: IdentitySurface,
+  options: { env?: Record<string, string | undefined>; storeToken?: string | undefined } = {},
+): string[] {
+  const env = options.env ?? process.env;
+  return secretValues([
+    bearer,
+    session.gateway?.access_token,
+    session.gateway?.refresh_token,
+    session.idp?.access_token,
+    session.idp?.refresh_token,
+    options.storeToken,
+    // The approvals store token this process presents, including the
+    // development fallback when the variable is unset.
+    readWebConfigSafely(env)?.approvalsStoreToken,
+    config.arcadeApiKey,
+    config.agent.anthropicApiKey,
+    config.identity.idpClientSecret,
+    config.identity.sessionSecret,
+    ...environmentSecrets(env),
+  ]);
+}
+
+/** `readWebConfig` throws in production without a store token; that is not this caller's concern. */
+function readWebConfigSafely(env: Record<string, string | undefined>) {
+  try {
+    return readWebConfig(env);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -627,8 +669,10 @@ function streamTurn(turn: {
   requestApprovalTool: string;
   nativeElicitation: ReturnType<typeof createNativeElicitationBridge>;
   onAuthorization: () => void;
+  secrets: readonly string[];
 }): Response {
-  const { agent, prompt, opening, client, headers, requestApprovalTool, nativeElicitation, onAuthorization } = turn;
+  const { agent, prompt, opening, client, headers, requestApprovalTool, nativeElicitation, onAuthorization, secrets } =
+    turn;
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -637,7 +681,7 @@ function streamTurn(turn: {
       };
       try {
         for (const event of opening) emit(event);
-        await runTurn({ agent, prompt, emit, requestApprovalTool, nativeElicitation, onAuthorization });
+        await runTurn({ agent, prompt, emit, requestApprovalTool, nativeElicitation, onAuthorization, secrets });
       } finally {
         // The MCP connection belongs to this turn and this persona. Leaving it
         // open would leave a bearer token alive in a process that serves every
