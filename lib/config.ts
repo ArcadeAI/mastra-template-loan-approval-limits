@@ -187,6 +187,22 @@ const DEV_STORE_TOKEN = "cg-approvals-store-dev-token-not-for-production";
  */
 export type IdentitySurface = Pick<WebConfig, "identity" | "arcadeApiUrl" | "arcadeApiKey" | "agent">;
 
+/**
+ * Every secret this configuration holds, for the chat to withhold from what it
+ * shows of a tool call (#37). Declared here, beside the fields, so a new
+ * secret is added where it is defined; `app-test/chat-leak-probes.test.ts`
+ * enumerates every field named like a secret and fails if one is missing.
+ */
+export function configSecrets(config: IdentitySurface & Partial<Pick<WebConfig, "approvalsStoreToken">>): string[] {
+  return [
+    config.arcadeApiKey,
+    config.agent.anthropicApiKey,
+    config.identity.idpClientSecret,
+    config.identity.sessionSecret,
+    config.approvalsStoreToken,
+  ].filter((value): value is string => typeof value === "string" && value !== "");
+}
+
 export function readIdentitySurface(
   env: Record<string, string | undefined> = process.env,
 ): IdentitySurface {

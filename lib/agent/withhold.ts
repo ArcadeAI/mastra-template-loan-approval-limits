@@ -11,10 +11,13 @@
  *
  * Three nets, because each misses what the others catch:
  *
- * - **Known values.** The strings this process holds as secrets for this turn:
- *   the persona's gateway and IdP tokens, and the service secrets from the
- *   environment. Matched as substrings, so a token inside a URL or a sentence
- *   goes too.
+ * - **Known values.** Every secret the app holds for this turn: every token in
+ *   the sealed session (`sessionSecrets`, in the identity module), every
+ *   secret field of the configuration (`configSecrets`), and the service
+ *   secrets from the environment. Matched as substrings, so a token inside a
+ *   URL or a sentence goes too. The identity provider's signing secret, which
+ *   nothing outside the provider may read, is matched by fingerprint instead
+ *   (`lib/secret-fingerprints.ts`).
  * - **Key names.** A string under `access_token`, `client_secret`, `password`
  *   and the like, whatever its value. Covers OAuth tokens this process never
  *   held, such as the hop-2 token Arcade keeps.
@@ -25,6 +28,8 @@
  * what the browser is shown of it.
  */
 
+import { sha256, type SecretFingerprint } from "../secret-fingerprints.ts";
+
 /** What replaces a withheld value. */
 export const WITHHELD = "[withheld: secret]";
 
@@ -32,9 +37,9 @@ export const WITHHELD = "[withheld: secret]";
  * The environment variables whose values are secrets. Read by name, so a
  * value that is set is withheld wherever it turns up.
  *
- * Not the identity module's signing secret: only that module may read it
- * (`app-test/identity/only-identity-mints.test.ts`), and nothing on the MCP
- * path holds it to echo back.
+ * Not the identity provider's signing secret: only the provider may read it
+ * (`app-test/identity/only-identity-mints.test.ts`), so it registers a
+ * fingerprint instead, and `withholdSecrets` matches that.
  */
 export const SECRET_ENV = [
   "APPROVALS_STORE_TOKEN",
@@ -59,6 +64,17 @@ const SECRET_KEY =
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/g;
 const JWT = /\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
 
+/**
+ * What a turn withholds: secret values it holds, and fingerprints of secrets it
+ * may not hold (`lib/secret-fingerprints.ts`).
+ */
+export interface WithheldSet {
+  readonly values: readonly string[];
+  readonly fingerprints: readonly SecretFingerprint[];
+}
+
+export const NOTHING_WITHHELD: WithheldSet = { values: [], fingerprints: [] };
+
 /** The secret values to look for, deduplicated, longest first so a prefix never masks half of one. */
 export function secretValues(values: ReadonlyArray<string | undefined | null>): string[] {
   const kept = new Set<string>();
@@ -77,17 +93,47 @@ export function environmentSecrets(env: Record<string, string | undefined>): str
 /**
  * A copy of `value` with every secret replaced by `WITHHELD`, and how many
  * were replaced. `value` itself is not touched.
+ *
+ * The whole value is scanned, however deep: the walk keeps its own stack
+ * rather than recursing, so there is no cutoff and no stack to overflow. Round
+ * 1 of #41's review found the old cutoff at depth 32 returning a bearer
+ * nested 33 levels down unscanned. A value that refers to itself is copied
+ * with the same shape and scanned once.
  */
-export function withholdSecrets<T>(value: T, secrets: readonly string[]): { value: T; withheld: number } {
+export function withholdSecrets<T>(value: T, secrets: WithheldSet | readonly string[]): { value: T; withheld: number } {
+  const set: WithheldSet = Array.isArray(secrets)
+    ? { values: secrets as readonly string[], fingerprints: [] }
+    : (secrets as WithheldSet);
+  const lengths = [...new Set(set.fingerprints.map((print) => print.length))].filter(
+    (length) => length >= MIN_SECRET_LENGTH,
+  );
+  const hashes = new Set(set.fingerprints.map((print) => `${print.length}:${print.sha256}`));
   let withheld = 0;
 
   const inString = (text: string): string => {
     let out = text;
-    for (const secret of secrets) {
+    for (const secret of set.values) {
       if (!out.includes(secret)) continue;
       const parts = out.split(secret);
       withheld += parts.length - 1;
       out = parts.join(WITHHELD);
+    }
+    // A fingerprint: hash every window of the secret's length.
+    for (const length of lengths) {
+      let at = 0;
+      let rebuilt = "";
+      let from = 0;
+      while (at + length <= out.length) {
+        if (hashes.has(`${length}:${sha256(out.slice(at, at + length))}`)) {
+          withheld += 1;
+          rebuilt += out.slice(from, at) + WITHHELD;
+          at += length;
+          from = at;
+          continue;
+        }
+        at += 1;
+      }
+      if (from > 0) out = rebuilt + out.slice(from);
     }
     out = out.replace(BEARER, () => {
       withheld += 1;
@@ -100,22 +146,39 @@ export function withholdSecrets<T>(value: T, secrets: readonly string[]): { valu
     return out;
   };
 
-  const walk = (node: unknown, depth: number): unknown => {
+  const copies = new Map<object, unknown>();
+  const pending: Array<{ from: object; into: Record<string, unknown> | unknown[] }> = [];
+
+  /** A string scanned, a leaf as is, an object or array as a shell queued for its children. */
+  const shell = (node: unknown): unknown => {
     if (typeof node === "string") return inString(node);
-    if (depth > 32 || node === null || typeof node !== "object") return node;
-    if (Array.isArray(node)) return node.map((item) => walk(item, depth + 1));
-    const copy: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
-      if (SECRET_KEY.test(key) && typeof child === "string" && child !== "" && child !== WITHHELD) {
-        withheld += 1;
-        copy[key] = WITHHELD;
-        continue;
-      }
-      copy[key] = walk(child, depth + 1);
-    }
-    return copy;
+    if (node === null || typeof node !== "object") return node;
+    const seen = copies.get(node);
+    if (seen !== undefined) return seen;
+    const into: Record<string, unknown> | unknown[] = Array.isArray(node) ? [] : {};
+    copies.set(node, into);
+    pending.push({ from: node, into });
+    return into;
   };
 
-  const masked = walk(value, 0) as T;
-  return { value: masked, withheld };
+  const root = shell(value);
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { from, into } = next;
+    if (Array.isArray(from)) {
+      const list = into as unknown[];
+      for (let index = 0; index < from.length; index += 1) list[index] = shell(from[index]);
+      continue;
+    }
+    const record = into as Record<string, unknown>;
+    for (const [key, child] of Object.entries(from as Record<string, unknown>)) {
+      if (SECRET_KEY.test(key) && typeof child === "string" && child !== "" && child !== WITHHELD) {
+        withheld += 1;
+        record[key] = WITHHELD;
+        continue;
+      }
+      record[key] = shell(child);
+    }
+  }
+
+  return { value: root as T, withheld };
 }

@@ -83,7 +83,7 @@
  * signed in here, is a `fault` — nothing decided anything, so nothing on
  * screen may say it did.
  */
-import { agentProblems, readIdentitySurface, readWebConfig, type IdentitySurface } from "../config.ts";
+import { agentProblems, configSecrets, readIdentitySurface, readWebConfig, type IdentitySurface } from "../config.ts";
 import { fetchApproval } from "../approvals-store.ts";
 import { readConversationHistory, withPrompt, type ConversationMessage } from "./conversation.ts";
 import { closeTurnOnEscalation } from "./escalation.ts";
@@ -91,14 +91,15 @@ import { planResume, readResumeRequest, type ResumeRequest } from "./resume.ts";
 import { anthropicModel, buildAgent } from "./agent.ts";
 import { CHAT_PATH, encodeEvent, NDJSON, type ChatEvent } from "./events.ts";
 import { serverFault } from "./fault.ts";
-import { CHAT_PAGE, GATEWAY_START_PATH, SIGNIN_PATH } from "../identity/handlers.ts";
+import { CHAT_PAGE, GATEWAY_START_PATH, sessionSecrets, SIGNIN_PATH } from "../identity/handlers.ts";
 import { gatewayToken } from "./gateway-token.ts";
 import { mcpUrl, probeGatewayToken } from "../identity/gateway.ts";
 import { gatewayClient, governedToolset } from "./tools.ts";
 import { createNativeElicitationBridge } from "./native-elicitation.ts";
 import { gatewayTokenRejected, readSession, writeSession, type Session } from "../identity/session.ts";
 import { runTurn, type Streamable } from "./run.ts";
-import { environmentSecrets, secretValues } from "./withhold.ts";
+import { environmentSecrets, secretValues, type WithheldSet } from "./withhold.ts";
+import { secretFingerprints } from "../secret-fingerprints.ts";
 
 // Defined in `events.ts` — the client component needs it too, and importing it
 // from here dragged `@mastra/mcp` into the browser bundle. Re-exported so a
@@ -479,7 +480,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
       requestApprovalTool: escalationTool,
       nativeElicitation,
       onAuthorization: closure.close,
-      secrets: turnSecrets(bearer, config, { storeToken: options.store?.approvalsStoreToken }),
+      secrets: turnSecrets(bearer, config, { storeToken: options.store?.approvalsStoreToken, session: current }),
     });
   } catch (cause) {
     // The connection belongs to a turn that will never happen. Same reason the
@@ -536,35 +537,43 @@ async function reauthorize(
 }
 
 /**
- * Every value this turn holds that the page must never be shown inside a tool
- * call's arguments or result (#37): the bearer the turn runs with, and the
- * service's own secrets, from the config and from the environment.
- * `withhold.ts` does the withholding.
+ * Everything this turn must never show inside a tool call's arguments or
+ * result (#37): every secret the app holds.
  *
- * The bearer is the one `gatewayToken()` handed this turn, not read out of the
- * session: that seam is the only reader of a stored gateway token
- * (`app-test/studio-entry.test.ts`). The session's other tokens never travel
- * on the MCP path, so a tool result cannot carry them back; an OAuth token a
- * tool does hold is caught by key name and shape.
+ * - every token in the sealed session, read where stored tokens are read, in
+ *   the identity module (`sessionSecrets`), plus the bearer `gatewayToken()`
+ *   handed this turn, which after a refresh is newer than the cookie;
+ * - every secret field of the configuration (`configSecrets`), from the config
+ *   the turn runs with and from the environment's own;
+ * - the service secrets from the environment, by name (`SECRET_ENV`);
+ * - the fingerprints of secrets this module may not read, which the identity
+ *   provider registered when it read its configuration.
+ *
+ * Round 1 of #41's review found the first and last missing: a refresh token
+ * and the provider's secret, under innocuous keys, reached the page.
  */
 export function turnSecrets(
   bearer: string,
   config: IdentitySurface,
-  options: { env?: Record<string, string | undefined>; storeToken?: string | undefined } = {},
-): string[] {
+  options: {
+    env?: Record<string, string | undefined>;
+    storeToken?: string | undefined;
+    session?: Session | undefined;
+  } = {},
+): WithheldSet {
   const env = options.env ?? process.env;
-  return secretValues([
-    bearer,
-    options.storeToken,
-    // The approvals store token this process presents, including the
-    // development fallback when the variable is unset.
-    readWebConfigSafely(env)?.approvalsStoreToken,
-    config.arcadeApiKey,
-    config.agent.anthropicApiKey,
-    config.identity.idpClientSecret,
-    config.identity.sessionSecret,
-    ...environmentSecrets(env),
-  ]);
+  const fromEnv = readWebConfigSafely(env);
+  return {
+    values: secretValues([
+      bearer,
+      options.storeToken,
+      ...(options.session ? sessionSecrets(options.session) : []),
+      ...configSecrets(config),
+      ...(fromEnv ? configSecrets(fromEnv) : []),
+      ...environmentSecrets(env),
+    ]),
+    fingerprints: secretFingerprints(),
+  };
 }
 
 /** `readWebConfig` throws in production without a store token; that is not this caller's concern. */
@@ -670,7 +679,7 @@ function streamTurn(turn: {
   requestApprovalTool: string;
   nativeElicitation: ReturnType<typeof createNativeElicitationBridge>;
   onAuthorization: () => void;
-  secrets: readonly string[];
+  secrets: WithheldSet;
 }): Response {
   const { agent, prompt, opening, client, headers, requestApprovalTool, nativeElicitation, onAuthorization, secrets } =
     turn;

@@ -178,10 +178,10 @@ describe("nothing leaks: secrets never reach a rendered argument or result", () 
     const env = { APPROVALS_STORE_TOKEN: "store-token-from-the-environment-0123" };
     const secrets = turnSecrets(bearer, harness.config, { env, storeToken: STORE_TOKEN });
     // What the handler holds as secret for this turn, named.
-    expect(secrets).toContain(bearer);
-    expect(secrets).toContain(STORE_TOKEN);
-    expect(secrets).toContain(env.APPROVALS_STORE_TOKEN);
-    expect(secrets).toContain(harness.config.identity.sessionSecret);
+    expect(secrets.values).toContain(bearer);
+    expect(secrets.values).toContain(STORE_TOKEN);
+    expect(secrets.values).toContain(env.APPROVALS_STORE_TOKEN);
+    expect(secrets.values).toContain(harness.config.identity.sessionSecret);
 
     const jwt =
       "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhbGljZUBiYW5rLmV4YW1wbGUifQ.c2lnbmF0dXJlLW9mLXRoZS10b2tlbg";

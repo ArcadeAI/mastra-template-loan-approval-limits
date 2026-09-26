@@ -63,7 +63,7 @@ import { approvalRequested } from "./escalation.ts";
 import { CORRELATION_TOKEN } from "../governance/correlation.ts";
 import type { ChatEvent } from "./events.ts";
 import { readNativeUrlElicitations, type NativeElicitationBridge, type NativeUrlElicitation } from "./native-elicitation.ts";
-import { withholdSecrets } from "./withhold.ts";
+import { NOTHING_WITHHELD, withholdSecrets, type WithheldSet } from "./withhold.ts";
 
 /** The ceiling on tool calls in one turn. High enough that a spin is visible as a spin. */
 export const MAX_STEPS = 8;
@@ -167,7 +167,7 @@ export interface RunOptions {
    * and token shapes are withheld whether or not they are listed here
    * (`withhold.ts`).
    */
-  secrets?: readonly string[];
+  secrets?: WithheldSet;
 }
 
 /** One message in a conversation handed to the agent. Mastra takes an array of these. */
@@ -185,7 +185,7 @@ export interface TurnMessage {
  */
 export async function runTurn(options: RunOptions): Promise<void> {
   const emit = options.emit;
-  const secrets = options.secrets ?? [];
+  const secrets = options.secrets ?? NOTHING_WITHHELD;
   let calls = 0;
 
   /**
