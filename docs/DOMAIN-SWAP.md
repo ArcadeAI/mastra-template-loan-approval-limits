@@ -460,8 +460,13 @@ overrides with their defaults. The domain swap touches:
 | `ARCADE_APPROVALS_TOOLKIT` | unchanged unless you rename `tools/approvals` |
 | `APP_PUBLIC_HOST` | the app's public host, which is also where `tools/loan` finds the API (under `API_BASE_PATH`). If your API lives on a host of its own, give the toolkit a secret of its own for it |
 | `IDENTITY_HOST` | where `lib/loans/` validates bearers; unset, the app's own listener. Point it at your IdP (§4) |
-| `PERSONA_<ROLE>_EMAIL` | your cast's role addresses, read once at first seed |
 | `LOANS_DB_PATH` | only if you keep a database of your own |
+
+Your people are not configuration, and nothing seeds them. Add each one with
+`bun run users add <email> --name <name> --role <role> --clearance <n>`, or the demo cast with
+`bun run users seed-demo`. Give `seed-demo` your own addresses with `--alice <email>`,
+`--bob`, `--charlie` and `--michael`, and those people become real users: a reset keeps
+their roles and clearances as they are.
 
 The auth provider id your tools require is not a variable: it is `IDP_PROVIDER_ID` in
 the toolkit and `PROVIDER_ID` in `scripts/setup-arcade/arcade.ts`, and the two must

@@ -50,7 +50,7 @@ export async function bootApp(env: Record<string, string>): Promise<App> {
   };
 
   // An allowlist, not the developer's shell minus some of it (`child-env.ts`):
-  // a PERSONA_* or an IDP_* from a local run would make these tests about
+  // an IDP_* from a local run would make these tests about
   // their environment, and a host or database path would point the app
   // somewhere else.
   //
