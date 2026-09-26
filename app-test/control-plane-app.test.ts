@@ -26,6 +26,7 @@ import { HealthResponse } from "@cg/policy-schema";
 
 import { serveOnFreePort, stopProcess, type Booted } from "./cdp.ts";
 import { spawnChild } from "./child.ts";
+import { seedDemoGovernance, seedDemoIdentity } from "./demo-cast.ts";
 import { loanFixture } from "./control-plane/loan-fixture.ts";
 import { openEventStream } from "./control-plane/sse-reader.ts";
 
@@ -56,9 +57,16 @@ async function bootApp(env: Record<string, string> = {}): Promise<App> {
   let booted: Booted;
   try {
     booted = await serveOnFreePort(
-      (port) => {
+      async (port) => {
         const dir = join(data, String(port));
         mkdirSync(dir);
+        // A first boot seeds nobody (#33): the demo cast this file acts as goes
+        // into both files first, the way `bun run users seed-demo` writes it.
+        seedDemoGovernance(join(dir, "governance.db"), {
+          loanToolkit: env.ARCADE_LOAN_TOOLKIT ?? process.env.ARCADE_LOAN_TOOLKIT?.trim() ?? "Loan",
+          approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT ?? process.env.ARCADE_APPROVALS_TOOLKIT?.trim() ?? "Approvals",
+        });
+        await seedDemoIdentity(join(dir, "idp.db"));
         const distDir = `.next/cg-test-${port}`;
         distDirs.push(distDir);
         return spawnChild(["bun", "scripts/next.ts", "dev"], {
