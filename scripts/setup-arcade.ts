@@ -336,6 +336,14 @@ function finish(userSource: { clientId: string; clientSecret: string | null }): 
   process.exit(0);
 }
 
+/**
+ * What `arcade deploy` says about the tool secrets, and why it is fine: it
+ * uploads a secret only from its own environment, and this run set both by API.
+ */
+const DEPLOY_SECRETS_NOTE =
+  "  (arcade deploy may print \"Secret 'APP_PUBLIC_HOST' not found in environment, skipping upload\". That is expected:\n" +
+  "  this run already set the tool secrets by API, above.)";
+
 /** `arcade deploy`, as printed by the dry run and run by a real one. */
 function deployLine(dir: string): string {
   return `  arcade deploy   (in ${dir})`;
@@ -419,7 +427,10 @@ if (dryRun) {
     await admin.request("GET", projectPath(scope, "/gateways/<gateway_id>"));
   }
   out(skipDeploy ? "\nDeploys: skipped (--skip-deploy)." : "\nDeploys, after the hooks and before the gateway, each stopping the run if it fails:");
-  if (!skipDeploy) for (const dir of TOOLKIT_DIRS) out(deployLine(dir));
+  if (!skipDeploy) {
+    for (const dir of TOOLKIT_DIRS) out(deployLine(dir));
+    out(DEPLOY_SECRETS_NOTE);
+  }
   finish({ clientId: "<the arcade-user-source client id in idp.db>", clientSecret: clientsOnDisk ? null : "<its secret, minted by this run>" });
 }
 
@@ -664,6 +675,7 @@ if (scope === null) {
 if (skipDeploy) {
   out("\nDeploys: skipped (--skip-deploy). Deploy both toolkits before the gateway: arcade deploy, in tools/loan and in tools/approvals.");
 } else {
+  out(`\n${DEPLOY_SECRETS_NOTE.trimStart()}`);
   for (const dir of TOOLKIT_DIRS) {
     const where = join(cwd, dir);
     if (!existsSync(where)) fail(`there is no ${dir} under ${cwd} to deploy. Run this from the project's root, or pass --skip-deploy.`);
@@ -672,7 +684,11 @@ if (skipDeploy) {
     try {
       // The developer's own environment, not this run's: `arcade deploy`
       // reads its login and active project the way it does from their shell.
-      const child = Bun.spawn(["arcade", "deploy"], { cwd: where, env: shellEnv, stdio: ["inherit", "inherit", "inherit"] });
+      // No stdin (#30): the CLI asks "View full deployment logs? [y/n]" when
+      // stdin and stdout are both a terminal (arcade_cli/deploy.py, 1.16.1),
+      // and with the developer's terminal inherited every deploy waited for a
+      // key. Its output still streams to this one.
+      const child = Bun.spawn(["arcade", "deploy"], { cwd: where, env: shellEnv, stdio: ["ignore", "inherit", "inherit"] });
       code = await child.exited;
     } catch (error) {
       fail(

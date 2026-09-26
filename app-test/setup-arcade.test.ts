@@ -299,6 +299,9 @@ writeFileSync(
     "#!/bin/sh",
     'echo "fake arcade: $* (in $PWD)"',
     'echo "$PWD|$*" >> "$FAKE_ARCADE_LOG"',
+    // What the CLI would see as stdin: the harness hands setup-arcade a pipe, so an inherited stdin is one.
+    // `/dev/null` is a character device; a pipe or socket (Bun's "pipe") is not.
+    'if [ -c /dev/fd/0 ]; then echo "$PWD|stdin=none" >> "$FAKE_ARCADE_LOG.stdin"; else echo "$PWD|stdin=inherited" >> "$FAKE_ARCADE_LOG.stdin"; fi',
     'case "$PWD" in *"${FAKE_ARCADE_FAIL_IN:-no such directory}") echo "fake arcade: deploy failed" >&2; exit 3 ;; esac',
     "exit 0",
     "",
@@ -406,6 +409,8 @@ async function setupArcade(cwd: string, ...args: Array<string | RunOptions>): Pr
       FAKE_ARCADE_LOG: join(scratch, `${cwd.slice(scratch.length + 1)}.arcade.log`),
       ...(options.failDeployIn ? { FAKE_ARCADE_FAIL_IN: options.failDeployIn } : {}),
     }),
+    // A pipe that stays open and is never written: what a child that inherits stdin would get.
+    stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -1504,4 +1509,19 @@ test("an endpoint URL missing from the read-back means the hooks did not take", 
   expect(run.code).toBe(1);
   expect(run.stderr).toContain(`webhook_config.endpoints.pre.url: Arcade has nothing, this app needs "${ORIGIN}/hooks/pre"`);
   expect(projects.get(dir)!.deploys()).toEqual([]);
+}, 60_000);
+
+// --- The deploys, unattended (#30, run 4) -------------------------------------
+
+test("arcade deploy is given no stdin, so its logs prompt never waits for a key", async () => {
+  const dir = project("deploy-no-stdin");
+  const run = await setupArcade(dir);
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  const log = join(scratch, "deploy-no-stdin.arcade.log.stdin");
+  const seen = readFileSync(log, "utf8").trim().split("\n").map((line) => line.split("|")[1]);
+  // Both deploys, and neither had the pipe setup-arcade itself was given.
+  expect(seen).toEqual(["stdin=none", "stdin=none"]);
+  // And the CLI's own line about the secrets is called out as expected, next to the deploys.
+  expect(run.stdout).toContain(`Secret 'APP_PUBLIC_HOST' not found in environment, skipping upload". That is expected:`);
+  expect(run.stdout.indexOf("That is expected:")).toBeLessThan(run.stdout.indexOf("arcade deploy   (in tools/loan):"));
 }, 60_000);
