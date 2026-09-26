@@ -15,7 +15,11 @@
  * placed heaviest first on whichever shard is lightest so far, and files with
  * no weight yet (a test added since the weights were measured) are dealt out
  * round-robin after them. Every shard job computes the same split, so no job
- * has to hand another a list.
+ * has to hand another a list. To re-measure, fetch a green run's records and
+ * rewrite the weights from them:
+ *
+ *   gh run download <run> --pattern 'test-shard-*' --dir shards
+ *   bun scripts/test-shards.ts weights shards "<run url> (<sha>)"
  *
  * **A shard that silently ran less is the failure this guards.** Four jobs
  * that each pass say nothing about whether, between them, they ran the suite:
