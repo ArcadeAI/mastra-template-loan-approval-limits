@@ -40,6 +40,7 @@ import {
 } from "../app-test/agent-harness.ts";
 import { browserTarget, Cdp, evaluate, serveOnFreePort, startChrome, stopProcess, waitFor } from "../app-test/cdp.ts";
 import { spawnChild } from "../app-test/child.ts";
+import { childEnv } from "../app-test/child-env.ts";
 import { resolveChrome } from "../app-test/chrome.ts";
 import { scriptedModel, type Turn } from "../app-test/model.ts";
 import { chat, CHAT_PATH } from "../lib/agent/handlers.ts";
@@ -172,9 +173,7 @@ try {
     spawnChild({
       cmd: ["bun", "--bun", "run", "next", "dev", "--port", String(webPort)],
       cwd: REPO,
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: process.env.HOME ?? "",
+      env: childEnv({
         NODE_ENV: "development",
         PORT: String(webPort),
         GOVERNANCE_DB_PATH: ":memory:",
@@ -194,7 +193,12 @@ try {
         APPROVALS_STORE_TOKEN: STORE_TOKEN,
         LOANS_DB_PATH: agents.loansDbPath,
         IDENTITY_HOST: agents.idpHost,
-      },
+        // The local fixture's cast, so the roster names the persona the page acts as.
+        PERSONA_LOAN_OFFICER_EMAIL: DANA,
+        PERSONA_CREDIT_ANALYST_EMAIL: "bob@bank.example",
+        PERSONA_VP_CREDIT_EMAIL: RILEY,
+        PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: "michael@bank.example",
+      }),
       stdout: "pipe",
       stderr: "pipe",
     }),
