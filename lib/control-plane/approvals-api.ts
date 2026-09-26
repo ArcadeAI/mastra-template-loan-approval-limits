@@ -111,7 +111,11 @@ export async function handleApprovals(
 
   if (pathname === `${APPROVALS_PREFIX}/roster`) {
     if (method !== "GET") return json({ error: "Method not allowed" }, 405);
-    return json({ subjects: roster(deps.cache.current()).map(asRosterEntry) });
+    const state = deps.cache.current();
+    // `policy` beside the list, because an empty list is also what a cache
+    // that has not loaded answers, and a reader that cannot tell the two apart
+    // labels a real person "not in the cast" (#32).
+    return json({ subjects: roster(state).map(asRosterEntry), policy: state.status });
   }
 
   if (pathname === APPROVALS_PREFIX) {

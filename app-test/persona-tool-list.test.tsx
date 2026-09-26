@@ -12,43 +12,41 @@
  * - the built-ins that were filtered are **named**, because "eight became six"
  *   is an arithmetic nobody should have to take on trust.
  * - a failure to list is a sentence, never an empty list.
- * - the authority figure is labelled as the seeded one, since a presenter may
- *   raise a clearance live and this screen does not read the policy.
+ * - the authority figure is labelled as the policy's at page load, since it is
+ *   read from `governance.db` (#32) and a presenter may raise it live.
+ * - "not in the cast" and "the roster could not be read" are different
+ *   sentences.
+ *
+ * The person beside the session is the page's lookup, handed in as data. Here
+ * it is built by `personIn`, the same function `lookupPerson` applies to the
+ * control plane's answer; `roster-from-database.test.tsx` makes that answer
+ * come from a real `governance.db`.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { PersonaToolList } from "../components/identity/PersonaToolList.tsx";
 import type { SessionTools } from "../lib/agent/tool-list.ts";
+import type { RosterEntry } from "../lib/approvals-store.ts";
+import { personIn, type PersonLookup } from "../lib/identity/roster.ts";
 import type { Session } from "../lib/identity/session.ts";
 
 const DANA = "alice@bank.example";
 const SAM = "bob@bank.example";
 
-/** The roster reads `process.env`, which is where a deployment's four addresses live. */
-const CONFIGURED = {
-  PERSONA_LOAN_OFFICER_EMAIL: DANA,
-  PERSONA_CREDIT_ANALYST_EMAIL: SAM,
-  PERSONA_VP_CREDIT_EMAIL: "charlie@bank.example",
-  PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: "michael@bank.example",
-} as const;
+/** What `GET /api/approvals/roster` answers on a freshly seeded `governance.db`, as far as the card reads it. */
+const ROSTER: RosterEntry[] = [
+  { user_id: DANA, display_name: "Alice", role: "loan_officer", clearance: 50_000 },
+  { user_id: SAM, display_name: "Bob", role: "credit_analyst", clearance: 0 },
+  { user_id: "charlie@bank.example", display_name: "Charlie", role: "vp_credit", clearance: 250_000 },
+  { user_id: "michael@bank.example", display_name: "Michael", role: "chief_credit_officer", clearance: 5_000_000 },
+];
 
-const saved = new Map<string, string | undefined>();
-
-beforeEach(() => {
-  for (const [key, value] of Object.entries(CONFIGURED)) {
-    saved.set(key, process.env[key]);
-    process.env[key] = value;
-  }
-});
-
-afterEach(() => {
-  for (const [key, value] of saved) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  saved.clear();
-});
+function lookup(session: Session | null): PersonLookup {
+  if (session === null) return { status: "signed-out" };
+  const person = personIn(ROSTER, session.email);
+  return person ? { status: "found", person } : { status: "unknown" };
+}
 
 function session(email: string): Session {
   return { email, signed_in_at: 0, gateway: { access_token: "tok", expires_at: 0, client_id: "c" } };
@@ -73,7 +71,8 @@ const DANA_TOOLS: SessionTools = {
   filtered: ["System_ManageAuthorization", "Arcade_ListApps"],
 };
 
-const render = (props: Parameters<typeof PersonaToolList>[0]) => renderToStaticMarkup(<PersonaToolList {...props} />);
+const render = (props: { session: Session | null; tools: SessionTools; person?: PersonLookup }) =>
+  renderToStaticMarkup(<PersonaToolList person={lookup(props.session)} {...props} />);
 
 describe("the persona, with role and authority", () => {
   test("all three are on screen, and the email is the identity", () => {
@@ -96,21 +95,51 @@ describe("the persona, with role and authority", () => {
     expect(markup).toContain("$0");
   });
 
-  test("the figure says it is the seeded one", () => {
-    // `DESIGN.md` lets a presenter raise a clearance live on stage, and this
-    // component never reads the policy. A number presented as live truth would
-    // be a control surface asserting a value it did not fetch.
-    expect(render({ session: session(DANA), tools: DANA_TOOLS })).toContain("as seeded in the policy");
+  test("the figure says when it was read", () => {
+    // `DESIGN.md` lets a presenter raise a clearance live on stage. The figure
+    // is the subject row at page load, and says so, rather than presenting
+    // itself as what the next call will be decided with.
+    expect(render({ session: session(DANA), tools: DANA_TOOLS })).toContain("in the policy when this page loaded");
   });
 
-  test("an address the deployment does not name is said out loud, not guessed at", () => {
+  test("an address the control plane has no subject for is said out loud, not guessed at", () => {
     const markup = render({ session: session("stranger@elsewhere.example"), tools: SAM_TOOLS });
 
     expect(markup).toContain("stranger@elsewhere.example");
-    expect(markup).toContain("role email variables");
+    expect(markup).toContain("Not in this deployment’s cast");
+    expect(markup).toContain("has no subject at that address");
     // No borrowed role and no borrowed figure.
     expect(markup).not.toContain("Loan Officer");
     expect(markup).not.toContain("$50,000");
+  });
+
+  test("a roster that could not be read is not 'not in the cast'", () => {
+    const markup = render({
+      session: session(DANA),
+      tools: DANA_TOOLS,
+      person: { status: "unavailable", reason: "the control plane answered 503" },
+    });
+
+    expect(markup).toContain("the control plane answered 503");
+    expect(markup).toContain("says nothing about whether the address above is in the cast");
+    expect(markup).not.toContain("cast</strong>");
+    expect(markup).not.toContain("$50,000");
+  });
+
+  test("a role outside the demo cast's reads as words", () => {
+    const person = personIn(
+      [{ user_id: "priya@company.test", display_name: "Priya", role: "regional_credit_head", clearance: 400_000 }],
+      "Priya@Company.Test",
+    );
+    const markup = render({
+      session: session("priya@company.test"),
+      tools: DANA_TOOLS,
+      person: person ? { status: "found", person } : { status: "unknown" },
+    });
+
+    expect(markup).toContain("Priya");
+    expect(markup).toContain("Regional Credit Head");
+    expect(markup).toContain("$400,000");
   });
 
   test("nobody signed in says so", () => {

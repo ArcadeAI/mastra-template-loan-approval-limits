@@ -46,8 +46,8 @@
  * answer; `lib/loans/actor.ts`). Stated rather than hidden: if the book ever
  * grows, this is the line that has to change.
  */
-import { appOrigin } from "../config.ts";
-import { personaFor } from "../identity/roster.ts";
+import { appOrigin, type WebConfig } from "../config.ts";
+import { rosterNames } from "../identity/roster.ts";
 import { refreshIdpToken, tokenExpiry } from "../identity/oidc.ts";
 import { withIdpToken, type IdpToken, type Session } from "../identity/session.ts";
 import { loanModule } from "../loans/instance.ts";
@@ -94,6 +94,11 @@ export interface ReadLoanBookOptions {
    * server component passes nothing here and reads with the bearer it has.
    */
   onRenewed?: (session: Session) => void;
+  /**
+   * Where the control plane's roster is read, for `decided_by_name`. Defaults
+   * to the environment (`CONTROL_PLANE_HOST`), the way the approval page reads it.
+   */
+  roster?: Pick<WebConfig, "controlPlaneHost" | "approvalsStoreToken">;
   /** Only for tests, which need to see what was actually asked for. */
   onRequest?: (request: { path: string; authorization: string | null }) => void;
 }
@@ -182,6 +187,13 @@ export async function readLoanBook(
     }
     const card = projectLoan(detail.body);
     if (card !== null) cards.push(card);
+  }
+
+  // Who decided, by name, from the control plane's roster (#32) — asked only
+  // when something was decided, so a book of pending loans costs no extra read.
+  if (cards.some((card) => card.decided_by !== null)) {
+    const nameOf = await rosterNames(options.roster);
+    for (const card of cards) card.decided_by_name = nameOf(card.decided_by);
   }
 
   return { status: "loaded", actor: session.email, loans: cards };
@@ -341,6 +353,9 @@ function idsOf(body: unknown): string[] | null {
  * `underwriter_notes` are absent because nothing here names them — and a field
  * the loan book grows tomorrow is absent for the same reason. See
  * {@link LoanCard}.
+ *
+ * `decided_by_name` is left `null` here: the name is the control plane's to
+ * give, and `readLoanBook` fills it in from the roster.
  */
 export function projectLoan(body: unknown): LoanCard | null {
   if (typeof body !== "object" || body === null) return null;
@@ -361,7 +376,7 @@ export function projectLoan(body: unknown): LoanCard | null {
     annual_revenue: number(record.annual_revenue),
     years_in_business: number(record.years_in_business),
     decided_by: decidedBy,
-    decided_by_name: personaFor(decidedBy)?.name ?? null,
+    decided_by_name: null,
     decided_at: latest?.decided_at ?? null,
   };
 }

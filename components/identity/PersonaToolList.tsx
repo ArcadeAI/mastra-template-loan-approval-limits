@@ -18,18 +18,22 @@
  *
  * It also does not resolve identity. `session` is #82's sealed session, already
  * unsealed on the server; the role and authority beside it are a *label* looked
- * up from an address the IdP asserted (`lib/identity/roster.ts`). #176 deleted
+ * up from an address the IdP asserted (`lib/identity/roster.ts`), in
+ * `governance.db`'s `subjects` table, by the page, before this renders. #176 deleted
  * the switcher outright — one Chrome profile per persona is the real demo shape
  * — so the only way a `user_id` changes is a fresh sign-in at cg-idp from
  * `SessionChrome`, and there is nothing client-side that could change one.
  *
  * ## Props
  *
- * Two, and they stay two: `session` and `tools`. #22 owned the split-screen
- * shell and hosts this widget inside it, so everything this component needs
- * arrives as data and nothing about the page's layout is decided here.
+ * Three: `session`, `tools`, and since #32 `person`, the session's address
+ * looked up in the control plane's roster. #22 owned the split-screen shell and
+ * hosts this widget inside it, so everything this component needs arrives as
+ * data and nothing about the page's layout is decided here. The lookup is a
+ * prop rather than a fetch in here for the same reason `tools` is: the page
+ * reads, this renders.
  */
-import { formatAuthority, personaFor, unconfiguredPersonas } from "../../lib/identity/roster.ts";
+import { formatAuthority, type PersonLookup } from "../../lib/identity/roster.ts";
 import type { SessionTools } from "../../lib/agent/tool-list.ts";
 import type { Session } from "../../lib/identity/session.ts";
 
@@ -38,6 +42,8 @@ export interface PersonaToolListProps {
   session: Session | null;
   /** The result of one real `tools/list` for that session — `lib/agent/tool-list.ts`. */
   tools: SessionTools;
+  /** The session's address in `governance.db`'s `subjects` — `lookupPerson` in `lib/identity/roster.ts`. */
+  person: PersonLookup;
 }
 
 const card: React.CSSProperties = {
@@ -49,9 +55,8 @@ const card: React.CSSProperties = {
 
 const muted: React.CSSProperties = { color: "var(--muted)" };
 
-export function PersonaToolList({ session, tools }: PersonaToolListProps) {
-  const persona = personaFor(session?.email);
-  const missing = unconfiguredPersonas();
+export function PersonaToolList({ session, tools, person: lookup }: PersonaToolListProps) {
+  const persona = lookup.status === "found" ? lookup.person : null;
 
   return (
     <section style={card} aria-label="Signed-in persona and the tools their agent can see">
@@ -63,7 +68,13 @@ export function PersonaToolList({ session, tools }: PersonaToolListProps) {
             {/* The name is the roster's label; the email is the identity. The
                 email is always shown, so a missing label never leaves the
                 screen without the string the hooks will actually see. */}
-            {persona ? <strong>{persona.name}</strong> : <strong style={muted}>Not in this deployment&rsquo;s cast</strong>}{" "}
+            {persona ? (
+              <strong>{persona.name}</strong>
+            ) : lookup.status === "unavailable" ? (
+              <strong style={muted}>Role unavailable</strong>
+            ) : (
+              <strong style={muted}>Not in this deployment&rsquo;s cast</strong>
+            )}{" "}
             <code style={{ fontSize: "0.875rem" }}>{session.email}</code>
           </p>
 
@@ -82,19 +93,22 @@ export function PersonaToolList({ session, tools }: PersonaToolListProps) {
               <dt style={muted}>Approval authority</dt>
               <dd style={{ margin: 0 }}>
                 {formatAuthority(persona.clearance)}{" "}
-                {/* Said, not implied. `DESIGN.md` lets a presenter raise a
-                    clearance live on stage, and this figure is the seeded one —
-                    the audit row on the panel is what the control plane
-                    actually decided with. */}
-                <span style={muted}>as seeded in the policy</span>
+                {/* Said, not implied: this is the subject row as the control
+                    plane held it when the page was read. The audit row on the
+                    panel is what it actually decided with, call by call. */}
+                <span style={muted}>in the policy when this page loaded</span>
               </dd>
             </dl>
+          ) : lookup.status === "unavailable" ? (
+            <p role="status" style={{ ...muted, fontSize: "0.875rem", marginBottom: 0 }}>
+              The control plane&rsquo;s roster could not be read ({lookup.reason}), so there is no role or
+              authority to show. This says nothing about whether the address above is in the cast.
+            </p>
           ) : (
             <p style={{ ...muted, fontSize: "0.875rem", marginBottom: 0 }}>
-              None of this deployment&rsquo;s role email variables names anybody at that
-              address, so there is no role or authority to show.
-              {missing.length > 0 ? <> Unset: {missing.map((name) => <code key={name}>{name} </code>)}</> : null}{" "}
-              The control plane decides on the address above regardless of what this panel can label.
+              The control plane has no subject at that address, so there is no role or authority to show,
+              and it refuses every governed call as an identity nobody registered. Add them with{" "}
+              <code>bun run users add</code>.
             </p>
           )}
         </>

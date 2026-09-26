@@ -295,7 +295,16 @@ describe("the screen", () => {
         signedInAs={SAM}
         identity={null}
         loans={BOOK}
-        toolList={<PersonaToolList session={samSession()} tools={SAM_TOOLS} />}
+        toolList={
+          <PersonaToolList
+            session={samSession()}
+            tools={SAM_TOOLS}
+            person={{
+              status: "found",
+              person: { email: SAM, name: "Bob", role: "Credit Analyst", roleKey: "credit_analyst", clearance: 0 },
+            }}
+          />
+        }
       />,
     );
 
@@ -576,8 +585,8 @@ describe("the loan cards", () => {
   /**
    * The persona name is a convenience, never a requirement.
    *
-   * `personaFor` answers `null` when this deployment's `PERSONA_*_EMAIL`
-   * variables name nobody at that address, and the card must then print the
+   * `decided_by_name` is `null` when the control plane's roster has nobody
+   * at that address (#32), and the card must then print the
    * address rather than an empty span — a decision with no decider on it is the
    * claim this project exists to refuse.
    */

@@ -87,8 +87,9 @@ export interface LoanCard {
    */
   decided_by: string | null;
   /**
-   * The same person as a name a room can read — `Charlie` — when this
-   * deployment's `PERSONA_*_EMAIL` variables name somebody at that address.
+   * The same person as a name a room can read — `Charlie` — when
+   * `governance.db`'s `subjects` has somebody at that address (#32), read
+   * through the control plane's roster.
    *
    * `null` otherwise, and the card falls back to the address. A label that can
    * be wrong is worse than a label that is missing (`lib/identity/roster.ts`),

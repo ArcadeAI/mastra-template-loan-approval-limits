@@ -51,10 +51,34 @@ export async function fetchApproval(id: string, config: StoreConfig): Promise<Ap
 }
 
 export async function fetchRoster(config: StoreConfig): Promise<RosterEntry[]> {
-  const response = await get("/api/approvals/roster", config);
-  if (!response.ok) return [];
-  const body = (await response.json()) as { subjects?: RosterEntry[] };
-  return body.subjects ?? [];
+  const read = await readRoster(config);
+  return read.ok ? read.subjects : [];
+}
+
+/**
+ * Every subject in `governance.db`, or why they could not be read.
+ *
+ * The same read as {@link fetchRoster}, for a caller that must not mistake
+ * "the control plane did not answer" for "nobody is in the cast" (#32): the
+ * sign-in card says *not in the cast* only when the roster came back and the
+ * address is not in it.
+ */
+export type RosterRead = { ok: true; subjects: RosterEntry[] } | { ok: false; reason: string };
+
+export async function readRoster(config: StoreConfig): Promise<RosterRead> {
+  let response: Response;
+  try {
+    response = await get("/api/approvals/roster", config);
+  } catch (cause) {
+    return { ok: false, reason: `the control plane could not be reached: ${String(cause)}` };
+  }
+  if (!response.ok) return { ok: false, reason: `the control plane answered ${response.status}` };
+  const body = (await response.json()) as { subjects?: unknown; policy?: unknown };
+  if (body.policy !== undefined && body.policy !== "ready") {
+    return { ok: false, reason: `the control plane's policy is ${String(body.policy)}, so it has no roster to give` };
+  }
+  if (!Array.isArray(body.subjects)) return { ok: false, reason: "the control plane's roster carried no subjects list" };
+  return { ok: true, subjects: body.subjects as RosterEntry[] };
 }
 
 function get(path: string, config: StoreConfig): Promise<Response> {

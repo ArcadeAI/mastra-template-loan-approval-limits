@@ -73,6 +73,7 @@ import { readSessionFromCookies } from "../lib/identity/session.ts";
 import { approvalStreamUrl } from "../lib/governance/stream-url.ts";
 import { homeSurface } from "../lib/home/surface.ts";
 import { readLoanBook } from "../lib/loan-context/read.ts";
+import { lookupPerson } from "../lib/identity/roster.ts";
 import { PersonaToolList } from "../components/identity/PersonaToolList.tsx";
 import { ConfigurationBanner } from "../components/identity/ConfigurationBanner.tsx";
 import { OriginBanner } from "../components/identity/OriginBanner.tsx";
@@ -117,9 +118,10 @@ export default async function Home() {
     config,
   );
   // No session means no network call: both of these answer without asking.
-  const [{ tools }, loans] = await Promise.all([
+  const [{ tools }, loans, person] = await Promise.all([
     homeSurface(session, { config }),
     readLoanBook(session),
+    lookupPerson(session?.email),
   ]);
 
   const problems = configurationProblems(config);
@@ -143,7 +145,7 @@ export default async function Home() {
         signedInAs={session?.email ?? null}
         identity={<SessionChrome session={session} problems={problems} />}
         loans={loans}
-        toolList={<PersonaToolList session={session} tools={tools} />}
+        toolList={<PersonaToolList session={session} tools={tools} person={person} />}
         // #20: the chat watches the control plane for the one frame that
         // resumes a turn a human was asked about. `null` unless there is a live
         // control plane — a fixture replay has no approval frames in it.

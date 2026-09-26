@@ -33,6 +33,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { GET } from "../app/api/loans/route.ts";
+import type { HooksConfig } from "../lib/control-plane/config.ts";
+import { fixtureDigest } from "../lib/control-plane/fixture-drift.ts";
+import { createPolicyCache } from "../lib/control-plane/policy-cache.ts";
+import { loadSeed, openGovernance } from "../lib/control-plane/policy-store.ts";
+import { createServer } from "../lib/control-plane/server.ts";
 import { closeLoanModule, serve as serveBank } from "../lib/loans/instance.ts";
 import { chunk, chunkName, joinChunks, openSealed, seal } from "../lib/identity/seal.ts";
 import { DEMO_LOAN_IDS } from "../lib/loan-context/loans.ts";
@@ -60,6 +65,7 @@ let proxy: ReturnType<typeof Bun.serve>;
 let route: ReturnType<typeof Bun.serve>;
 let routeUrl: string;
 let restoreEnv: Array<[string, string | undefined]> = [];
+let plane: ReturnType<typeof startControlPlane>;
 
 beforeAll(async () => {
   identity = await startIdentityHarness();
@@ -104,11 +110,13 @@ beforeAll(async () => {
   closeLoanModule();
   set("LOANS_DB_PATH", join(workspace, "loans.db"));
   set("IDENTITY_HOST", `localhost:${proxy.port}`);
-  // So `decided_by_name` can resolve an address to the name a room reads.
-  set("PERSONA_LOAN_OFFICER_EMAIL", PEOPLE.dana.email);
-  set("PERSONA_CREDIT_ANALYST_EMAIL", PEOPLE.sam.email);
-  set("PERSONA_VP_CREDIT_EMAIL", PEOPLE.riley.email);
-  set("PERSONA_CHIEF_CREDIT_OFFICER_EMAIL", PEOPLE.morgan.email);
+  // So `decided_by_name` can resolve an address to the name a room reads: a
+  // real control plane over its own governance.db, whose subjects are the
+  // harness's people, read at CONTROL_PLANE_HOST the way the app reads it
+  // (#32). No PERSONA_* variable is set; the name comes from the table.
+  plane = startControlPlane(join(workspace, "governance.db"));
+  set("CONTROL_PLANE_HOST", `localhost:${plane.server.port}`);
+  set("APPROVALS_STORE_TOKEN", STORE_TOKEN);
 
   route = Bun.serve({
     port: 0,
@@ -119,6 +127,7 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
+  plane?.stop();
   route?.stop(true);
   bank?.stop(true);
   proxy?.stop(true);
@@ -130,6 +139,43 @@ afterAll(async () => {
   }
   rmSync(workspace, { recursive: true, force: true });
 });
+
+const STORE_TOKEN = "api-loans-store-token";
+
+function startControlPlane(dbPath: string) {
+  const config: HooksConfig = {
+    port: 0,
+    dbPath,
+    signingSecret: "api-loans-hook-secret",
+    approvalsStoreToken: STORE_TOKEN,
+    loanToolkit: "Loan",
+    approvalsToolkit: "Approvals",
+    personaEmails: Object.fromEntries(Object.entries(PEOPLE).map(([key, person]) => [key, person.email])),
+    deadlineMs: 2500,
+    policyPollMs: 1000,
+    grantTtlSeconds: 900,
+    injectionDetection: "armed",
+    resetToken: "",
+  };
+  const db = openGovernance(dbPath, config);
+  const image = loadSeed(config);
+  const cache = createPolicyCache(db, {
+    log: () => {},
+    pollMs: config.policyPollMs,
+    scanners: config.injectionDetection,
+    fixture: fixtureDigest(config, image),
+  });
+  cache.start();
+  const server = createServer({ config, db, cache, log: () => {}, seed: image });
+  return {
+    server,
+    stop() {
+      cache.stop();
+      server.stop(true);
+      db.close();
+    },
+  };
+}
 
 function set(key: string, value: string): void {
   restoreEnv.push([key, process.env[key]]);
@@ -322,11 +368,18 @@ describe("who the read is made as", () => {
     // Two addresses, one question: the module asks the recording proxy, and
     // the proxy — which runs in this process too, so the spy sees it — asks
     // the identity provider behind it the same thing.
-    const userinfo = new Set([
+    //
+    // And one more since #32: the names on decided loans come from the control
+    // plane's roster, at CONTROL_PLANE_HOST — the app's own address, never the
+    // public host — and it is the only other place a read may go. It is not a
+    // loan read and carries no loan-book bearer; `readLoanBook` asks it only
+    // when something on the book was decided.
+    const allowed = new Set([
       `http://localhost:${proxy.port}/oauth2/userinfo`,
       `http://${new URL(identity.idpUrl).host}/oauth2/userinfo`,
+      `http://localhost:${plane.server.port}/api/approvals/roster`,
     ]);
-    expect(outbound.filter((url) => !userinfo.has(url))).toEqual([]);
+    expect(outbound.filter((url) => !allowed.has(url))).toEqual([]);
     expect(outbound).toContain(`http://localhost:${proxy.port}/oauth2/userinfo`);
     expect(outbound.filter((url) => url.includes("/bank/") || url.includes("/mcp"))).toEqual([]);
   }, 45_000);

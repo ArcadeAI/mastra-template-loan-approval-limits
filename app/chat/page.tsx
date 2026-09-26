@@ -23,6 +23,7 @@ import { Chat } from "../../components/chat/Chat.tsx";
 import { configurationProblems, readIdentitySurface } from "../../lib/config.ts";
 import { ConfigurationBanner } from "../../components/identity/ConfigurationBanner.tsx";
 import { PersonaToolList } from "../../components/identity/PersonaToolList.tsx";
+import { lookupPerson } from "../../lib/identity/roster.ts";
 import { approvalStreamUrl } from "../../lib/governance/stream-url.ts";
 import { sessionTools } from "../../lib/agent/tool-list.ts";
 import { readSessionFromCookies } from "../../lib/identity/session.ts";
@@ -38,7 +39,7 @@ export default async function ChatPage() {
     new Map(jar.getAll().map((cookie) => [cookie.name, cookie.value])),
     config,
   );
-  const tools = await sessionTools(session, { config });
+  const [tools, person] = await Promise.all([sessionTools(session, { config }), lookupPerson(session?.email)]);
 
   return (
     <main style={{ maxWidth: "42rem", margin: "0 auto", padding: "3rem 1.5rem" }}>
@@ -67,7 +68,7 @@ export default async function ChatPage() {
         </p>
       ) : null}
 
-      <PersonaToolList session={session} tools={tools} />
+      <PersonaToolList session={session} tools={tools} person={person} />
 
       {/* Resolved on the server: `NEXT_PUBLIC_*` is inlined at build time and
           the hosting platform supplies the environment at runtime, so the browser is handed
