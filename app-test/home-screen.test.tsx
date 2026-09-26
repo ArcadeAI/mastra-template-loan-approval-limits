@@ -1076,11 +1076,14 @@ describe("the fork seam", () => {
     // panel's stream (the browser's address for `/hooks/events`) and the
     // identity provider's issuer. Since #9: the origin trap, which compares
     // the host a page was served on with it and names it on the home page's
-    // banner and in `bun run dev`'s first line. It fetches nothing.
+    // banner and in `bun run dev`'s first line. It fetches nothing. Since
+    // #30: `next dev`'s `allowedDevOrigins`, which lists the host's name so a
+    // page served on it can load the dev resources. It fetches nothing either.
     expect(reaching.sort()).toEqual([
       "components/identity/OriginBanner.tsx",
       "lib/config.ts",
       "lib/control-plane/config.ts",
+      "lib/dev-origins.ts",
       "lib/governance/stream-url.ts",
       "lib/identity/provider/config.ts",
       "lib/origin.ts",
