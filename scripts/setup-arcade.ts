@@ -72,6 +72,7 @@ import {
   pluginBody,
   pluginDifferences,
   pluginPatch,
+  unverifiedLine,
   type ProjectScope,
   projectPath,
   PROVIDER_ID,
@@ -630,9 +631,10 @@ if (scope === null) {
     out(`  hooks: created ${HOOKS_NAME}`);
     wrote = true;
   } else {
-    const differences = pluginDifferences(existing, await hooksOf(id), origin);
+    const { differences, unverified } = pluginDifferences(existing, await hooksOf(id), origin);
     if (differences.length === 0) {
       out(`  hooks: ${HOOKS_NAME} is already registered and matches; it is left as it is`);
+      for (const field of unverified) out(`  ${unverifiedLine(field)}`);
     } else {
       out(`  hooks: ${HOOKS_NAME} is registered and differs from what this app needs, so it is updated:`);
       for (const line of differences) out(`    - ${line}`);
@@ -644,11 +646,16 @@ if (scope === null) {
   }
   if (wrote) {
     const plugin = await step("reading the hooks back", () => admin.expect("GET", projectPath(scope, `/plugins/${encodeURIComponent(id)}`)));
-    const differences = pluginDifferences(plugin, await hooksOf(id), origin);
+    const { differences, unverified } = pluginDifferences(plugin, await hooksOf(id), origin);
     if (differences.length > 0) {
       fail(`the hooks did not take: Arcade reads back\n${differences.map((line) => `  - ${line}`).join("\n")}`);
     }
-    out(`  hooks: ${origin}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check ${healthCheckUrl(origin)} (read back)`);
+    const healthUnread = unverified.some(({ path }) => path === "webhook_config.health_check_path");
+    out(
+      `  hooks: ${origin}/hooks/access, /hooks/pre and /hooks/post, fail closed` +
+        `${healthUnread ? "" : `, health check ${healthCheckUrl(origin)}`} (read back)`,
+    );
+    for (const field of unverified) out(`  ${unverifiedLine(field)}`);
   }
 }
 

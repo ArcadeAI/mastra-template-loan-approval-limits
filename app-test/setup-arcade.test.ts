@@ -98,6 +98,14 @@ class StandIn {
   takenSlugs = new Set<string>();
   /** When set, the next plugin create answers this instead of creating anything. */
   nextPluginCreate: { status: number; body: Json } | null = null;
+  /**
+   * What a plugin read-back says `health_check_path` is. `undefined` leaves the
+   * field out, which is what real Arcade did on the fourth live run's retry
+   * (#30), so it is the default; `"stored"` echoes what was sent.
+   */
+  healthCheckReadBack: string | undefined = undefined;
+  /** When set, a plugin read-back leaves this endpoint's URL out. */
+  omitEndpointUrl: string | null = null;
   /** When set, a PUT to the verifier settings is accepted and ignored. */
   verifierIgnoresPut = false;
   /**
@@ -122,8 +130,9 @@ class StandIn {
   private pluginResponse(stored: Json): Json {
     const { token, ...auth } = stored.webhook_config?.auth ?? {};
     const endpoints = Object.fromEntries(
-      Object.entries(stored.webhook_config?.endpoints ?? {}).map(([point, endpoint]) => [point, { url: (endpoint as Json).url }]),
+      Object.entries(stored.webhook_config?.endpoints ?? {}).map(([point, endpoint]) => [point, point === this.omitEndpointUrl ? {} : { url: (endpoint as Json).url }]),
     );
+    const health = this.healthCheckReadBack === "stored" ? stored.webhook_config?.health_check_path : this.healthCheckReadBack;
     return {
       id: stored.id,
       name: stored.name,
@@ -132,7 +141,7 @@ class StandIn {
       status: stored.status,
       health_status: "unknown",
       webhook_config: {
-        health_check_path: stored.webhook_config?.health_check_path,
+        ...(health === undefined ? {} : { health_check_path: health }),
         auth: { ...auth, token: { exists: typeof token === "string" && token !== "", editable: true, binding: "project" } },
         endpoints,
       },
@@ -552,7 +561,8 @@ test("a real run registers every API-able piece, deploys both toolkits, and prin
 
   // The hooks: by API since #30, with the bearer the app checks, which is never printed.
   hooksAreRegistered(dir);
-  expect(run.stdout).toContain(`hooks: ${ORIGIN}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check ${ORIGIN}/hooks/health (read back)`);
+  expect(run.stdout).toContain(`hooks: ${ORIGIN}/hooks/access, /hooks/pre and /hooks/post, fail closed (read back)`);
+  expect(run.stdout).toContain(`hooks: Arcade doesn't echo webhook_config.health_check_path back; it was sent as ${ORIGIN}/hooks/health and can't be verified`);
   expect(`${run.stdout}${run.stderr}`).not.toContain(env.ARCADE_HOOK_SIGNING_SECRET!);
 
   // The deploys: both toolkits, in order, streamed, after the hooks.
@@ -1432,4 +1442,66 @@ test("a shell that exports the same values as .env is no conflict", async () => 
   const run = await setupArcade(dir, { shell: { ARCADE_API_KEY: KEY, SESSION_SECRET: "" } });
   expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
   expect(envOf(dir).SESSION_SECRET).toMatch(/^[0-9a-f]{64}$/);
+}, 60_000);
+
+// --- A read-back that leaves fields out (#30, run 4's retry) ------------------
+
+/**
+ * Real Arcade, on the fourth live run's retry: `POST …/plugins → 201`, both
+ * read-backs 200, and no `webhook_config.health_check_path` in the plugin's.
+ * The run stopped with "the hooks did not take". The stand-in's read-back has
+ * that shape by default, and this is the live project's state from there.
+ */
+test("a read-back without health_check_path is a warning, and a rerun from that state neither re-creates nor loops", async () => {
+  const dir = project("health-not-echoed");
+  const first = await setupArcade(dir);
+  console.log(`--- setup-arcade ${HOST}, Arcade not echoing health_check_path ---\n${first.stdout}${first.stderr}`);
+  expect(first.code, `${first.stdout}\n${first.stderr}`).toBe(0);
+  const warning = `hooks: Arcade doesn't echo webhook_config.health_check_path back; it was sent as ${ORIGIN}/hooks/health and can't be verified`;
+  expect(first.stdout).toContain(warning);
+  expect(first.stdout).not.toContain("the hooks did not take");
+  // It carried on: the deploys ran, and the run ended on the User Source form.
+  expect(projects.get(dir)!.deploys()).toEqual(DEPLOYS);
+  expect(formOrder(first.stdout)).toEqual(["User Source"]);
+  // What was sent is what the app needs, whatever the read-back says.
+  hooksAreRegistered(dir);
+
+  for (const attempt of [1, 2]) {
+    arcade.requests = [];
+    const rerun = await setupArcade(dir);
+    expect(rerun.code, `rerun ${attempt}: ${rerun.stdout}\n${rerun.stderr}`).toBe(0);
+    expect(rerun.stdout).toContain("hooks: loan-approval-limits-hooks is already registered and matches; it is left as it is");
+    expect(rerun.stdout).toContain(warning);
+    // Found by name: no second plugin, and no PATCH for a field it cannot see.
+    expect(sequence(arcade.requests)).toEqual(RERUN);
+    expect(arcade.plugins.size).toBe(1);
+  }
+}, 120_000);
+
+test("a health_check_path read back present but different still fails the run", async () => {
+  const dir = project("health-differs");
+  arcade.healthCheckReadBack = "https://old-host.example/hooks/health";
+  const run = await setupArcade(dir);
+  expect(run.code).toBe(1);
+  expect(run.stderr).toContain("the hooks did not take: Arcade reads back");
+  expect(run.stderr).toContain(`webhook_config.health_check_path: Arcade has "https://old-host.example/hooks/health", this app needs "${ORIGIN}/hooks/health"`);
+  expect(projects.get(dir)!.deploys()).toEqual([]);
+}, 60_000);
+
+test("a health_check_path Arcade does echo is checked, and the line says so", async () => {
+  const dir = project("health-echoed");
+  arcade.healthCheckReadBack = "stored";
+  const run = await setupArcade(dir);
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  expect(run.stdout).toContain(`hooks: ${ORIGIN}/hooks/access, /hooks/pre and /hooks/post, fail closed, health check ${ORIGIN}/hooks/health (read back)`);
+  expect(run.stdout).not.toContain("doesn't echo webhook_config.health_check_path");
+}, 60_000);
+
+test("an endpoint URL missing from the read-back means the hooks did not take", async () => {
+  const dir = project("endpoint-missing");
+  arcade.omitEndpointUrl = "pre";
+  const run = await setupArcade(dir);
+  expect(run.code).toBe(1);
+  expect(run.stderr).toContain(`webhook_config.endpoints.pre.url: Arcade has nothing, this app needs "${ORIGIN}/hooks/pre"`);
+  expect(projects.get(dir)!.deploys()).toEqual([]);
 }, 60_000);

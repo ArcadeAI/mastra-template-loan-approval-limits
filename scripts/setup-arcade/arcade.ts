@@ -338,36 +338,66 @@ function webhookConfig(origin: string, hookToken: string) {
   };
 }
 
+/** What comparing a plugin read back with what this app needs found. */
+export interface PluginComparison {
+  /** `path: Arcade has X, this app needs Y`: present and different, or required and absent. */
+  differences: string[];
+  /** `path` and what was sent, for a field Arcade's read-back leaves out, which cannot be checked either way. */
+  unverified: Array<{ path: string; sent: string }>;
+}
+
 /**
- * `path: Arcade has X, this app needs Y`, one line per difference between a
- * plugin as Arcade reads it back (`schemas.PluginResponse`) plus the hooks it
- * made (`schemas.HookResponse`), and what this app needs. The bearer cannot be
- * read back (`schemas.SecretResponse`), so only its presence is compared.
+ * A plugin as Arcade reads it back (`schemas.PluginResponse`) plus the hooks it
+ * made (`schemas.HookResponse`), against what this app needs.
+ *
+ * **Absent is not different** (#30). On the fourth live run's retry Arcade
+ * created the plugin, and its read-back had no `webhook_config.health_check_path`
+ * at all, so a run that treated absence as a difference stopped with "the hooks
+ * did not take" over a field it had just sent and Arcade had just accepted. A
+ * field Arcade leaves out is reported as unverified and the run carries on; a
+ * rerun then does not PATCH for it either, so it cannot loop. A field that is
+ * **present and different** is still a difference.
+ *
+ * Except for what proves the hooks exist: the three endpoint URLs, a hook on
+ * each hook point, its phase, and fail-closed. Absent, those mean the hooks did
+ * not take, so they are differences whether missing or wrong. The bearer
+ * cannot be read back (`schemas.SecretResponse`), so only its `exists` is.
  */
-export function pluginDifferences(plugin: unknown, hooks: unknown[], origin: string): string[] {
-  const differences: string[] = [];
-  const compare = (path: string, have: unknown, want: unknown) => {
+export function pluginDifferences(plugin: unknown, hooks: unknown[], origin: string): PluginComparison {
+  const result: PluginComparison = { differences: [], unverified: [] };
+  const check = (path: string, have: unknown, want: unknown, { required = false, sent }: { required?: boolean; sent?: string } = {}) => {
+    if (have === undefined && !required) {
+      result.unverified.push({ path, sent: sent ?? JSON.stringify(want) });
+      return;
+    }
     if (JSON.stringify(have) !== JSON.stringify(want)) {
-      differences.push(`${path}: Arcade has ${JSON.stringify(have) ?? "nothing"}, this app needs ${JSON.stringify(want)}`);
+      result.differences.push(`${path}: Arcade has ${JSON.stringify(have) ?? "nothing"}, this app needs ${JSON.stringify(want)}`);
     }
   };
-  compare("plugin_type", at(plugin, "plugin_type"), "webhook");
-  compare("status", at(plugin, "status"), "active");
-  compare("webhook_config.health_check_path", at(plugin, "webhook_config.health_check_path"), healthCheckUrl(origin));
-  compare("webhook_config.auth.type", at(plugin, "webhook_config.auth.type"), "bearer");
-  if (at(plugin, "webhook_config.auth.token.exists") !== true) differences.push("webhook_config.auth.token: Arcade holds no bearer token");
+  check("plugin_type", at(plugin, "plugin_type"), "webhook");
+  check("status", at(plugin, "status"), "active");
+  check("webhook_config.health_check_path", at(plugin, "webhook_config.health_check_path"), healthCheckUrl(origin), { sent: healthCheckUrl(origin) });
+  check("webhook_config.auth.type", at(plugin, "webhook_config.auth.type"), "bearer");
+  const token = at(plugin, "webhook_config.auth.token.exists");
+  if (token === undefined) result.unverified.push({ path: "webhook_config.auth.token", sent: "the value of ARCADE_HOOK_SIGNING_SECRET in .env" });
+  else if (token !== true) result.differences.push("webhook_config.auth.token: Arcade holds no bearer token");
   for (const { point, hookPoint, phase } of HOOK_POINTS) {
-    compare(`webhook_config.endpoints.${point}.url`, at(plugin, `webhook_config.endpoints.${point}.url`), `${origin}/hooks/${point}`);
+    check(`webhook_config.endpoints.${point}.url`, at(plugin, `webhook_config.endpoints.${point}.url`), `${origin}/hooks/${point}`, { required: true });
     const hook = hooks.find((each) => at(each, "hook_point") === hookPoint);
     if (hook === undefined) {
-      differences.push(`hooks: Arcade has no ${hookPoint} hook on this plugin`);
+      result.differences.push(`hooks: Arcade has no ${hookPoint} hook on this plugin`);
       continue;
     }
-    compare(`${hookPoint}.phase`, at(hook, "phase"), phase);
-    compare(`${hookPoint}.failure_mode`, at(hook, "failure_mode"), "fail_closed");
-    compare(`${hookPoint}.status`, at(hook, "status"), "active");
+    check(`${hookPoint}.phase`, at(hook, "phase"), phase, { required: true });
+    check(`${hookPoint}.failure_mode`, at(hook, "failure_mode"), "fail_closed", { required: true });
+    check(`${hookPoint}.status`, at(hook, "status"), "active");
   }
-  return differences;
+  return result;
+}
+
+/** The line a run prints for each field it could not check. */
+export function unverifiedLine({ path, sent }: { path: string; sent: string }): string {
+  return `hooks: Arcade doesn't echo ${path} back; it was sent as ${sent} and can't be verified`;
 }
 
 /** The six tools the agent is given, as a gateway's `tool_filter` names them: `Toolkit.Tool`. */
