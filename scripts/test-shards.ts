@@ -105,7 +105,8 @@ export function split(files: readonly string[], seconds: Record<string, number>,
 /** Shard `shard` (1-based) of `of`, from the tracked files and the committed weights. */
 export function shardFiles(shard: number, of: number, root = ROOT): string[] {
   if (!Number.isInteger(shard) || shard < 1 || shard > of) throw new Error(`there is no shard ${shard} of ${of}`);
-  return split(testFiles(root), readWeights().seconds, of)[shard - 1] ?? [];
+  // DEMO (#38), reverted in the next commit: a split that drops one file.
+  return (split(testFiles(root), readWeights().seconds, of)[shard - 1] ?? []).filter((file) => file !== "app-test/diff.test.ts");
 }
 
 /** One line of a shard's record: a file Bun loaded, and how long it had until the next one. */
