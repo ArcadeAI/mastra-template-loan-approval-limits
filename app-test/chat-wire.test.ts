@@ -175,23 +175,13 @@ describe("nothing leaks: secrets never reach a rendered argument or result", () 
 
   test("a result carrying the store token, an OAuth token and a Bearer header is withheld", async () => {
     const bearer = "gw_7f1d6c2e-5b1a-4c55-9a51-0d1f7c1f2b3a";
-    const session: Session = {
-      email: DANA,
-      signed_in_at: Date.now(),
-      gateway: {
-        access_token: bearer,
-        refresh_token: "gw_refresh_1b2c3d4e5f6a7b8c",
-        expires_at: Date.now() + 3_600_000,
-        client_id: "chat-wire-tests",
-      },
-    };
     const env = { APPROVALS_STORE_TOKEN: "store-token-from-the-environment-0123" };
-    const secrets = turnSecrets(session, bearer, harness.config, { env, storeToken: STORE_TOKEN });
+    const secrets = turnSecrets(bearer, harness.config, { env, storeToken: STORE_TOKEN });
     // What the handler holds as secret for this turn, named.
     expect(secrets).toContain(bearer);
-    expect(secrets).toContain("gw_refresh_1b2c3d4e5f6a7b8c");
     expect(secrets).toContain(STORE_TOKEN);
     expect(secrets).toContain(env.APPROVALS_STORE_TOKEN);
+    expect(secrets).toContain(harness.config.identity.sessionSecret);
 
     const jwt =
       "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhbGljZUBiYW5rLmV4YW1wbGUifQ.c2lnbmF0dXJlLW9mLXRoZS10b2tlbg";

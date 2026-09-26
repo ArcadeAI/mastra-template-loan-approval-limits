@@ -479,7 +479,7 @@ export async function chat(request: Request, options: ChatOptions = {}): Promise
       requestApprovalTool: escalationTool,
       nativeElicitation,
       onAuthorization: closure.close,
-      secrets: turnSecrets(current, bearer, config, { storeToken: options.store?.approvalsStoreToken }),
+      secrets: turnSecrets(bearer, config, { storeToken: options.store?.approvalsStoreToken }),
     });
   } catch (cause) {
     // The connection belongs to a turn that will never happen. Same reason the
@@ -537,12 +537,17 @@ async function reauthorize(
 
 /**
  * Every value this turn holds that the page must never be shown inside a tool
- * call's arguments or result (#37): the bearer the turn runs with, the rest of
- * this persona's sealed tokens, and the service's own secrets, from the
- * config and from the environment. `withhold.ts` does the withholding.
+ * call's arguments or result (#37): the bearer the turn runs with, and the
+ * service's own secrets, from the config and from the environment.
+ * `withhold.ts` does the withholding.
+ *
+ * The bearer is the one `gatewayToken()` handed this turn, not read out of the
+ * session: that seam is the only reader of a stored gateway token
+ * (`app-test/studio-entry.test.ts`). The session's other tokens never travel
+ * on the MCP path, so a tool result cannot carry them back; an OAuth token a
+ * tool does hold is caught by key name and shape.
  */
 export function turnSecrets(
-  session: Session,
   bearer: string,
   config: IdentitySurface,
   options: { env?: Record<string, string | undefined>; storeToken?: string | undefined } = {},
@@ -550,10 +555,6 @@ export function turnSecrets(
   const env = options.env ?? process.env;
   return secretValues([
     bearer,
-    session.gateway?.access_token,
-    session.gateway?.refresh_token,
-    session.idp?.access_token,
-    session.idp?.refresh_token,
     options.storeToken,
     // The approvals store token this process presents, including the
     // development fallback when the variable is unset.
