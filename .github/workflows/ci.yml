@@ -114,6 +114,12 @@ jobs:
           # action put on PATH. A wrong value here fails loudly by design.
           CG_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
 
+      # How this job ended so far, beside its record, so `tests ran` can name
+      # the shard that did not succeed rather than only the matrix as a whole.
+      - name: Note how this shard ended
+        if: always()
+        run: mkdir -p test-shard-${{ matrix.shard }} && echo "${{ job.status }}" > test-shard-${{ matrix.shard }}/job-status
+
       # Uploaded whether the shard passed or not: a failed shard's record is
       # what `tests ran` reports its counts from.
       - name: Keep what ran
@@ -129,14 +135,18 @@ jobs:
   # one that died while it was imported, leaves every shard green. This fails
   # unless the files the shards actually loaded are exactly the tracked test
   # files, each once, and on any failed test or Bun "error" in any shard. It
-  # prints each shard's pass/skip/fail counts and its five slowest files. It
-  # runs whatever the shards concluded, so a red shard still gets its counts
-  # printed here; only a cancelled run (a newer push to the same ref) skips it.
+  # prints each shard's pass/skip/fail counts and its five slowest files.
+  #
+  # `always()`, cancelled runs included, and never `!cancelled()`: a job its
+  # `if` skips reports *success*, so a run cancelled before this job would have
+  # left a green check that compared nothing (PR #42, round 1). It runs, and
+  # fails unless the shard matrix's result is `success`, every shard's own job
+  # status is `success`, and every shard's record is present and complete.
   tests-ran:
     name: tests ran
     runs-on: ubuntu-latest
     needs: test
-    if: ${{ !cancelled() }}
+    if: always()
     steps:
       - uses: actions/checkout@v4
 
@@ -144,7 +154,10 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      # A shard that never uploaded is a missing record, which `check` fails
+      # on by name; the download itself must not be what stops this job first.
       - name: Fetch every shard's record
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           pattern: test-shard-*
@@ -153,7 +166,7 @@ jobs:
       # No install: the check reads the records and `git ls-files`, and imports
       # nothing but Bun and Node built-ins.
       - name: Every tracked test file ran exactly once
-        run: bun scripts/test-shards.ts check shards 4
+        run: bun scripts/test-shards.ts check shards 4 "${{ needs.test.result }}"
 
   # The toolkits are discovered, never listed. `tools/approvals` is meant to be
   # deletable — a forker who wants no Python removes it and substitutes their

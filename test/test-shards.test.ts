@@ -99,6 +99,7 @@ function honest(lists: string[][]): ShardRecord[] {
     complete: true,
     summary: { ...clean, files: assigned.length },
     exitCode: 0,
+    jobStatus: "success",
   }));
 }
 
@@ -107,7 +108,7 @@ describe("the check", () => {
   const lists = split(expected, {}, 2);
 
   test("passes a run where every file ran once, and prints each shard's counts", () => {
-    const { report, problems } = checkShards(expected, honest(lists));
+    const { report, problems } = checkShards(expected, honest(lists), "success");
     expect(problems).toEqual([]);
     expect(report[0]).toMatch(/^shard 1\/2: 3 files loaded of 3 handed, 3 pass, 0 skip, 0 todo, 0 fail, 0 error/);
     expect(report.at(-1)).toMatch(/^all shards: 5 files loaded of 5 tracked/);
@@ -115,13 +116,13 @@ describe("the check", () => {
 
   test("is red on a split that drops one file, though every shard passed", () => {
     const dropped = lists.map((list) => list.filter((file) => file !== "c.test.ts"));
-    const { problems } = checkShards(expected, honest(dropped));
+    const { problems } = checkShards(expected, honest(dropped), "success");
     expect(problems).toEqual(["the split handed c.test.ts to no shard", "no shard ran c.test.ts"]);
   });
 
   test("is red when a file runs twice", () => {
     const twice = [lists[0] ?? [], [...(lists[1] ?? []), "a.test.ts"]];
-    const { problems } = checkShards(expected, honest(twice));
+    const { problems } = checkShards(expected, honest(twice), "success");
     expect(problems).toContain("the split handed a.test.ts to shards 1 and 2");
     expect(problems).toContain("a.test.ts ran 2 times, in shards 1 and 2");
   });
@@ -131,7 +132,7 @@ describe("the check", () => {
     const first = records[0] as ShardRecord;
     first.loaded = first.loaded.slice(1);
     first.summary = { ...first.summary, files: first.assigned.length - 1 };
-    const { problems } = checkShards(expected, records);
+    const { problems } = checkShards(expected, records, "success");
     expect(problems).toContain(`no shard ran ${first.assigned[0]}`);
     expect(problems).toContain(`shard 1: Bun ran ${first.assigned.length - 1} files but was handed ${first.assigned.length}`);
   });
@@ -140,7 +141,7 @@ describe("the check", () => {
     const records: Array<ShardRecord | null> = honest(lists);
     (records[0] as ShardRecord).summary.error = 1;
     records[1] = null;
-    const { problems } = checkShards(expected, records);
+    const { problems } = checkShards(expected, records, "success");
     expect(problems).toContain("shard 1: 1 Bun error(s), exceptions thrown between tests");
     expect(problems).toContain("shard 2 left no record: it did not run, or its artifact was not uploaded");
   });
@@ -150,8 +151,42 @@ describe("the check", () => {
     const first = records[0] as ShardRecord;
     first.summary.fail = 2;
     first.exitCode = 1;
-    const { problems } = checkShards(expected, records);
+    const { problems } = checkShards(expected, records, "success");
     expect(problems).toEqual(["shard 1: 2 failed", "shard 1: bun test exited 1"]);
+  });
+
+  // PR #42, round 1: a job its `if` skips reports success, so `tests ran` runs
+  // `always()` and has to reach this decision itself. `needs.test.result` is one
+  // of these four; only `success` passes.
+  test.each(["success", "failure", "cancelled", "skipped", ""])(
+    "the shard matrix ending %p passes only when it is success",
+    (result) => {
+      const { problems } = checkShards(expected, honest(lists), result);
+      if (result === "success") expect(problems).toEqual([]);
+      else expect(problems).toEqual([`the test shards ended "${result === "" ? "(no result)" : result}", not "success"`]);
+    },
+  );
+
+  test.each(["failure", "cancelled", null])("is red, naming the shard, when a shard's own job ended %p", (status) => {
+    const records = honest(lists);
+    (records[1] as ShardRecord).jobStatus = status;
+    const { problems } = checkShards(expected, records, "success");
+    expect(problems).toEqual([`shard 2: its job ended "${status ?? "(no status recorded)"}", not "success"`]);
+  });
+
+  test("a cancelled run is red on every count it has: the matrix, the shard, and the record it never finished", () => {
+    const records: Array<ShardRecord | null> = honest(lists);
+    const first = records[0] as ShardRecord;
+    first.jobStatus = "cancelled";
+    first.complete = false;
+    first.summary = { ...first.summary, files: null };
+    first.exitCode = null;
+    records[1] = null;
+    const { problems } = checkShards(expected, records, "cancelled");
+    expect(problems).toContain('the test shards ended "cancelled", not "success"');
+    expect(problems).toContain('shard 1: its job ended "cancelled", not "success"');
+    expect(problems).toContain("shard 1: its record has no END line; the test process did not exit normally");
+    expect(problems).toContain("shard 2 left no record: it did not run, or its artifact was not uploaded");
   });
 });
 

@@ -4,7 +4,7 @@
  *
  *   bun scripts/test-shards.ts list <shard> <of>          the files one shard runs, one per line
  *   bun scripts/test-shards.ts run <shard> <of> <dir>     run them, and write what ran into <dir>
- *   bun scripts/test-shards.ts check <dir> <of>           every shard's record, against `git ls-files`
+ *   bun scripts/test-shards.ts check <dir> <of> <result>  every shard's record, against `git ls-files`
  *   bun scripts/test-shards.ts weights <dir> <run>        rewrite scripts/test-weights.json from a run's records
  *
  * Serially the suite was 148 files and 502s on the runner (run 36230453689),
@@ -168,7 +168,7 @@ export function parseSummary(log: string): Summary {
   };
 }
 
-/** One shard's artifact: what it was handed, what Bun loaded, and what Bun said. */
+/** One shard's artifact: what it was handed, what Bun loaded, what Bun said, and how its job ended. */
 export interface ShardRecord {
   shard: number;
   assigned: string[];
@@ -176,6 +176,8 @@ export interface ShardRecord {
   complete: boolean;
   summary: Summary;
   exitCode: number | null;
+  /** The shard job's own `job.status` (`success`, `failure` or `cancelled`), or `null` if it wrote none. */
+  jobStatus: string | null;
 }
 
 export function readShard(dir: string, shard: number): ShardRecord | null {
@@ -184,6 +186,7 @@ export function readShard(dir: string, shard: number): ShardRecord | null {
   const read = (name: string) => (existsSync(join(base, name)) ? readFileSync(join(base, name), "utf8") : "");
   const record = parseRecord(read("loaded.txt"));
   const status = read("exit-code").trim();
+  const jobStatus = read("job-status").trim();
   return {
     shard,
     assigned: read("assigned.txt").split("\n").filter((line) => line !== ""),
@@ -191,19 +194,32 @@ export function readShard(dir: string, shard: number): ShardRecord | null {
     complete: record.complete,
     summary: parseSummary(read("bun.log")),
     exitCode: status === "" ? null : Number(status),
+    jobStatus: jobStatus === "" ? null : jobStatus,
   };
 }
 
 /**
  * Everything `check` has to say: a report to print, and the problems that fail
  * it. Pure, so the tests can hand it a split that drops a file.
+ *
+ * `shardsResult` is `needs.test.result`, GitHub's one result for the whole
+ * shard matrix: `success` only when every shard succeeded, and otherwise
+ * `failure`, `cancelled` or `skipped`. Anything but `success` fails the check,
+ * and so does any shard whose own `job.status` is not `success`. The job that
+ * runs this runs `always()` so that it reaches this decision on a cancelled
+ * run too: a job skipped by its `if` reports success (PR #42, round 1), which
+ * would make a cancelled run's check green without comparing anything.
  */
 export function checkShards(
   expected: readonly string[],
   records: ReadonlyArray<ShardRecord | null>,
+  shardsResult: string,
 ): { report: string[]; problems: string[] } {
   const report: string[] = [];
   const problems: string[] = [];
+  if (shardsResult !== "success") {
+    problems.push(`the test shards ended "${shardsResult === "" ? "(no result)" : shardsResult}", not "success"`);
+  }
   const ranBy = new Map<string, number[]>();
   const handedTo = new Map<string, number[]>();
   const totals = { files: 0, tests: 0, pass: 0, skip: 0, todo: 0, fail: 0, error: 0 };
@@ -234,6 +250,7 @@ export function checkShards(
     if (summary.fail > 0) problems.push(`shard ${shard}: ${summary.fail} failed`);
     if (summary.error > 0) problems.push(`shard ${shard}: ${summary.error} Bun error(s), exceptions thrown between tests`);
     if (record.exitCode !== 0) problems.push(`shard ${shard}: bun test exited ${record.exitCode ?? "without a status"}`);
+    if (record.jobStatus !== "success") problems.push(`shard ${shard}: its job ended "${record.jobStatus ?? "(no status recorded)"}", not "success"`);
     const assigned = new Set(record.assigned);
     for (const { file } of record.loaded) {
       if (!assigned.has(file)) problems.push(`shard ${shard} loaded ${file}, which it was not handed`);
@@ -315,7 +332,7 @@ function usage(): never {
     [
       "usage: bun scripts/test-shards.ts list <shard> <of>",
       "       bun scripts/test-shards.ts run <shard> <of> <dir>",
-      "       bun scripts/test-shards.ts check <dir> <of>",
+      "       bun scripts/test-shards.ts check <dir> <of> <result of the shard jobs>",
       "       bun scripts/test-shards.ts weights <dir> <run>",
     ].join("\n"),
   );
@@ -330,10 +347,10 @@ if (import.meta.main) {
     for (const file of shardFiles(Number(first), Number(second))) console.log(`./${file}`);
   } else if (command === "run" && args.length === 3) {
     process.exit(await runShard(Number(first), Number(second), third));
-  } else if (command === "check" && args.length === 2) {
+  } else if (command === "check" && args.length === 3) {
     const of = Number(second);
     const records = Array.from({ length: of }, (_, index) => readShard(first, index + 1));
-    const { report, problems } = checkShards(testFiles(), records);
+    const { report, problems } = checkShards(testFiles(), records, third);
     for (const line of report) console.log(line);
     if (problems.length > 0) {
       for (const problem of problems) console.log(`::error::${problem}`);
