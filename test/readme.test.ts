@@ -213,6 +213,21 @@ function inOrder(text: string, steps: Array<[string, RegExp]>): string[] {
   return missing.length > 0 ? missing : found.sort((a, b) => a.at - b.at).map(({ name }) => name);
 }
 
+/**
+ * Lines that name a port number the reader's own variable decides, without
+ * naming the variable (#34 review): `ngrok http … 3000` is only right while
+ * `PORT` is unset, and `localhost:4111` only while `STUDIO_PORT` is.
+ */
+function portsTiedToVariables(markdown: string): number[] {
+  const PORTS: Array<[RegExp, string]> = [
+    [/\b3000\b/, "`PORT`"],
+    [/\b4111\b/, "`STUDIO_PORT`"],
+  ];
+  return proseLines(markdown)
+    .filter(({ text }) => PORTS.some(([port, variable]) => port.test(text) && !text.includes(variable)))
+    .map(({ n }) => n);
+}
+
 /** The steps in the order the Quickstart's remainder first names them, or the ones it never does. */
 function quickstartOrder(markdown: string): string[] {
   const quickstart = section(markdown, "Quickstart 🚀");
@@ -264,6 +279,14 @@ describe("README.md follows Mastra's outline", () => {
 
   test("the Quickstart's last steps run in the order the dependencies allow: tunnel, User Source, the gateway run, the app", () => {
     expect(quickstartOrder(README)).toEqual(QUICKSTART_ORDER.map(([name]) => name));
+  });
+
+  test("the ngrok command is the one bun run dev printed for PORT, with 3000 only as the default's example", () => {
+    expect(portsTiedToVariables(README)).toEqual([]);
+    const quickstart = section(README, "Quickstart 🚀");
+    expect(quickstart).toContain("run the ngrok command `bun run dev` printed");
+    expect(quickstart).toContain("With the default `PORT` it is `ngrok http --url=<APP_PUBLIC_HOST> 3000`");
+    expect(quickstart).toContain("`bun run studio`, which listens on `STUDIO_PORT` (4111 when unset");
   });
 
   test("step 4 is the run that registers the hooks and deploys both toolkits", () => {
@@ -395,6 +418,16 @@ describe("each check bites on a planted violation", () => {
     expect(inOrder(lines.join("\n"), CLI_SETUP)).toContain("missing: check it");
     lines.splice(lines.findIndex((line) => line.includes("`arcade login`")), 0, whoami!);
     expect(inOrder(lines.join("\n"), CLI_SETUP)).not.toEqual(CLI_SETUP.map(([name]) => name));
+  });
+
+  test("an ngrok command, or a Studio link, with its port and no variable", () => {
+    expect(portsTiedToVariables("5. **Start**\n   - In a second terminal, run `ngrok http --url=<APP_PUBLIC_HOST> 3000`.\n")).toEqual([2]);
+    expect(portsTiedToVariables("Open [Studio](http://localhost:4111).\n")).toEqual([1]);
+    // The line as it stood before the #34 review, planted back into the README.
+    const lines = README.split("\n");
+    const ngrok = lines.findIndex((line) => line.includes("run the ngrok command `bun run dev` printed"));
+    lines[ngrok] = "   - In a second terminal, run that command: `ngrok http --url=<APP_PUBLIC_HOST> 3000`.";
+    expect(portsTiedToVariables(lines.join("\n"))).toEqual([ngrok + 1]);
   });
 
   test("a URL nobody verified", () => {
