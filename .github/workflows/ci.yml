@@ -10,8 +10,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The tests are the `test` shards below since #38; this job keeps the rest of
+  # what it always ran, in the same order.
   check:
-    name: typecheck and test
+    name: typecheck and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +44,41 @@ jobs:
       - name: idp schema is regenerated from the installed Better Auth
         run: bun run generate:identity-schema:check
 
+      # `bun test` and `tsc` never exercise the app's build, and a Next.js
+      # build is where most of this service's failures show up. The app is the
+      # repo root since #3, so the root `build` is `next build` (plus the
+      # workspaces' no-op builds).
+      - name: Build web
+        run: bun run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  # `bun test`, in four shards that run side by side (#38). Serially it was 148
+  # files and 502s of an eight-minute job (run 36230453689), most of it the few
+  # files that each boot a Next server and a Chrome. `scripts/test-shards.ts`
+  # splits the tracked test files by the seconds measured on a CI run
+  # (`scripts/test-weights.json`), heaviest first onto the lightest shard, and
+  # deals files with no weight yet round-robin; every job computes the same
+  # split. Each shard sets up everything the whole suite needed, so no file
+  # depends on which shard it landed in.
+  test:
+    name: test (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      # Every shard runs to the end, so `tests ran` sees all four records.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
       # `app-test/home-loan-next-browser.test.ts` drives the real Next page
       # in a real headless Chrome. Until #152 it looked only for the macOS
       # application bundle, so on this runner it skipped — and a regression that
@@ -65,21 +102,56 @@ jobs:
         with:
           node-version: 22
 
+      # `run` is `bun test` on this shard's files with a preload that writes
+      # down every file Bun loaded (`scripts/test-shards-record.ts`), and it
+      # keeps Bun's output. Its exit status is Bun's.
       - name: Test
-        run: bun test
+        run: bun scripts/test-shards.ts run ${{ matrix.shard }} 4 test-shard-${{ matrix.shard }}
         env:
           # Explicit rather than trusting discovery to agree with whatever the
           # action put on PATH. A wrong value here fails loudly by design.
           CG_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
 
-      # `bun test` and `tsc` never exercise the app's build, and a Next.js
-      # build is where most of this service's failures show up. The app is the
-      # repo root since #3, so the root `build` is `next build` (plus the
-      # workspaces' no-op builds).
-      - name: Build web
-        run: bun run build
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
+      # Uploaded whether the shard passed or not: a failed shard's record is
+      # what `tests ran` reports its counts from.
+      - name: Keep what ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-shard-${{ matrix.shard }}
+          path: test-shard-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  # Four green shards do not say the suite ran: a file the split dropped, or
+  # one that died while it was imported, leaves every shard green. This fails
+  # unless the files the shards actually loaded are exactly the tracked test
+  # files, each once, and on any failed test or Bun "error" in any shard. It
+  # prints each shard's pass/skip/fail counts and its five slowest files. It
+  # runs whatever the shards concluded (`always()`), so a red shard still gets
+  # its counts printed here.
+  tests-ran:
+    name: tests ran
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Fetch every shard's record
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-shard-*
+          path: shards
+
+      # No install: the check reads the records and `git ls-files`, and imports
+      # nothing but Bun and Node built-ins.
+      - name: Every tracked test file ran exactly once
+        run: bun scripts/test-shards.ts check shards 4
 
   # The toolkits are discovered, never listed. `tools/approvals` is meant to be
   # deletable — a forker who wants no Python removes it and substitutes their
