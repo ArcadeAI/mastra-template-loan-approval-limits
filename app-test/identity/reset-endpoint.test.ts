@@ -66,12 +66,12 @@ async function boot(overrides: Record<string, string>): Promise<Instance> {
   // `bun run users seed-demo` adds it, before the provider opens the file.
   await seedDemoIdentity(dbPath);
 
-  // Any PERSONA_* or IDP_* in the developer's shell is deliberately not passed
+  // Any IDP_* in the developer's shell is deliberately not passed
   // on, so this is about the fixture rather than about their environment.
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key, value]) =>
-        value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+        value !== undefined && !key.startsWith("IDP_"),
     ),
   ) as Record<string, string>;
 

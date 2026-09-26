@@ -114,7 +114,7 @@ beforeAll(async () => {
   // So `decided_by_name` can resolve an address to the name a room reads: a
   // real control plane over its own governance.db, whose subjects are the
   // harness's people, read at CONTROL_PLANE_HOST the way the app reads it
-  // (#32). No PERSONA_* variable is set; the name comes from the table.
+  // (#32). Nothing in the environment names anybody; the name comes from the table.
   plane = startControlPlane(join(workspace, "governance.db"));
   set("CONTROL_PLANE_HOST", `localhost:${plane.server.port}`);
   set("APPROVALS_STORE_TOKEN", STORE_TOKEN);

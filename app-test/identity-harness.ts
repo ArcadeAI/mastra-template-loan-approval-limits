@@ -971,7 +971,7 @@ export async function startIdentityHarness(
   mkdirSync(dirname(dbPath), { recursive: true });
 
   // The provider's environment, and the credentials script's: an allowlist
-  // (`child-env.ts`), so a developer's own PERSONA_*, IDP_* or host values
+  // (`child-env.ts`), so a developer's own IDP_* or host values
   // never reach it — these tests are about the fixture.
   const idpEnv: Record<string, string> = childEnv({
     PORT: String(webPort),

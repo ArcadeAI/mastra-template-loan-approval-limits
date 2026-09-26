@@ -16,7 +16,8 @@
  * `governance.db`'s `subjects` table, read through the control plane's own
  * `GET /api/approvals/roster` — the same read the approval page makes, at
  * `CONTROL_PLANE_HOST` and never at the public host. Until #32 this was a
- * static list of four personas joined on the `PERSONA_*` variables, so a user
+ * static list of four personas joined on per-persona email variables (a
+ * contract #33 removed along with the seeded cast), so a user
  * added with `bun run users` had a role and a clearance the hooks enforced and
  * a card that said nobody was there. Now the name, the role and the clearance
  * on screen are the row `/hooks/pre` decides on, including a clearance raised

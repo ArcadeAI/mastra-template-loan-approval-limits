@@ -2,7 +2,7 @@
  * The name, role and clearance beside a person come from `governance.db` (#32).
  *
  * Until #32 the sign-in card and the loan cards' "decided by" read a static
- * list of four personas joined on the `PERSONA_*` variables, so a user added to
+ * list of four personas joined on per-persona email variables (removed in #33), so a user added to
  * the database had a role the hooks enforced and a card that said nobody was
  * there. Here the control plane is real — its own server on a port the OS
  * handed out, over a `governance.db` seeded from the shipped fixture — and a

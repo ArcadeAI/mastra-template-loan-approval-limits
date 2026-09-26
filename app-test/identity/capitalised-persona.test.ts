@@ -2,8 +2,8 @@
  * The test #58 says would have caught it: put a person in under a capitalised
  * address and assert `/sign-in/email` answers 200.
  *
- * Until #33 the address arrived through a `PERSONA_*` role variable read at
- * first seed. Since #33 nobody is seeded and the only way in is
+ * Until #33 the address arrived through a per-persona email variable read at
+ * first seed; that contract is gone. Since #33 nobody is seeded and the only way in is
  * `bun run users add`, so that is what this runs, as a subprocess against the
  * provider's own file before it boots.
  *
@@ -85,7 +85,7 @@ beforeAll(async () => {
 
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+      ([key, value]) => value !== undefined && !key.startsWith("IDP_"),
     ),
   ) as Record<string, string>;
 
