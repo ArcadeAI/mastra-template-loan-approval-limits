@@ -90,7 +90,9 @@ import { useEffect, useRef, useState } from "react";
 import { CHAT_PATH, replyText, type ChatEvent } from "../../lib/agent/events.ts";
 import { boundConversation, type ConversationMessage } from "../../lib/agent/conversation.ts";
 import { noticeIsFor, subscribeToApprovalNotices } from "../../lib/governance/approval-stream.ts";
+import { JsonView } from "./JsonView.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { statusLine } from "./status.ts";
 import { transcript } from "./transcript.ts";
 import "./chat.css";
 
@@ -198,6 +200,18 @@ interface Waiting {
 interface ChatTurn {
   prompt: string;
   events: ChatEvent[];
+  /**
+   * The typed message resumed a paused turn rather than asking something new
+   * (#37). It is shown, and it was not sent to the model: the request was the
+   * one Continue sends.
+   */
+  continues?: boolean;
+}
+
+/** Where the attempt that is streaming, or last streamed, starts in the transcript. */
+interface Attempt {
+  turnIndex: number;
+  from: number;
 }
 
 interface AuthorizationChallenge {
@@ -231,6 +245,8 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
   const runGenerationRef = useRef(0);
   const runAbortRef = useRef<AbortController | null>(null);
   const [authorizationChallenge, setAuthorizationChallenge] = useState<AuthorizationChallenge | null>(null);
+  /** The status line reads this attempt's events only, so an earlier attempt's card does not speak for it. */
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
   const authorizationChallengeRef = useRef<AuthorizationChallenge | null>(null);
   /**
    * The approval this transcript is holding, or `null`.
@@ -273,6 +289,7 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
     conversationRef.current = [];
     authorizationChallengeRef.current = null;
     setTurns([]);
+    setAttempt(null);
     setFailure(null);
     setAuthorizationChallenge(null);
     setWaiting(null);
@@ -324,6 +341,7 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
     const generation = runGenerationRef.current;
     const abort = new AbortController();
     runAbortRef.current = abort;
+    setAttempt({ turnIndex: options.turnIndex, from: turnsRef.current[options.turnIndex]?.events.length ?? 0 });
 
     // Collected alongside the transcript, because a resume has to hand back
     // what the agent said on the turn that ended waiting, and reading it out of
@@ -472,6 +490,16 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
     event.preventDefault();
     if (prompt.trim() === "" || inFlight.current) return;
     const requested = prompt.trim();
+    // Chat, don't click (#37): while an authorization card is waiting, a typed
+    // message is the person saying they have authorized. It resumes the paused
+    // turn through the same path as Continue, so the request is the same one
+    // and the one-attempt guard is the same guard. The words are shown and
+    // are not sent to the model.
+    if (authorizationChallengeRef.current !== null) {
+      setPrompt("");
+      continueAuthorization(requested);
+      return;
+    }
     // The submitted prompt is already preserved in the visible user bubble;
     // leave the composer ready for the next turn instead of making a reader
     // delete the previous request by hand.
@@ -494,15 +522,20 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
    * one new attempt with the original prompt and bounded prior context; it is
    * never treated as proof that a credential was granted.
    */
-  function continueAuthorization(): void {
+  function continueAuthorization(typed?: string): void {
     const challenge = authorizationChallengeRef.current;
     if (challenge === null || inFlight.current) return;
     authorizationChallengeRef.current = null;
     setAuthorizationChallenge(null);
+    // A typed message gets its own line in the transcript, and the attempt
+    // streams under it; a click continues under the card it was on. The
+    // request is identical either way.
+    const turnIndex =
+      typed === undefined ? challenge.turnIndex : addTurn({ prompt: typed, events: [], continues: true });
     const history = boundConversation(conversationRef.current);
     void run(
       { prompt: challenge.prompt, ...(history.length === 0 ? {} : { history }) },
-      { turnIndex: challenge.turnIndex, prompt: challenge.prompt, commitConversation: true },
+      { turnIndex, prompt: challenge.prompt, commitConversation: true },
     );
   }
 
@@ -605,6 +638,18 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [approvalStreamUrl, signedInAs]);
 
+  const attemptEvents =
+    attempt === null ? [] : (turns[attempt.turnIndex]?.events ?? []).slice(attempt.from);
+  const status =
+    attempt === null
+      ? null
+      : statusLine({
+          running,
+          events: attemptEvents,
+          waitingRequestId: waiting?.request_id ?? null,
+          challengeHeld: authorizationChallenge?.turnIndex === attempt.turnIndex,
+        });
+
   return (
     <section className="chat-shell" aria-label="Conversation">
       {/* Who the conversation acts as. Amber rather than muted grey when the
@@ -653,6 +698,15 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
         </button>
       </form>
 
+      {status === null ? null : (
+        // What the agent is waiting on, from the stream's own events
+        // (`status.ts`). A running status pulses; a held one is still text,
+        // because the turn has ended and nothing is spinning.
+        <p className="chat-status" data-status={status.kind} role="status">
+          {status.text}
+        </p>
+      )}
+
       {failure === null ? null : (
         // The request never got as far as a turn. Plumbing, and worded as such:
         // it used to wear the denial's red, which put a refusal on screen that
@@ -672,39 +726,40 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
             element.scrollHeight - element.scrollTop - element.clientHeight <= 48;
         }}
       >
+      {/* One transcript, not a box per turn (#37). The person's lines and the
+          agent's follow each other; the cards inside keep their own borders
+          because each is a different claim about the world. */}
       <div className="chat-transcript" aria-live="polite">
         {turns.map((turn, index) => {
           const latestAuthorization = [...turn.events]
             .reverse()
             .find((candidate) => candidate.kind === "authorization");
+          const streaming = running && attempt?.turnIndex === index;
           return (
             <article className="chat-turn" data-kind="turn" key={index}>
             {turn.prompt === "" ? null : (
               <div className="chat-message chat-message-user" data-role="user">
                 <span className="chat-message-label">You</span>
                 <p>{turn.prompt}</p>
+                {turn.continues ? (
+                  <p className="chat-message-note" data-note="continues">
+                    Resumed the paused request, as Continue does. This message was not sent to the
+                    agent.
+                  </p>
+                ) : null}
               </div>
             )}
             <div className="chat-message chat-message-assistant" data-role="assistant">
               <span className="chat-message-label">Assistant</span>
-              {/* Grouped, not one-per-event. A `text` event is a delta; the
-                  deltas either side of a tool call are two messages and the
-                  deltas between them are one. `transcript.ts` says why that
-                  distinction is the whole bug #99 was filed for. */}
-              {groupToolBlocks(transcript(visibleEvents(turn.events))).map((block, blockIndex) =>
+              {/* A `text` event is a delta; the deltas either side of a tool
+                  call are two messages and the deltas between them are one.
+                  `transcript.ts` says why that distinction is the whole bug
+                  #99 was filed for. */}
+              {withToolRows(transcript(visibleEvents(turn.events))).map((block, blockIndex) =>
                 block.kind === "reply" ? (
                   <Markdown key={blockIndex} source={block.text} />
-                ) : block.kind === "tools" ? (
-                  <details className="chat-tools" key={blockIndex}>
-                    <summary>
-                      {block.toolCount === 1 ? "1 tool call" : `${block.toolCount} tool calls`} · {toolIdentity(block)}
-                    </summary>
-                    <div className="chat-tools-body">
-                      {block.events.map((event, eventIndex) => (
-                        <EventView key={eventIndex} event={event} />
-                      ))}
-                    </div>
-                  </details>
+                ) : block.kind === "tool" ? (
+                  <ToolRow key={blockIndex} row={block} pending={streaming} />
                 ) : (
                   <EventView
                     key={blockIndex}
@@ -713,7 +768,7 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
                     authorizationChallenge?.turnIndex === index &&
                     latestAuthorization === block.event
                       ? {
-                          onContinueAuthorization: continueAuthorization,
+                          onContinueAuthorization: () => continueAuthorization(),
                           authorizationContinuing: running,
                         }
                       : {})}
@@ -732,42 +787,136 @@ export function Chat({ signedInAs, approvalStreamUrl = null, sessionStale = fals
 }
 
 type TranscriptBlock = ReturnType<typeof transcript>[number];
-type ToolEvent = Extract<ChatEvent, { kind: "tool-call" | "tool-result" }>;
-type RenderBlock =
-  | TranscriptBlock
-  | { kind: "tools"; events: ToolEvent[]; toolCount: number; identities: string[] };
+type ToolCall = Extract<ChatEvent, { kind: "tool-call" }>;
+type ToolResult = Extract<ChatEvent, { kind: "tool-result" }>;
 
-/** Keep tool traffic available without letting it crowd the conversation. */
-function groupToolBlocks(blocks: readonly TranscriptBlock[]): RenderBlock[] {
-  const grouped: RenderBlock[] = [];
-  let toolEvents: ToolEvent[] = [];
+/**
+ * One tool call as the chat shows it: its arguments, and what came back.
+ *
+ * `outcome` is set when the call did not return a result: the card that says
+ * why (a denial, a fault, an authorization) follows the row in the
+ * transcript, and the row names which one it was.
+ */
+interface ToolRowBlock {
+  kind: "tool";
+  tool: string;
+  call: ToolCall | null;
+  result: ToolResult | null;
+  outcome: "denied" | "fault" | "authorization" | null;
+}
 
-  const flush = () => {
-    if (toolEvents.length === 0) return;
-    const identities = [...new Set(toolEvents.map((event) => event.tool))];
-    grouped.push({
-      kind: "tools",
-      events: toolEvents,
-      toolCount: toolEvents.filter((event) => event.kind === "tool-call").length || identities.length,
-      identities,
-    });
-    toolEvents = [];
+type RenderBlock = TranscriptBlock | ToolRowBlock;
+
+/**
+ * Pair every `tool-call` with what answered it, in arrival order.
+ *
+ * A `tool-result` answers the earliest unanswered call to the same tool. A
+ * `denied`, `fault` or `authorization` for that tool closes it without a
+ * result and still renders as its own card. A result with no call before it
+ * (a stream that began mid-turn) is a row of its own rather than dropped.
+ */
+function withToolRows(blocks: readonly TranscriptBlock[]): RenderBlock[] {
+  const out: RenderBlock[] = [];
+  const open: ToolRowBlock[] = [];
+  const answer = (tool: string): ToolRowBlock | null => {
+    const at = open.findIndex((row) => row.tool === tool);
+    if (at === -1) return null;
+    const [row] = open.splice(at, 1);
+    return row ?? null;
   };
 
   for (const block of blocks) {
-    if (block.kind === "event" && (block.event.kind === "tool-call" || block.event.kind === "tool-result")) {
-      toolEvents.push(block.event);
+    if (block.kind !== "event") {
+      out.push(block);
       continue;
     }
-    flush();
-    grouped.push(block);
+    const event = block.event;
+    if (event.kind === "tool-call") {
+      const row: ToolRowBlock = { kind: "tool", tool: event.tool, call: event, result: null, outcome: null };
+      open.push(row);
+      out.push(row);
+      continue;
+    }
+    if (event.kind === "tool-result") {
+      const row = answer(event.tool);
+      if (row) row.result = event;
+      else out.push({ kind: "tool", tool: event.tool, call: null, result: event, outcome: null });
+      continue;
+    }
+    if (event.kind === "denied" || event.kind === "fault" || event.kind === "authorization") {
+      const row = answer(event.tool);
+      if (row) row.outcome = event.kind;
+    }
+    out.push(block);
   }
-  flush();
-  return grouped;
+  return out;
 }
 
-function toolIdentity(block: Extract<RenderBlock, { kind: "tools" }>): string {
-  return block.identities.join(", ");
+const OUTCOME_LABEL: Record<NonNullable<ToolRowBlock["outcome"]>, string> = {
+  denied: "denied",
+  fault: "did not complete",
+  authorization: "authorization needed",
+};
+
+/**
+ * A tool call, collapsed to its name, that opens onto the exact arguments the
+ * model sent and the exact result it received (#37).
+ *
+ * The result is labelled as the post-hook output because that is what it is:
+ * `/post` has already rewritten it, which is why a masked account number
+ * shows as `[REDACTED]` here and not as the number.
+ */
+function ToolRow({ row, pending }: { row: Omit<ToolRowBlock, "kind">; pending: boolean }) {
+  const state =
+    row.result !== null
+      ? "returned"
+      : row.outcome !== null
+        ? OUTCOME_LABEL[row.outcome]
+        : pending
+          ? "running…"
+          : "no result";
+  return (
+    <details className="chat-tool" data-kind="tool" data-tool={row.tool} data-state={state}>
+      <summary>
+        <span className="chat-tool-name">{row.tool}</span>
+        <span className="chat-tool-state">{state}</span>
+      </summary>
+      <div className="chat-tool-body">
+        {row.call === null ? null : (
+          <>
+            <JsonView label="Arguments" value={row.call.inputs} />
+            <Withheld count={row.call.withheld} />
+          </>
+        )}
+        {row.result === null ? (
+          <p className="chat-tool-note">
+            {row.outcome === null
+              ? "No result yet."
+              : "No result: the tool did not return one. The card below says why."}
+          </p>
+        ) : (
+          <>
+            <JsonView label="Result" value={row.result.result} />
+            <p className="chat-tool-note" data-note="post-hook">
+              This is the post-hook output: what the agent received after the control plane&apos;s
+              /post hook rewrote the tool&apos;s result.
+            </p>
+            <Withheld count={row.result.withheld} />
+          </>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function Withheld({ count }: { count: number | undefined }) {
+  if (count === undefined || count === 0) return null;
+  return (
+    <p className="chat-tool-note" data-note="withheld">
+      {count === 1 ? "1 value" : `${count} values`} withheld here as secret. The agent received{" "}
+      {count === 1 ? "it" : "them"}; this page does not show {count === 1 ? "it" : "them"}.
+    </p>
+  );
 }
 
 function detailOf(detail: unknown): string {
@@ -799,16 +948,10 @@ export function EventView({
       return <Markdown source={event.text} />;
 
     case "tool-call":
-      return (
-        <div style={{ ...box, fontFamily: mono, color: "var(--muted)" }}>
-          → {event.tool}({JSON.stringify(event.inputs)})
-        </div>
-      );
+      return <ToolRow row={{ tool: event.tool, call: event, result: null, outcome: null }} pending={false} />;
 
     case "tool-result":
-      return (
-        <div style={{ ...box, fontFamily: mono, color: "var(--muted)" }}>← {event.tool} returned</div>
-      );
+      return <ToolRow row={{ tool: event.tool, call: null, result: event, outcome: null }} pending={false} />;
 
     case "denied":
       return (
