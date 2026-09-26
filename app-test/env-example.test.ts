@@ -66,6 +66,7 @@ const SET_ELSEWHERE: Record<string, string> = {
   ARCADE_WORK_DIR: "the Arcade CLI's own, naming its config directory; setup-arcade reads the CLI's context where the CLI does",
   ARCADE_CONTEXT: "the Arcade CLI's own, choosing a saved context; setup-arcade honours it as the CLI does",
   HOME: "the shell's, where the Arcade CLI keeps ~/.arcade",
+  MASTRA_PROJECT_ROOT: "the Mastra CLI's own, set on the Studio server `mastra dev` spawns; memory.db resolves against it (#36)",
 };
 
 /** Dynamic names: `IDP_OAUTH_REDIRECT_URIS_<KEY>` for each client key. */

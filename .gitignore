@@ -30,6 +30,7 @@ build/
 # data — bootstrapped from checked-in fixtures, never committed. The -wal and
 # -shm sidecars are SQLite's write-ahead log, which holds rows not yet
 # checkpointed into the .db: sessions, OAuth clients, audit rows (#19).
+# Mastra Studio's memory.db (#36) is covered too: written by Studio, never seeded.
 *.db
 *.db-journal
 *.db-wal
