@@ -283,7 +283,7 @@ describe("README.md follows Mastra's outline", () => {
 
   test("the Quickstart warns about ngrok's page on a free domain, once, where the app is first opened", () => {
     const quickstart = section(README, "Quickstart 🚀");
-    const open = quickstart.slice(quickstart.indexOf("8. **Ask for the $95K approval**"));
+    const open = quickstart.slice(quickstart.indexOf("9. **Ask for the $95K approval**"));
     expect(open).toContain("The first time a browser opens a free ngrok domain, ngrok shows its own warning page first: click **Visit Site**.");
     expect(open).toContain("Arcade's own calls to the app never see that page.");
     expect(README.match(/Visit Site/g)).toHaveLength(1);
