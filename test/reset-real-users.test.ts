@@ -10,9 +10,9 @@
  * afterwards refused as an identity nobody registered.
  *
  * The app is booted the way a presenter runs it (`test/app.ts`), and a person
- * is added the way `bun run users add` adds one: a `user` row with a
- * `credential` account in `idp.db`, and a `subjects` row in `governance.db`,
- * written straight into the files the running app has open. The reset command
+ * is added with `bun run users add` itself (#31), a subprocess writing the two
+ * files the running app has open. Bob is removed with `bun run users remove`
+ * and brought back with `bun run users seed-demo`, the same way. The reset command
  * then runs as a subprocess, and what survived is read back over the app's own
  * HTTP surfaces: a sign-in with the password she was given, a `/hooks/pre`
  * decision on her clearance, the roster the pages read. The disk is read only
@@ -21,10 +21,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import type { Server } from "bun";
-import { hashPassword } from "better-auth/crypto";
 import { join } from "node:path";
 
 import { spawnChild } from "../app-test/child.ts";
+import { childEnv } from "../app-test/child-env.ts";
 import { bootApp, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -64,36 +64,51 @@ async function runReset(args: string[] = []): Promise<{ code: number; out: strin
   return { code, out, err };
 }
 
-/** What `bun run users add` writes (#31), with the password hashed the way the seed hashes it. */
-async function addRealUser(): Promise<void> {
-  const passwordHash = await hashPassword(PRIYA.password);
-  const idp = new Database(app.databases.idp);
-  try {
-    const now = new Date().toISOString();
-    const userId = crypto.randomUUID();
-    idp.transaction(() => {
-      idp.run(
-        `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, 1, ?, ?)`,
-        [userId, PRIYA.name, PRIYA.email, now, now],
-      );
-      idp.run(
-        `INSERT INTO "account" ("id", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt")
-         VALUES (?, ?, 'credential', ?, ?, ?, ?)`,
-        [crypto.randomUUID(), userId, userId, passwordHash, now, now],
-      );
-    })();
-  } finally {
-    idp.close();
+/**
+ * `bun run users …` (#31), run the way an operator runs it: a subprocess
+ * against this app's two database files, with nothing else from this shell.
+ */
+async function users(args: string[]): Promise<{ code: number; out: string; err: string }> {
+  const proc = spawnChild(["bun", "--no-env-file", join(ROOT, "scripts", "users.ts"), ...args], {
+    cwd: ROOT,
+    env: childEnv({ IDP_DB_PATH: app.databases.idp, GOVERNANCE_DB_PATH: app.databases.governance }),
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (code !== 0) throw new Error(`bun run users ${args.join(" ")} exited ${code}:\n${out}\n${err}`);
+  return { code, out, err };
+}
+
+/** The app's own readiness page, which carries `fixture_drift` (DESIGN.md → Readiness). */
+async function drift(): Promise<{ ids: string[]; changed: string[]; missing: string[] } | null> {
+  const body = (await (await fetch(`${app.origin}/health`)).json()) as { fixture_drift: never };
+  return body.fixture_drift;
+}
+
+/** Waits for a condition the policy cache reaches on its next poll. */
+async function until(condition: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await Bun.sleep(100);
   }
-  const governance = new Database(app.databases.governance);
-  try {
-    governance.run(
-      "INSERT INTO subjects (user_id, display_name, role, clearance, attributes) VALUES (?, ?, ?, ?, '{}')",
-      [PRIYA.email, PRIYA.name, PRIYA.role, PRIYA.clearance],
-    );
-  } finally {
-    governance.close();
+  throw new Error("the control plane never served the change that was written");
+}
+
+/** Waits a policy poll or two for the cache to see a write made from another connection. */
+async function untilDrift(predicate: (value: Awaited<ReturnType<typeof drift>>) => boolean): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (predicate(await drift())) return;
+    await Bun.sleep(100);
   }
+  throw new Error(`fixture_drift never reached the expected state: ${JSON.stringify(await drift())}`);
 }
 
 /** Better Auth's own sign-in, as the login form calls it. */
@@ -196,7 +211,10 @@ beforeAll(async () => {
     IDENTITY_HOST: `127.0.0.1:${userinfo.port}`,
   });
 
-  await addRealUser();
+  await users([
+    "add", PRIYA.email, "--name", PRIYA.name, "--role", PRIYA.role,
+    "--clearance", String(PRIYA.clearance), "--password", PRIYA.password,
+  ]);
   await untilServed();
 }, 240_000);
 
@@ -213,6 +231,40 @@ describe("before any reset, the added user is a user", () => {
     // clearance and not a policy that permits everybody.
     expect(await approve95k(ALICE)).toMatchObject({ code: "CHECK_FAILED" });
   });
+});
+
+describe("drift, with a user `bun run users add` created (#32)", () => {
+  test("she is not drift, and a hand-edited demo row beside her still is", async () => {
+    await untilDrift((value) => value === null);
+
+    const governance = new Database(app.databases.governance);
+    governance.run("UPDATE subjects SET clearance = 250000 WHERE user_id = ?", [ALICE]);
+    governance.close();
+    await untilDrift((value) => value !== null);
+    const found = await drift();
+    expect(found?.ids).toEqual([`subjects:${ALICE}`]);
+    expect(found?.changed).toEqual([`subjects:${ALICE}`]);
+
+    // Put back by hand, so the next test starts from the fixture.
+    const back = new Database(app.databases.governance);
+    back.run("UPDATE subjects SET clearance = 50000 WHERE user_id = ?", [ALICE]);
+    back.close();
+    await untilDrift((value) => value === null);
+  }, 60_000);
+
+  test("a demo row deleted by hand is missing drift, and a reset re-seeds it", async () => {
+    const governance = new Database(app.databases.governance);
+    governance.run("DELETE FROM subjects WHERE user_id = ?", ["charlie@bank.example"]);
+    governance.close();
+    await untilDrift((value) => value !== null);
+    expect((await drift())?.missing).toEqual(["subjects:charlie@bank.example"]);
+
+    const { code, out } = await runReset();
+    expect(code).toBe(0);
+    expect(out).toContain("0 removed with `bun run users remove` not re-seeded");
+    expect((await roster()).find((entry) => entry.user_id === "charlie@bank.example")?.clearance).toBe(250_000);
+    expect(await drift()).toBeNull();
+  }, 60_000);
 });
 
 describe("`bun run reset` keeps her", () => {
@@ -281,22 +333,48 @@ describe("`bun run reset --hard` keeps her too, and signs everybody out", () => 
     expect((await signIn(ALICE, DEMO_PASSWORD)).status).toBe(200);
   }, 60_000);
 
-  test("a demo persona that was removed stays removed: the cast is re-seeded only if it was seeded", async () => {
-    // What `bun run users remove bob@…` leaves behind: no user, no account.
-    const idp = new Database(app.databases.idp);
-    idp.run("PRAGMA foreign_keys = ON");
-    idp.run(`DELETE FROM "user" WHERE "email" = ?`, [BOB]);
-    idp.close();
+  test("Bob removed with `bun run users remove` has neither half after either reset, and is not drift", async () => {
+    await users(["remove", BOB]);
     expect(idpRow(BOB)).toBeNull();
+    // Served from the policy cache, which sees the removal on its next poll.
+    await until(async () => !(await roster()).some((entry) => entry.user_id === BOB));
+    // A removal recorded in subject_changes is intent, not drift.
+    await untilDrift((value) => value === null);
 
-    const { code, out } = await runReset(["--hard"]);
-    expect(code).toBe(0);
-    const idpLine = out.split("\n").find((line) => line.startsWith("[reset] idp "));
+    for (const args of [[], ["--hard"]]) {
+      const { code, out } = await runReset(args);
+      expect(code).toBe(0);
+      const hooksLine = out.split("\n").find((line) => line.startsWith("[reset] hooks "));
+      expect(hooksLine).toContain(`1 removed with \`bun run users remove\` not re-seeded (${BOB})`);
+
+      expect(idpRow(BOB)).toBeNull();
+      expect((await roster()).some((entry) => entry.user_id === BOB)).toBe(false);
+      expect((await signIn(BOB, DEMO_PASSWORD)).status).toBe(401);
+      expect(await drift()).toBeNull();
+    }
+    const hard = await runReset(["--hard"]);
+    const idpLine = hard.out.split("\n").find((line) => line.startsWith("[reset] idp "));
     expect(idpLine).toContain(`demo cast re-seeded (${ALICE}, charlie@bank.example, michael@bank.example)`);
-    expect(idpLine).toContain("people 4→4");
-
-    expect(idpRow(BOB)).toBeNull();
-    expect((await signIn(BOB, DEMO_PASSWORD)).status).toBe(401);
     expect((await signIn(PRIYA.email, PRIYA.password)).status).toBe(200);
-  }, 60_000);
+  }, 90_000);
+
+  test("Bob removed, then `bun run users seed-demo`, is back as a user with no drift", async () => {
+    const { out } = await users([
+      "seed-demo", "--alice", ALICE, "--bob", BOB, "--charlie", "charlie@bank.example",
+      "--michael", "michael@bank.example", "--password", "bob-is-back-2026",
+    ]);
+    expect(out).toContain(`Bob: added ${BOB}`);
+    await until(async () => (await roster()).some((entry) => entry.user_id === BOB));
+    await untilDrift((value) => value === null);
+    expect((await roster()).find((entry) => entry.user_id === BOB)?.role).toBe("credit_analyst");
+    expect((await signIn(BOB, "bob-is-back-2026")).status).toBe(200);
+
+    // Present again, so both resets treat him as the demo cast once more.
+    const { code, out: hardOut } = await runReset(["--hard"]);
+    expect(code).toBe(0);
+    expect(hardOut).toContain(`demo cast re-seeded (${ALICE}, ${BOB}, charlie@bank.example, michael@bank.example)`);
+    expect(hardOut).toContain("0 removed with `bun run users remove` not re-seeded");
+    expect((await roster()).some((entry) => entry.user_id === BOB)).toBe(true);
+    expect(await drift()).toBeNull();
+  }, 90_000);
 });

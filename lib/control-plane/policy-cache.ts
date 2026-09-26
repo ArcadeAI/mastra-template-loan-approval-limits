@@ -62,7 +62,7 @@ import {
   type FixtureDrift,
   type PolicyDigest,
 } from "./fixture-drift.ts";
-import { readPolicy, readRevision } from "./policy-store.ts";
+import { readPolicy, readRevision, removedSubjects } from "./policy-store.ts";
 
 export type CacheState =
   | { status: "cold" }
@@ -231,7 +231,8 @@ export function createPolicyCache(db: Database, options: PolicyCacheOptions = {}
   const checkDrift = (): void => {
     if (fixture === undefined) return;
     try {
-      drift = compareToFixture(digestPolicy(db), fixture);
+      // A demo subject removed with `bun run users remove` is intent, not drift (#32).
+      drift = compareToFixture(digestPolicy(db), fixture, removedSubjects(db));
       if (drift !== null) log(`FIXTURE DRIFT: ${driftWarning(drift)}`);
     } catch (cause) {
       drift = null;

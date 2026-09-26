@@ -813,9 +813,19 @@ export function seed(db: Database, data: Seed): void {
  * identity" after a reset meant to put the *demo* back. The fixture's own
  * rows are deleted and written again, so a demo clearance raised on stage
  * still goes back to the seeded one.
+ *
+ * **Except one the operator removed** (#32, round 1). A demo subject whose
+ * latest `subject_changes` row is `remove` was taken out with
+ * `bun run users remove`, which deletes the identity too; writing the subject
+ * back would leave a role and a clearance for somebody who cannot sign in, and
+ * would undo on every reset a removal somebody asked for. So it is left out,
+ * and a later `add` (`bun run users add` or `seed-demo`) makes it the demo
+ * cast's again. A demo row deleted by hand has no such record and is written
+ * back, which is what makes its `missing` drift fixable by a reset.
  */
 export function replacePolicy(db: Database, data: Seed): void {
   db.transaction(() => {
+    const removed = removedSubjects(db);
     const deleteSubject = db.prepare<unknown, [string]>("DELETE FROM subjects WHERE user_id = ?");
     try {
       for (const subject of data.subjects) deleteSubject.run(subject.user_id);
@@ -825,8 +835,39 @@ export function replacePolicy(db: Database, data: Seed): void {
     for (const table of ["catalogue", "policy_rules", "output_rules"]) {
       db.exec(`DELETE FROM ${table}`);
     }
-    insertPolicy(db, data);
+    insertPolicy(db, { ...data, subjects: data.subjects.filter((subject) => !removed.has(subject.user_id)) });
   })();
+}
+
+/**
+ * Every `user_id` whose most recent `subject_changes` row is a `remove`: the
+ * people `bun run users remove` took out and nobody has added since (#31).
+ * Read by the reset, which does not re-seed them, and by the drift check,
+ * which does not call their absence drift. Empty on a disk whose schema
+ * predates `subject_changes`, which has recorded no removals.
+ */
+export function removedSubjects(db: Database): Set<string> {
+  const table = db
+    .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subject_changes'")
+    .get();
+  if (table === null) return new Set();
+  const rows = db
+    .query<{ user_id: string }, []>(
+      `SELECT c.user_id FROM subject_changes c
+       WHERE c.action = 'remove'
+         AND c.seq = (SELECT MAX(seq) FROM subject_changes WHERE user_id = c.user_id)`,
+    )
+    .all();
+  return new Set(rows.map((row) => row.user_id));
+}
+
+/** The demo cast members `bun run users remove` took out: what a reset does not re-seed, and says so. */
+export function removedDemoSubjects(db: Database, data: Seed): string[] {
+  const removed = removedSubjects(db);
+  return data.subjects
+    .map((subject) => subject.user_id)
+    .filter((userId) => removed.has(userId))
+    .sort();
 }
 
 /**

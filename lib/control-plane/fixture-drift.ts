@@ -137,7 +137,16 @@ export interface FixtureDrift {
  * policy, row for row, which is the state a fresh deployment is in and the
  * state a reset returns to.
  */
-export function compareToFixture(disk: PolicyDigest, fixture: PolicyDigest): FixtureDrift | null {
+export function compareToFixture(
+  disk: PolicyDigest,
+  fixture: PolicyDigest,
+  /**
+   * Subjects `bun run users remove` took out (`removedSubjects`). A fixture
+   * subject among them that is absent from the disk is a removal somebody
+   * asked for, recorded in `subject_changes`, not drift (#32, round 1).
+   */
+  removed: ReadonlySet<string> = new Set(),
+): FixtureDrift | null {
   const missing: string[] = [];
   const changed: string[] = [];
   const unexpected: string[] = [];
@@ -147,6 +156,7 @@ export function compareToFixture(disk: PolicyDigest, fixture: PolicyDigest): Fix
     const shipped = fixture[table];
     for (const [key, hash] of shipped) {
       const found = onDisk.get(key);
+      if (found === undefined && table === "subjects" && removed.has(key)) continue;
       if (found === undefined) missing.push(`${table}:${key}`);
       else if (found !== hash) changed.push(`${table}:${key}`);
     }

@@ -361,13 +361,16 @@ async function resetOne(
       after: Record<string, number>;
     };
     const kept = ((body.kept as { subjects?: string[] } | undefined)?.subjects ?? []) as string[];
+    const removed = ((body.removed as { subjects?: string[] } | undefined)?.subjects ?? []) as string[];
     return {
       label: spec.label,
       ok: true,
       line:
         `${label} OK  ${String(body.mode)} at revision ${String(body.revision)} — ${deltas(counts.before, counts.after)}` +
         `; demo cast's subjects re-seeded, ${kept.length} added by \`bun run users\` kept` +
-        (kept.length === 0 ? "" : ` (${kept.join(", ")})`),
+        (kept.length === 0 ? "" : ` (${kept.join(", ")})`) +
+        `, ${removed.length} removed with \`bun run users remove\` not re-seeded` +
+        (removed.length === 0 ? "" : ` (${removed.join(", ")})`),
     };
   }
 

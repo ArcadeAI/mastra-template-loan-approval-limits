@@ -38,6 +38,7 @@ import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
 import { recoverStalePolicy } from "../../lib/control-plane/policy-recovery.ts";
 import { loadSeed, openGovernance, seed as seedInto, type Seed } from "../../lib/control-plane/policy-store.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
+import { addSubject, removeSubject, subjectChanges } from "../../lib/control-plane/subjects.ts";
 import rawFixture from "../../lib/control-plane/fixtures/governance.json" with { type: "json" };
 
 const SECRET = "test-secret";
@@ -650,5 +651,62 @@ describe("a reset keeps real users' subjects rows (#32)", () => {
     const body = (await (await reset(instance.base, { mode: "demo" })).json()) as { kept: { subjects: string[] } };
     expect(body.kept.subjects).toEqual([]);
     expect((await health(instance.base)).counts.subjects).toBe(4);
+  });
+});
+
+describe("a demo subject removed with `bun run users remove` stays removed (#32, round 1)", () => {
+  const BOB = "bob@bank.example";
+  const BOB_SUBJECT = { user_id: BOB, display_name: "Bob", role: "credit_analyst", clearance: 0 };
+
+  test("it is not drift", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    expect(removeSubject(instance.db, BOB, "cli:test")?.action).toBe("remove");
+    await Bun.sleep(POLL_MS * 8);
+
+    expect((await health(instance.base)).fixture_drift).toBeNull();
+  });
+
+  for (const mode of ["policy", "demo"] as const) {
+    test(`${mode} mode does not re-seed it, says so, and keeps the record of the removal`, async () => {
+      const instance = boot(diskSeededFrom(rawFixture));
+      removeSubject(instance.db, BOB, "cli:test");
+
+      const body = (await (await reset(instance.base, { mode })).json()) as {
+        removed: { subjects: string[] };
+        kept: { subjects: string[] };
+      };
+      expect(body.removed.subjects).toEqual([BOB]);
+      expect(subjectRow(instance.db, BOB)).toBeNull();
+      expect(subjectRow(instance.db, DANA)?.clearance).toBe(50_000);
+      expect((await health(instance.base)).fixture_drift).toBeNull();
+      // The removal is the record the next reset reads, so no reset may erase it.
+      expect(subjectChanges(instance.db, BOB).map((change) => change.action)).toEqual(["remove"]);
+    });
+  }
+
+  test("added back (seed-demo writes an `add` row), it is the demo cast again and a reset re-seeds it", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    removeSubject(instance.db, BOB, "cli:test");
+    addSubject(instance.db, BOB_SUBJECT, "cli:test");
+    instance.db.run("UPDATE subjects SET clearance = 10 WHERE user_id = ?", [BOB]);
+    await Bun.sleep(POLL_MS * 8);
+    expect((await health(instance.base)).fixture_drift?.changed).toEqual([`subjects:${BOB}`]);
+
+    const body = (await (await reset(instance.base, { mode: "demo" })).json()) as { removed: { subjects: string[] } };
+    expect(body.removed.subjects).toEqual([]);
+    expect(subjectRow(instance.db, BOB)?.clearance).toBe(0);
+    expect((await health(instance.base)).fixture_drift).toBeNull();
+  });
+
+  test("deleted by hand, with no recorded removal, it is still missing drift and a reset re-seeds it", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    instance.db.run("DELETE FROM subjects WHERE user_id = ?", [BOB]);
+    await Bun.sleep(POLL_MS * 8);
+    expect((await health(instance.base)).fixture_drift?.missing).toEqual([`subjects:${BOB}`]);
+
+    const body = (await (await reset(instance.base, { mode: "policy" })).json()) as { removed: { subjects: string[] } };
+    expect(body.removed.subjects).toEqual([]);
+    expect(subjectRow(instance.db, BOB)).toEqual(BOB_SUBJECT);
+    expect((await health(instance.base)).fixture_drift).toBeNull();
   });
 });
