@@ -149,6 +149,20 @@
   font-size: 0.88em;
 }
 
+.chat-tool summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A flex summary loses the browser's own disclosure triangle, so it is drawn. */
+.chat-tool summary::before {
+  content: "\25B8";
+  width: 0.8em;
+}
+
+.chat-tool[open] > summary::before {
+  content: "\25BE";
+}
+
 .chat-tool-name {
   font-weight: 700;
 }
