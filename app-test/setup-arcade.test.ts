@@ -1030,6 +1030,7 @@ test("ARCADE_ORG_ID and ARCADE_PROJECT_ID win over the CLI's active project", as
   const run = await setupArcade(dir);
   expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
   expect(run.stdout).toContain(`arcade        org ${ORG}, project ${PROJECT} (from ARCADE_ORG_ID and ARCADE_PROJECT_ID)`);
+  expect(run.stdout).toContain("warning       arcade deploy uses the Arcade CLI's active project, not these variables");
   expect(sequence(arcade.requests)).toEqual(FIRST_RUN);
   expect(JSON.stringify(arcade.requests)).not.toContain("prj_the_cli_has");
 }, 60_000);

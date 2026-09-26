@@ -208,6 +208,11 @@ const resolution = resolveContext(loaded);
 const scope: (ArcadeContext & ProjectScope) | null = resolution.context;
 if (scope !== null) {
   out(`  arcade        org ${scope.orgId}, project ${scope.projectId} (from ${scope.source})`);
+  if (!scope.source.startsWith("the Arcade CLI") && !skipDeploy) {
+    // `arcade deploy` always deploys into the CLI's own active project
+    // (`arcade_cli/deploy.py`): these variables do not reach it.
+    out("  warning       arcade deploy uses the Arcade CLI's active project, not these variables: `arcade whoami` must show the same one");
+  }
 } else {
   out(`  arcade        no org and project: ${"why" in resolution ? resolution.why : "unknown"}.`);
   out("                The hooks and the gateway are printed as dashboard forms instead. Set ARCADE_ORG_ID and");
