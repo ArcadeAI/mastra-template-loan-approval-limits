@@ -17,6 +17,8 @@
  *   policy   subjects, catalogue, policy_rules, output_rules — the four tables
  *            the in-memory cache is built from, replaced from the fixture. What
  *            the demo *did* survives: grants, approval requests, audit rows.
+ *            So does every subject the fixture does not seed — a real user
+ *            added by `bun run users` (#32) — and the response names them.
  *            This is the drift fix: after a fixture change, run it and the live
  *            policy is the shipped policy.
  *   demo     the above, plus grants, approval_requests and audit_log emptied.
@@ -55,7 +57,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { PolicyCache } from "./policy-cache.ts";
-import { counts, readRevision, replacePolicy, type Seed } from "./policy-store.ts";
+import { counts, operatorSubjects, readRevision, replacePolicy, type Seed } from "./policy-store.ts";
 
 export const RESET_PATH = "/admin/reset";
 
@@ -77,6 +79,13 @@ export interface ResetResult {
   mode: ResetMode;
   revision: number;
   counts: { before: Record<string, number>; after: Record<string, number> };
+  /**
+   * The `subjects` rows left as they were, by `user_id`: the people
+   * `bun run users` added, whom neither mode touches (#32). Named rather than
+   * counted, so a presenter can see *who* survived, and so "nobody" reads as
+   * an empty list rather than as a zero that might mean the lookup broke.
+   */
+  kept: { subjects: string[] };
 }
 
 /**
@@ -91,7 +100,9 @@ export function runReset(mode: ResetMode, deps: ResetDeps): ResetResult {
   const { db, cache, seed, log } = deps;
   const before = counts(db);
 
+  let kept: string[] = [];
   db.transaction(() => {
+    kept = operatorSubjects(db, seed);
     replacePolicy(db, seed);
     if (mode === "demo") clearDemoState(db);
   })();
@@ -104,9 +115,11 @@ export function runReset(mode: ResetMode, deps: ResetDeps): ResetResult {
       Object.entries(after)
         .map(([table, n]) => `${table} ${before[table] ?? 0}→${n}`)
         .join(", ") +
+      `; kept ${kept.length} subject${kept.length === 1 ? "" : "s"} the fixture does not seed` +
+      (kept.length === 0 ? "" : ` (${kept.join(", ")})`) +
       `; cache ${state.status}`,
   );
-  return { mode, revision, counts: { before, after } };
+  return { mode, revision, counts: { before, after }, kept: { subjects: kept } };
 }
 
 /**

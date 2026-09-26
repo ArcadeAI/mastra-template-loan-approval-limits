@@ -758,14 +758,41 @@ export function seed(db: Database, data: Seed): void {
  *
  * `DELETE` and not `DROP`: the schema, its indexes and the revision triggers
  * are the database's, not the fixture's, and a reset is about rows.
+ *
+ * **`subjects` is replaced only where the fixture has a row** (#32). Anyone
+ * else in the table was added by `bun run users` — a real person, whose role
+ * and clearance are the operator's, not the demo's — and a reset that deleted
+ * them would leave every real user failing closed with "must register the
+ * identity" after a reset meant to put the *demo* back. The fixture's own
+ * rows are deleted and written again, so a demo clearance raised on stage
+ * still goes back to the seeded one.
  */
 export function replacePolicy(db: Database, data: Seed): void {
   db.transaction(() => {
-    for (const table of ["subjects", "catalogue", "policy_rules", "output_rules"]) {
+    const deleteSubject = db.prepare<unknown, [string]>("DELETE FROM subjects WHERE user_id = ?");
+    try {
+      for (const subject of data.subjects) deleteSubject.run(subject.user_id);
+    } finally {
+      deleteSubject.finalize();
+    }
+    for (const table of ["catalogue", "policy_rules", "output_rules"]) {
       db.exec(`DELETE FROM ${table}`);
     }
     insertPolicy(db, data);
   })();
+}
+
+/**
+ * The subjects the fixture does not seed: the people `bun run users` added.
+ * What a reset keeps, and says it kept.
+ */
+export function operatorSubjects(db: Database, data: Seed): string[] {
+  const seeded = new Set(data.subjects.map((subject) => subject.user_id));
+  return db
+    .query<{ user_id: string }, []>("SELECT user_id FROM subjects ORDER BY user_id")
+    .all()
+    .map((row) => row.user_id)
+    .filter((userId) => !seeded.has(userId));
 }
 
 /**

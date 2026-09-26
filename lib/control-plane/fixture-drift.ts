@@ -54,6 +54,20 @@ const ROW_KEY: Record<PolicyTable, (row: Record<string, unknown>) => string> = {
   output_rules: (row) => String(row.id),
 };
 
+/**
+ * Tables where a row the fixture never had is somebody's to add, not drift.
+ *
+ * `subjects` is the cast, and since #31 the cast is not only the fixture's:
+ * `bun run users add` writes a row for every real user. Those rows are the
+ * operator's, exactly as a clearance raised on stage is, and a `/health` that
+ * went degraded every time somebody was invited would be a warning that is
+ * always on, which is a warning nobody reads (#32). So on this table only the
+ * fixture's own rows are compared: a demo row edited by hand, or missing, is
+ * still named. A rule or a catalogue entry the fixture does not ship is still
+ * named too, because nothing adds those on purpose.
+ */
+const OPERATOR_ROWS: ReadonlySet<PolicyTable> = new Set(["subjects"]);
+
 /** Row key → content hash, per table. */
 export type PolicyDigest = Record<PolicyTable, Map<string, string>>;
 
@@ -136,6 +150,7 @@ export function compareToFixture(disk: PolicyDigest, fixture: PolicyDigest): Fix
       if (found === undefined) missing.push(`${table}:${key}`);
       else if (found !== hash) changed.push(`${table}:${key}`);
     }
+    if (OPERATOR_ROWS.has(table)) continue;
     for (const key of onDisk.keys()) {
       if (!shipped.has(key)) unexpected.push(`${table}:${key}`);
     }
