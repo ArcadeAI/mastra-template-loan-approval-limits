@@ -62,6 +62,7 @@ const SET_ELSEWHERE: Record<string, string> = {
   NODE_ENV: "set by Next and by the Dockerfile",
   NEXT_RUNTIME: "set by Next",
   CG_NEXT_DIST_DIR: "set by test harnesses, to run a second `next dev`",
+  CG_SHARD_RECORD: "set by CI's test shard runner (scripts/test-shards.ts), for its bun test preload",
   SLACK_API_BASE_URL: "the approvals toolkit's test override, in Arcade's worker, not the app",
   ARCADE_WORK_DIR: "the Arcade CLI's own, naming its config directory; setup-arcade reads the CLI's context where the CLI does",
   ARCADE_CONTEXT: "the Arcade CLI's own, choosing a saved context; setup-arcade honours it as the CLI does",

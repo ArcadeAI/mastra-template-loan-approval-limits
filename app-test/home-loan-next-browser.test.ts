@@ -163,8 +163,8 @@ async function waitForHydration(cdp: Cdp): Promise<void> {
 
 /**
  * This is a required measurement wherever a browser can be had, which since
- * #152 includes CI: `.github/workflows/ci.yml` installs Chrome in the `check`
- * job and `browserRequired()` turns a miss there into a failure. It skips only
+ * #152 includes CI: `.github/workflows/ci.yml` installs Chrome in every `test`
+ * shard and `browserRequired()` turns a miss there into a failure. It skips only
  * on a developer machine with no browser at all, and says so when it does.
  */
 test.skipIf(chromeResolution.path === null && !REQUIRED)(
