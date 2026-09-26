@@ -13,6 +13,8 @@
  *   approval_requests  escalations the approvals toolkit writes and the
  *                   approval page reads; empty on seed (#19)
  *   audit_log       append-only, one row per decision — see `audit-log.ts`
+ *   subject_changes append-only, one row per change to `subjects` made through
+ *                   `bun run users` — see `subjects.ts` (#31)
  *
  * Plus `policy_revision`, a single integer that triggers bump on every write to
  * `subjects`, `catalogue` or `policy_rules`. That number is how the in-memory
@@ -331,6 +333,32 @@ const SCHEMA = `
   CREATE TRIGGER IF NOT EXISTS audit_log_is_append_only_delete BEFORE DELETE ON audit_log
   BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
 
+  -- One row per change to the cast: a subject added or removed, a role or a
+  -- clearance changed (#31). Changing somebody's clearance is itself a
+  -- governance action, so it leaves a record the way a hook decision does.
+  -- Its own table rather than audit_log, because audit_log is the hooks'
+  -- decisions in GovernanceEvent's shape (DESIGN.md → Event contract) and
+  -- hook is one of access, pre or post. Not streamed to the panel.
+  -- NULL on the side of a change that had no row: role_before on an add,
+  -- role_after on a remove.
+  CREATE TABLE IF NOT EXISTS subject_changes (
+    seq              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id               TEXT    NOT NULL UNIQUE,
+    ts               TEXT    NOT NULL,
+    actor            TEXT    NOT NULL,
+    user_id          TEXT    NOT NULL,
+    action           TEXT    NOT NULL
+                             CHECK (action IN ('add', 'set-role', 'set-clearance', 'remove')),
+    role_before      TEXT,
+    role_after       TEXT,
+    clearance_before REAL,
+    clearance_after  REAL
+  );
+  CREATE TRIGGER IF NOT EXISTS subject_changes_is_append_only_update BEFORE UPDATE ON subject_changes
+  BEGIN SELECT RAISE(ABORT, 'subject_changes is append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS subject_changes_is_append_only_delete BEFORE DELETE ON subject_changes
+  BEGIN SELECT RAISE(ABORT, 'subject_changes is append-only'); END;
+
   -- Bumped on every write to the tables the in-memory policy cache is built
   -- from, so an edit from any connection is noticed on the next hook call.
   CREATE TABLE IF NOT EXISTS policy_revision (
@@ -386,8 +414,12 @@ const REVISION_TRIGGERS = ["subjects", "catalogue", "policy_rules", "output_rule
  * those columns held unrecoverable from the file rather than merely
  * unselectable. Two versions for one change because `VACUUM` cannot run inside
  * a transaction: see {@link MIGRATIONS} and {@link upgradeSchema}.
+ *
+ * Version 5 is #31: the `subject_changes` table. A new table only, which the
+ * replay of `SCHEMA` creates, so its step has nothing of its own to do; it is
+ * listed so the version it stamps is written down next to the others.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * What each version needs beyond a replay of `SCHEMA`, keyed by the version it
@@ -405,7 +437,13 @@ export const SCHEMA_VERSION = 4;
  * step marked `outsideTransaction` cannot be — `VACUUM` is the only statement
  * here that SQLite refuses inside one — so it runs after that transaction
  * commits and stamps its own version on its own, which is what keeps *it*
- * retried on the next boot if it fails. Such a step must therefore sort last.
+ * retried on the next boot if it fails. A transactional step numbered above
+ * it (#31's version 5, above #103's `VACUUM`) still runs inside the
+ * transaction, which is why every step here must be safe to apply twice: the
+ * transaction claims only the version below the deferred step, and
+ * `SCHEMA_VERSION` is stamped after the deferred step succeeds. A failed
+ * `VACUUM` therefore leaves the disk below it, and the next boot applies the
+ * later step again and retries the sweep.
  */
 interface Migration {
   /** The version this step brings the database to. */
@@ -469,6 +507,12 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
       db.exec("VACUUM");
       db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     },
+  },
+  {
+    to: 5,
+    // #31: `subject_changes`. `CREATE TABLE IF NOT EXISTS` in `SCHEMA`, which
+    // the upgrade replays inside its transaction, so nothing to add here.
+    apply: () => {},
   },
 ];
 
@@ -673,6 +717,9 @@ function upgradeSchema(db: Database, path: string): MigrationReport | null {
     db.exec(`PRAGMA user_version = ${migration.to}`);
     vacuumMs = (vacuumMs ?? 0) + (performance.now() - started);
   }
+  // Every transactional step above the deferred one committed with the
+  // transaction, so once the deferred step has too, the disk is current.
+  if (deferred.length > 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 
   return {
     from: found,
