@@ -66,6 +66,11 @@
  * own grant. `app-test/studio-entry.test.ts` fails if what reaches the model
  * differs between them.
  *
+ * And in one thing more: Studio's agent has a memory (`memory.ts`, #36),
+ * because Studio sends one message and a thread id and expects the agent to
+ * recall the rest. The chat route's has none, because the browser sends its
+ * history with every request.
+ *
  * ## Temperature 0, and one model id
  *
  * Temperature is pinned at the call site because `modelSettings` is a
@@ -148,10 +153,19 @@ export const TEMPERATURE = 0;
 /** A toolset, or the function that resolves one when the agent is asked for it (Studio). */
 export type AgentTools = Record<string, unknown> | (() => Promise<Record<string, unknown>>);
 
+/** A Mastra memory, or the function that resolves one when the agent is asked for it (Studio). */
+export type AgentMemory = NonNullable<ConstructorParameters<typeof Agent>[0]["memory"]>;
+
+/**
+ * `memory` is Studio's alone (#36). The chat route passes none: the browser
+ * sends its own history with every request (`conversation.ts`), and a memory
+ * on top of it would hand the model every earlier message twice.
+ */
 export function buildAgent(options: {
   model: ConstructorParameters<typeof Agent>[0]["model"];
   tools: AgentTools;
   instructions?: string;
+  memory?: AgentMemory;
 }): Agent {
   return new Agent({
     id: AGENT_ID,
@@ -162,6 +176,7 @@ export function buildAgent(options: {
     // rather than widen to it: an optional property may be absent, but it may
     // not be present and undefined.
     tools: options.tools as NonNullable<ConstructorParameters<typeof Agent>[0]["tools"]>,
+    ...(options.memory === undefined ? {} : { memory: options.memory }),
     defaultOptions: { modelSettings: { temperature: TEMPERATURE } },
   });
 }
