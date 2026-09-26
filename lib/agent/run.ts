@@ -63,6 +63,7 @@ import { approvalRequested } from "./escalation.ts";
 import { CORRELATION_TOKEN } from "../governance/correlation.ts";
 import type { ChatEvent } from "./events.ts";
 import { readNativeUrlElicitations, type NativeElicitationBridge, type NativeUrlElicitation } from "./native-elicitation.ts";
+import { NOTHING_WITHHELD, withholdSecrets, type WithheldSet } from "./withhold.ts";
 
 /** The ceiling on tool calls in one turn. High enough that a spin is visible as a spin. */
 export const MAX_STEPS = 8;
@@ -160,6 +161,13 @@ export interface RunOptions {
   nativeElicitation?: NativeElicitationBridge;
   /** Close the turn's tool boundary before any queued dispatch can start. */
   onAuthorization?: () => void;
+  /**
+   * Values that must not reach the page inside a tool call's arguments or
+   * result: this persona's tokens and the service's secrets (#37). Key names
+   * and token shapes are withheld whether or not they are listed here
+   * (`withhold.ts`).
+   */
+  secrets?: WithheldSet;
 }
 
 /** One message in a conversation handed to the agent. Mastra takes an array of these. */
@@ -177,6 +185,7 @@ export interface TurnMessage {
  */
 export async function runTurn(options: RunOptions): Promise<void> {
   const emit = options.emit;
+  const secrets = options.secrets ?? NOTHING_WITHHELD;
   let calls = 0;
 
   /**
@@ -260,10 +269,12 @@ export async function runTurn(options: RunOptions): Promise<void> {
           break;
         }
         calls += 1;
+        const inputs = withholdSecrets((payload.args ?? {}) as Record<string, unknown>, secrets);
         await emit({
           kind: "tool-call",
           tool,
-          inputs: (payload.args ?? {}) as Record<string, unknown>,
+          inputs: inputs.value,
+          ...(inputs.withheld > 0 ? { withheld: inputs.withheld } : {}),
         });
         continue;
       }
@@ -292,7 +303,18 @@ export async function runTurn(options: RunOptions): Promise<void> {
           await endOnAuthorization(tool, authorizationResult);
           break;
         }
-        await emit({ kind: "tool-result", tool });
+        // What the model received, which is `payload.result`: Mastra hands the
+        // same value to the provider as the tool message's output. Measured on
+        // #37 against the scripted model's recorded prompt, and asserted in
+        // `app-test/chat-wire.test.ts`. Secrets are withheld from the copy the
+        // page gets; the escalation below still reads the original.
+        const shown = withholdSecrets(payload.result ?? null, secrets);
+        await emit({
+          kind: "tool-result",
+          tool,
+          result: shown.value,
+          ...(shown.withheld > 0 ? { withheld: shown.withheld } : {}),
+        });
 
         // The escalation landed, so **the turn is over**. Nothing waits for the
         // decision; the page is given the request id so it can recognise the
@@ -377,25 +399,31 @@ export async function runTurn(options: RunOptions): Promise<void> {
         // control plane" about a socket error is the one lie this UI must not
         // tell — see `isHookDecision`.
         if (!isHookDecision(text)) {
-          await emit({ kind: "fault", tool, message: text });
+          // A fault's text can echo the arguments back, so it gets the same
+          // withholding as the arguments did (#37).
+          await emit({ kind: "fault", tool, message: withholdSecrets(text, secrets).value });
           continue;
         }
 
         const reason = remediationText(text);
-        await emit({ kind: "denied", tool, reason, ref: correlationRef(reason) });
+        // The rule author's sentence, verbatim, except a secret it may have
+        // echoed from the arguments (#37). The `[ref …]` token is not one.
+        const shownReason = withholdSecrets(reason, secrets).value;
+        await emit({ kind: "denied", tool, reason: shownReason, ref: correlationRef(shownReason) });
         continue;
       }
 
       // A failure of the run itself, not of a tool: the model refused, the
       // provider errored, the stream broke. Never a governance decision.
       if (chunk.type === "error") {
-        await emit({ kind: "error", message: failureText(payload.error ?? payload) });
+        await emit({ kind: "error", message: withholdSecrets(failureText(payload.error ?? payload), secrets).value });
       }
     }
   } catch (cause) {
     // An abort we asked for is not a failure. Anything else is, and says so.
     if (!endedOnEscalation && !endedOnAuthorization) {
-      await emit({ kind: "error", message: cause instanceof Error ? cause.message : String(cause) });
+      const message = cause instanceof Error ? cause.message : String(cause);
+      await emit({ kind: "error", message: withholdSecrets(message, secrets).value });
     }
   }
 

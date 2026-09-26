@@ -30,10 +30,23 @@
 export type ChatEvent =
   /** A run of assistant text. Concatenate in order; there is no other text source. */
   | { kind: "text"; text: string }
-  /** The model chose a tool. Emitted before the call is made, so a slow call is visible. */
-  | { kind: "tool-call"; tool: string; inputs: Record<string, unknown> }
-  /** The tool ran. The value is not streamed — the reply says what happened. */
-  | { kind: "tool-result"; tool: string }
+  /**
+   * The model chose a tool. Emitted before the call is made, so a slow call is visible.
+   *
+   * `withheld` counts values `withhold.ts` replaced before this was written;
+   * absent when it replaced none (#37).
+   */
+  | { kind: "tool-call"; tool: string; inputs: Record<string, unknown>; withheld?: number }
+  /**
+   * The tool ran, and `result` is what the model received from it (#37): the
+   * value after `/post` rewrote it, not what the toolkit returned. The chat
+   * shows it because the demo is about what crosses the wire.
+   *
+   * The one difference from what the model saw is secrets, which are replaced
+   * on the server before the event is written (`withhold.ts`); `withheld`
+   * counts them and is absent when there were none.
+   */
+  | { kind: "tool-result"; tool: string; result: unknown; withheld?: number }
   /**
    * The turn ended because an approval was requested, and the request id it is
    * waiting on (#20).

@@ -251,7 +251,7 @@ describe("a streamed reply is one message, not one message per chunk", () => {
       ...deltas("Rea"),
       ...deltas("ding it now."),
       { kind: "tool-call", tool: "Loan_GetLoan", inputs: { loan_id: "LN-2291" } },
-      { kind: "tool-result", tool: "Loan_GetLoan" },
+      { kind: "tool-result", tool: "Loan_GetLoan", result: { loan_id: "LN-2291", amount: 95000 } },
       ...deltas("It is for $95,000."),
       { kind: "done", calls: 1 },
     ]);
