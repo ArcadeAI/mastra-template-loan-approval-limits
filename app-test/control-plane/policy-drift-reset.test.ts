@@ -53,7 +53,6 @@ const baseConfig: HooksConfig = {
   approvalsStoreToken: "test-store-token",
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: POLL_MS,
   grantTtlSeconds: 900,
@@ -117,7 +116,10 @@ function scratch(): string {
 /**
  * Writes a `governance.db` seeded from `raw` and returns its path — the disk a
  * later boot finds. `seed()` is the same function bootstrapping uses, so this
- * produces exactly the rows that version of the fixture would have left.
+ * produces exactly the rows that version of the fixture would have left, and
+ * it is handed the fixture's cast as well: the disk of a deployment where
+ * `bun run users seed-demo` added the demo cast at the fixture's addresses
+ * (or one written before #33, which seeded them at first boot).
  */
 function diskSeededFrom(raw: unknown, config: HooksConfig = baseConfig): string {
   const path = join(scratch(), "governance.db");
@@ -605,7 +607,10 @@ describe("a user added by `bun run users` is not drift (#32)", () => {
     expect(drift?.unexpected).toEqual([]);
   });
 
-  test("a demo row deleted is still drift, and a rule the fixture never shipped still is", async () => {
+  // Changed by #33: a demo row that is absent was drift until the first boot
+  // stopped seeding the cast. Absent is now the ordinary state (never seeded,
+  // or removed), so only a demo row that is on disk is compared.
+  test("a demo row deleted is not drift, and a rule the fixture never shipped still is (#33)", async () => {
     const instance = boot(diskSeededFrom(rawFixture));
     addRealUser(instance.db);
     instance.db.run("DELETE FROM subjects WHERE user_id = ?", [DANA]);
@@ -617,7 +622,8 @@ describe("a user added by `bun run users` is not drift (#32)", () => {
     await Bun.sleep(POLL_MS * 8);
 
     const drift = (await health(instance.base)).fixture_drift;
-    expect(drift?.missing).toEqual([`subjects:${DANA}`]);
+    expect(drift?.missing).toEqual([]);
+    expect(drift?.ids).toEqual(["policy_rules:pre.planted"]);
     expect(drift?.unexpected).toEqual(["policy_rules:pre.planted"]);
   });
 });
@@ -632,8 +638,9 @@ describe("a reset keeps real users' subjects rows (#32)", () => {
 
       const response = await reset(instance.base, { mode });
       expect(response.status).toBe(200);
-      const body = (await response.json()) as { kept: { subjects: string[] } };
+      const body = (await response.json()) as { kept: { subjects: string[] }; demo_cast: { subjects: string[] } };
       expect(body.kept.subjects).toEqual([REAL_USER.user_id]);
+      expect(body.demo_cast.subjects).toEqual([DANA, "bob@bank.example", "charlie@bank.example", "michael@bank.example"]);
 
       expect(subjectRow(instance.db, REAL_USER.user_id)).toEqual(REAL_USER);
       expect(subjectRow(instance.db, DANA)?.clearance).toBe(50_000);
@@ -651,6 +658,40 @@ describe("a reset keeps real users' subjects rows (#32)", () => {
     const body = (await (await reset(instance.base, { mode: "demo" })).json()) as { kept: { subjects: string[] } };
     expect(body.kept.subjects).toEqual([]);
     expect((await health(instance.base)).counts.subjects).toBe(4);
+  });
+});
+
+describe("a first boot has no subjects, and neither drift nor a reset adds any (#33)", () => {
+  test("no drift, healthy, and a reset in either mode leaves nobody behind it", async () => {
+    const path = join(scratch(), "governance.db");
+    const instance = boot(path);
+    expect((await health(instance.base)).counts.subjects).toBe(0);
+    expect((await health(instance.base)).fixture_drift).toBeNull();
+    expect((await health(instance.base)).status).toBe("healthy");
+
+    for (const mode of ["policy", "demo"] as const) {
+      const body = (await (await reset(instance.base, { mode })).json()) as {
+        kept: { subjects: string[] };
+        demo_cast: { subjects: string[] };
+      };
+      expect(body.kept.subjects).toEqual([]);
+      expect(body.demo_cast.subjects).toEqual([]);
+      expect((await health(instance.base)).counts.subjects).toBe(0);
+    }
+    expect(instance.logs.some((line) => line.includes("no demo cast on disk"))).toBe(true);
+  });
+
+  test("the demo cast at the fixture's addresses is put back to the demo's clearance, one member at a time", async () => {
+    const instance = boot(join(scratch(), "governance.db"));
+    addSubject(instance.db, { user_id: DANA, display_name: "Alice", role: "loan_officer", clearance: 75_000 }, "cli:test");
+    await Bun.sleep(POLL_MS * 8);
+    expect((await health(instance.base)).fixture_drift?.changed).toEqual([`subjects:${DANA}`]);
+
+    const body = (await (await reset(instance.base, { mode: "policy" })).json()) as { demo_cast: { subjects: string[] } };
+    expect(body.demo_cast.subjects).toEqual([DANA]);
+    expect(subjectRow(instance.db, DANA)?.clearance).toBe(50_000);
+    expect((await health(instance.base)).counts.subjects).toBe(1);
+    expect((await health(instance.base)).fixture_drift).toBeNull();
   });
 });
 
@@ -672,10 +713,12 @@ describe("a demo subject removed with `bun run users remove` stays removed (#32,
       removeSubject(instance.db, BOB, "cli:test");
 
       const body = (await (await reset(instance.base, { mode })).json()) as {
-        removed: { subjects: string[] };
+        demo_cast: { subjects: string[] };
         kept: { subjects: string[] };
       };
-      expect(body.removed.subjects).toEqual([BOB]);
+      // Changed by #33: the response names the demo cast it rewrote, which is
+      // everybody but Bob, instead of naming Bob as removed.
+      expect(body.demo_cast.subjects).toEqual([DANA, "charlie@bank.example", "michael@bank.example"]);
       expect(subjectRow(instance.db, BOB)).toBeNull();
       expect(subjectRow(instance.db, DANA)?.clearance).toBe(50_000);
       expect((await health(instance.base)).fixture_drift).toBeNull();
@@ -692,21 +735,24 @@ describe("a demo subject removed with `bun run users remove` stays removed (#32,
     await Bun.sleep(POLL_MS * 8);
     expect((await health(instance.base)).fixture_drift?.changed).toEqual([`subjects:${BOB}`]);
 
-    const body = (await (await reset(instance.base, { mode: "demo" })).json()) as { removed: { subjects: string[] } };
-    expect(body.removed.subjects).toEqual([]);
+    const body = (await (await reset(instance.base, { mode: "demo" })).json()) as { demo_cast: { subjects: string[] } };
+    expect(body.demo_cast.subjects).toContain(BOB);
     expect(subjectRow(instance.db, BOB)?.clearance).toBe(0);
     expect((await health(instance.base)).fixture_drift).toBeNull();
   });
 
-  test("deleted by hand, with no recorded removal, it is still missing drift and a reset re-seeds it", async () => {
+  // Changed by #33: this was missing drift and a reset re-seeded the row. With
+  // no seeded cast, absent is absent however it happened: not drift, and not
+  // added back. `bun run users seed-demo` is what adds a demo person.
+  test("deleted by hand, with no recorded removal, it is not drift and a reset does not add it back (#33)", async () => {
     const instance = boot(diskSeededFrom(rawFixture));
     instance.db.run("DELETE FROM subjects WHERE user_id = ?", [BOB]);
     await Bun.sleep(POLL_MS * 8);
-    expect((await health(instance.base)).fixture_drift?.missing).toEqual([`subjects:${BOB}`]);
+    expect((await health(instance.base)).fixture_drift).toBeNull();
 
-    const body = (await (await reset(instance.base, { mode: "policy" })).json()) as { removed: { subjects: string[] } };
-    expect(body.removed.subjects).toEqual([]);
-    expect(subjectRow(instance.db, BOB)).toEqual(BOB_SUBJECT);
+    const body = (await (await reset(instance.base, { mode: "policy" })).json()) as { demo_cast: { subjects: string[] } };
+    expect(body.demo_cast.subjects).not.toContain(BOB);
+    expect(subjectRow(instance.db, BOB)).toBeNull();
     expect((await health(instance.base)).fixture_drift).toBeNull();
   });
 });

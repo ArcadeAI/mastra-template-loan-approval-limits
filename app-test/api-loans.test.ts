@@ -50,6 +50,7 @@ import {
   startIdentityHarness,
   type IdentityHarness,
 } from "./identity-harness.ts";
+import { seedDemoSubjects } from "./demo-cast.ts";
 
 /** The $88,000 control application, pending in the fixture. Charlie decides it below. */
 const CONTROL_LOAN = "LN-2299";
@@ -150,7 +151,6 @@ function startControlPlane(dbPath: string) {
     approvalsStoreToken: STORE_TOKEN,
     loanToolkit: "Loan",
     approvalsToolkit: "Approvals",
-    personaEmails: Object.fromEntries(Object.entries(PEOPLE).map(([key, person]) => [key, person.email])),
     deadlineMs: 2500,
     policyPollMs: 1000,
     grantTtlSeconds: 900,
@@ -158,6 +158,8 @@ function startControlPlane(dbPath: string) {
     resetToken: "",
   };
   const db = openGovernance(dbPath, config);
+  // A first boot seeds nobody (#33); the demo cast is added as `seed-demo` adds it.
+  seedDemoSubjects(db);
   const image = loadSeed(config);
   const cache = createPolicyCache(db, {
     log: () => {},

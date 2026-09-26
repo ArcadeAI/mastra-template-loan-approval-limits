@@ -40,6 +40,7 @@ import { LOAN_POLL_INTERVAL_MS } from "../lib/loan-context/loans.ts";
 import { SESSION_COOKIE, type Session } from "../lib/identity/session.ts";
 import { appIdentityEnv } from "./app-identity.ts";
 import { Browser, PEOPLE, SESSION_SECRET, signInAs } from "./identity-harness.ts";
+import { seedDemoGovernance } from "./demo-cast.ts";
 
 const WEB = join(import.meta.dir, "..");
 
@@ -79,6 +80,9 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
       // Each child gets its port inside `serveOnFreePort` / `startChrome`, which
       // start it again on a new one if another process took it first (#9).
       const dir = workspace;
+      // A first boot seeds nobody (#33): the board names who approved from the
+      // roster, so the demo cast's subjects go into the file the app opens.
+      seedDemoGovernance(join(dir, "governance.db"));
       const web = await serveOnFreePort(async (webPort) => {
         // The app is its own identity provider since #6: its own throwaway
         // idp.db, client C minted in it, and APP_PUBLIC_HOST its own origin.
@@ -94,8 +98,8 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
             NODE_ENV: "development",
             PORT: String(webPort),
             // The app mounts the control plane since #4; a throwaway one, not
-            // a governance.db in the repo.
-            GOVERNANCE_DB_PATH: ":memory:",
+            // a governance.db in the repo, with the demo cast in it (above).
+            GOVERNANCE_DB_PATH: join(dir, "governance.db"),
             SESSION_SECRET,
             ...appIdentity.env,
             // The app's loan module: its own `loans.db` in this test's
@@ -105,10 +109,6 @@ test.skipIf(chromeResolution.path === null && !REQUIRED)(
             LOANS_DB_PATH: join(dir, "loans.db"),
             IDENTITY_HOST: `localhost:${webPort}`,
             // So the decision line can name the person rather than the address.
-            PERSONA_LOAN_OFFICER_EMAIL: PEOPLE.dana.email,
-            PERSONA_CREDIT_ANALYST_EMAIL: PEOPLE.sam.email,
-            PERSONA_VP_CREDIT_EMAIL: PEOPLE.riley.email,
-            PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: PEOPLE.morgan.email,
             // The gateway is not configured on purpose: nothing about the loan
             // cards depends on hop 1 since #157, and a page that still needed it
             // would fail here rather than quietly keep working.

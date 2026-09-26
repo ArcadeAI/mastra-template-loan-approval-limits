@@ -22,7 +22,7 @@ import { dirname, join } from "node:path";
 
 import { serveOnFreePort } from "../cdp.ts";
 import { freePort, spawnChild } from "../child.ts";
-import { loadPeople } from "../../lib/identity/provider/db.ts";
+import { DEMO_PEOPLE, seedDemoIdentity } from "../demo-cast.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-${crypto.randomUUID()}`, "idp.db");
@@ -35,17 +35,17 @@ const SECRET = "test-secret-".padEnd(48, "x");
 
 // The fixture's own addresses: any persona email variable in the developer's shell is
 // deliberately not passed to the child, so the test is about the fixture.
-const people = loadPeople({});
-const dana = people.find((p) => p.persona === "dana")!;
-const riley = people.find((p) => p.persona === "riley")!;
+const people = DEMO_PEOPLE;
+const dana = people.find((p) => p.key === "dana")!;
+const riley = people.find((p) => p.key === "riley")!;
 // Used only by the rotation test. Consent is recorded per person, per client,
 // and outlives a cookie jar — so a test that walks the flow as someone else's
 // persona silently changes whether *their* test sees the consent page.
-const morgan = people.find((p) => p.persona === "morgan")!;
+const morgan = people.find((p) => p.key === "morgan")!;
 // Only the revocation test signs in as Bob, which keeps that test's consent
 // screen predictable: consent is recorded per person per client and outlives a
 // cookie jar, so sharing a persona would make one test depend on another.
-const sam = people.find((p) => p.persona === "sam")!;
+const sam = people.find((p) => p.key === "sam")!;
 
 let child: Subprocess;
 let baseUrl: string;
@@ -150,6 +150,9 @@ beforeAll(async () => {
   ) as Record<string, string>;
 
   mkdirSync(dirname(logPath), { recursive: true });
+  // Nobody is seeded at first boot (#33): the demo cast is added the way
+  // `bun run users seed-demo` adds it, before the provider opens the file.
+  await seedDemoIdentity(dbPath);
 
   // On a port chosen inside `serveOnFreePort`, which starts the provider again
   // on a new one if another process took it first (#9).

@@ -34,6 +34,7 @@ import {
   SchemaTooNewError,
   SchemaTooOldError,
 } from "../../lib/identity/provider/db.ts";
+import { DEMO_PEOPLE } from "../demo-cast.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -116,13 +117,13 @@ describe("idempotentSchema", () => {
   });
 
   test("replaying it against a database that already has everything is a no-op", async () => {
-    const db = await openPeople(":memory:");
+    const db = await openPeople(":memory:", DEMO_PEOPLE.map(({ name, email, password }) => ({ name, email, password })));
     const before = tables(db);
 
     db.exec(idempotentSchema(await Bun.file(join(ROOT, "lib", "identity", "provider", "schema.sql")).text()));
 
     expect(tables(db)).toEqual(before);
-    expect(countPeople(db)).toBe(4);
+    expect(countPeople(db)).toBe(DEMO_PEOPLE.length);
     db.close();
   });
 });

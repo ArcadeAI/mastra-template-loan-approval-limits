@@ -13,14 +13,19 @@ import { CORRELATION_TOKEN, correlationId } from "../../lib/control-plane/correl
 import { handleAccess, handlePost, handlePre, type HandlerContext } from "../../lib/control-plane/handlers.ts";
 import { createPolicyCache, type CacheState } from "../../lib/control-plane/policy-cache.ts";
 import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 const DANA = "alice@bank.example";
 const SAM = "bob@bank.example";
 const RILEY = "charlie@bank.example";
 const MORGAN = "michael@bank.example";
 
-const governance = (): Database =>
-  openGovernance(":memory:", { loanToolkit: "Loan", approvalsToolkit: "Approvals", personaEmails: {} });
+/** A fresh governance.db seeds nobody (#33); these suites act as the demo cast. */
+const governance = (): Database => {
+  const db = openGovernance(":memory:", { loanToolkit: "Loan", approvalsToolkit: "Approvals" });
+  seedDemoSubjects(db);
+  return db;
+};
 
 let n = 0;
 

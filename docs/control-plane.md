@@ -209,7 +209,12 @@ The tables you can read at a glance, because one gets edited live on stage:
 | `subject_changes` | one row per change `bun run users` makes to `subjects` — added, removed, a role or a clearance changed — with before and after, append-only (#31). Not `audit_log`, whose rows are hook decisions, and not on the panel | never |
 
 Seeded from `lib/control-plane/fixtures/governance.json` **only when the database has no
-schema** (decided on #29). It sits wherever `GOVERNANCE_DB_PATH` points (`./governance.db` by
+schema** (decided on #29). **The seed writes the policy and nobody** (#33): `catalogue`,
+`policy_rules` and `output_rules` come from the fixture, and `subjects` starts empty, the same as
+`idp.db`. People are added with `bun run users add`, or the demo cast with
+`bun run users seed-demo`. The fixture's `subjects` are that demo cast, at their `@bank.example`
+addresses, and are written only by `seed-demo`: seeding them at first boot would leave four
+subjects nobody can sign in as, and approval routing picks from every subject. It sits wherever `GOVERNANCE_DB_PATH` points (`./governance.db` by
 default), and a deployment keeps it on a persistent disk, so a clearance raised in act 1 is
 still raised in act 3 and after a restart. Resetting is `POST /admin/reset` (below), never a
 redeploy.
@@ -307,11 +312,25 @@ fixed is the silence.
 **A subject the fixture does not seed is not drift** (#32). `bun run users add` writes a
 `subjects` row for every real user, and a `/health` that went degraded each time somebody was
 invited would be a warning that is always on. So on `subjects` only the fixture's own rows are
-compared: a demo row edited by hand is `changed`, one deleted by hand is `missing`, and a row for
-anybody else is ignored. A demo subject taken out with `bun run users remove` is not `missing`:
-its latest `subject_changes` row is the `remove`, which is a record of intent, and a later `add`
-or `seed-demo` makes it the demo cast's again. A rule or a catalogue entry the fixture does not
-ship is still `unexpected`.
+compared, and only when they are on disk (#33): a demo row edited by hand is `changed`, and a row
+for anybody else is ignored. A demo row that is absent is never `missing`, because a first boot
+seeds none of them; it was never seeded, or `bun run users remove` took it out, or somebody
+deleted it by hand, and none of those is the fixture failing to reach the disk. A rule or a
+catalogue entry the fixture does not ship is still `unexpected`, and one missing is still
+`missing`.
+
+**The demo cast is known by the fixture's addresses.** `bun run users seed-demo --alice
+you@company.com` adds Alice with the demo's role and clearance under your address, and from then
+on she is a real user like any other: a reset keeps her clearance as it is instead of putting the
+demo's back, and her row is not compared to the fixture. `seed-demo` says so when it adds her.
+Seed the cast at the `@bank.example` addresses to keep the reset and the drift check on it.
+
+**Who can sign in, against who the hooks know.** The app's `/health` (not this module's) holds
+`idp.db`'s people against `subjects` and reports any difference as `user_drift`, by address:
+`identity_without_subject` (can sign in, denied at every hook) and `subject_without_identity`
+(cannot sign in, and approval routing can still pick them). Either makes `/health` `degraded`.
+`bun run users` writes both halves or neither, so this only happens when one half is deleted by
+hand, or one disk is recreated without the other.
 
 **The outage.** `/health` used to answer 503 while the policy failed to compile. The stage
 demo's host health-checked that path, so when #89's compile guard met a disk still holding the
@@ -344,15 +363,15 @@ curl -fsS -X POST "https://$APP_PUBLIC_HOST/hooks/admin/reset" \
 
 | mode | replaces | leaves |
 |---|---|---|
-| `policy` (the endpoint's default) | the fixture's `subjects` rows, `catalogue`, `policy_rules`, `output_rules` | grants, approval requests, audit log, every subject the fixture does not seed |
+| `policy` (the endpoint's default) | the fixture's `subjects` rows that are on disk, `catalogue`, `policy_rules`, `output_rules` | grants, approval requests, audit log, every subject the fixture does not seed |
 | `demo` | the above, **and empties** `grants`, `approval_requests`, `audit_log` | every subject the fixture does not seed |
 
 Neither mode deletes a real user (#32): a `subjects` row whose address the fixture does not seed
 was added by `bun run users`, and both modes keep it as it was and name it in the response's
-`kept.subjects`. Neither mode brings back a demo subject removed with `bun run users remove`
-either: it is listed in `removed.subjects` and left out, so a removed person has neither half
-after a reset. A demo row deleted by hand, with no recorded removal, is written back. Neither
-mode touches `subject_changes`, which is append-only and is what the next reset reads.
+`kept.subjects`. Neither mode adds anybody (#33): a demo cast member on disk is put back to the
+demo's role and clearance and named in `demo_cast.subjects`, and one who is not on disk — never
+seeded, removed with `bun run users remove`, or deleted by hand — stays absent. Neither mode
+touches `subject_changes`, which is append-only.
 
 One transaction, then an immediate cache reload, so the `revision` in the response is the
 revision being served rather than one that will be shortly.

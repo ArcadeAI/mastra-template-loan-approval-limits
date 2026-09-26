@@ -409,6 +409,14 @@ describe("users remove", () => {
   });
 });
 
+describe("a first boot (#33)", () => {
+  test("seeds nobody on either side: no identity, no subject, no change recorded", async () => {
+    const run = await ok(["list"]);
+    expect(run.stdout.trim()).toBe("no users. Add one with `bun run users add`.");
+    expect(counts()).toEqual({ people: 0, subjects: 0, changes: 0 });
+  });
+});
+
 describe("users list", () => {
   test("shows both halves side by side, and says what a half-present user cannot do", async () => {
     await ok(["add", "xan@example.com", "--name", "Xan", "--role", "vp_credit", "--clearance", "250000"]);
@@ -466,6 +474,27 @@ describe("users seed-demo", () => {
     expect(run.code).toBe(2);
     expect(run.stderr).toContain("pass --alice, --bob, --charlie, --michael, or answer the prompts");
     expect(counts()).toEqual(before);
+  });
+
+  // #33: the demo cast is known by the fixture's addresses. Seeded anywhere
+  // else, a demo person is a real user from then on, and seed-demo says so.
+  test("under addresses that are not the fixture's, each one is said to count as a real user", async () => {
+    const run = await ok(["seed-demo", ...FLAGS]);
+    for (const [email, name] of CAST) {
+      expect(run.stdout).toContain(`real user  ${email} is not the fixture's`);
+      expect(run.stdout).toContain(`so from here on ${name} counts as a real user`);
+    }
+    expect(run.stdout.match(/^ {2}real user {2}/gm)).toHaveLength(4);
+    expect(run.stdout).toContain("`bun run reset` keeps their role and clearance as they are");
+  });
+
+  test("at the fixture's own addresses, nobody is called a real user", async () => {
+    const run = await ok([
+      "seed-demo", "--alice", "alice@bank.example", "--bob", "bob@bank.example",
+      "--charlie", "charlie@bank.example", "--michael", "michael@bank.example",
+    ]);
+    expect(run.stdout).not.toContain("real user");
+    expect(run.stdout.match(/^ {2}password {3}\S+$/gm)).toHaveLength(4);
   });
 
   test("refuses the same email twice", async () => {

@@ -34,6 +34,7 @@ import { readIdentitySurface, type IdentitySurface } from "../lib/config.ts";
 import { serveOnFreePort } from "./cdp.ts";
 import { spawnChild } from "./child.ts";
 import { readPort } from "./harness.ts";
+import { seedDemoGovernance } from "./demo-cast.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -198,6 +199,17 @@ export async function startAgentHarness(
     { ready: async (port, output) => output().includes(`listening on :${port}`), timeoutMs: 20_000 },
   );
   const idpHost = `localhost:${idpPort}`;
+
+  // A first boot seeds nobody (#33): the demo cast goes into the file first,
+  // under the toolkit names this control plane is about to be given.
+  const hooksEnv: Record<string, string | undefined> = options.hooksEnv ?? {};
+  const governancePath = hooksEnv.GOVERNANCE_DB_PATH ?? join(workspace, "governance.db");
+  if (governancePath !== ":memory:") {
+    seedDemoGovernance(governancePath, {
+      loanToolkit: hooksEnv.ARCADE_LOAN_TOOLKIT ?? LOAN_TOOLKIT,
+      approvalsToolkit: hooksEnv.ARCADE_APPROVALS_TOOLKIT ?? APPROVALS_TOOLKIT,
+    });
+  }
 
   const hooks = spawnChild({
     cmd: ["bun", join(REPO_ROOT, "scripts", "control-plane.ts")],

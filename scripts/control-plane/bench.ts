@@ -11,7 +11,8 @@
  *   bun scripts/control-plane/bench.ts
  */
 import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
-import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { loadSeed, openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { addSubject } from "../../lib/control-plane/subjects.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
 
 const SECRET = "bench";
@@ -20,7 +21,9 @@ const DANA = "alice@bank.example";
 const V = [{ version: "1.0.0" }];
 const LOAN_TOOLS = { SearchLoans: V, GetLoan: V, ApproveLoan: V, DenyLoan: V };
 
-const db = openGovernance(":memory:", { loanToolkit: "Loan", approvalsToolkit: "Approvals", personaEmails: {} });
+const db = openGovernance(":memory:", { loanToolkit: "Loan", approvalsToolkit: "Approvals" });
+// A fresh governance.db seeds nobody (#33); the bench acts as the demo cast.
+for (const subject of loadSeed({ loanToolkit: "Loan", approvalsToolkit: "Approvals" }).subjects) addSubject(db, subject, "bench");
 const cache = createPolicyCache(db);
 cache.start();
 const server = createServer({
@@ -31,7 +34,6 @@ const server = createServer({
     approvalsStoreToken: "bench-store-token",
     loanToolkit: "Loan",
     approvalsToolkit: "Approvals",
-    personaEmails: {},
     deadlineMs: 2500,
     policyPollMs: 250,
     grantTtlSeconds: 900,
@@ -149,7 +151,7 @@ const sizeOf = (source: typeof db, name: string): number => {
   return statSync(path).size;
 };
 
-const empty = openGovernance(":memory:", { loanToolkit: "Loan", approvalsToolkit: "Approvals", personaEmails: {} });
+const empty = openGovernance(":memory:", { loanToolkit: "Loan", approvalsToolkit: "Approvals" });
 const baseline = sizeOf(empty, "empty.db");
 empty.close();
 

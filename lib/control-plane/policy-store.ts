@@ -4,7 +4,8 @@
  * Six tables a presenter can read at a glance, because one of them gets
  * edited live on stage:
  *
- *   subjects        the cast: user_id (email), display_name, role, clearance
+ *   subjects        the people: user_id (email), display_name, role, clearance.
+ *                   Empty on seed since #33: `bun run users` adds every row
  *   catalogue       every governed tool and the arguments a call must supply
  *   policy_rules    /access and /pre rules — one row each, JSON only where the
  *                   schema is genuinely nested (subjects, conditions)
@@ -59,8 +60,6 @@ const TOOLKIT_PLACEHOLDERS = { $LOAN: "loanToolkit", $APPROVALS: "approvalsToolk
 export interface SeedOptions {
   loanToolkit: string;
   approvalsToolkit: string;
-  /** Persona key → email, from the shared role-variable contract. Missing keys keep the fixture's address. */
-  personaEmails: Record<string, string>;
 }
 
 const seedSubjectSchema = z
@@ -89,14 +88,21 @@ const fixtureSchema = z
 
 export interface Seed {
   catalogue: ToolCatalogue;
+  /**
+   * The demo cast (#33): Alice, Bob, Charlie and Michael at the fixture's own
+   * addresses. **Not written by the first boot**, which seeds nobody:
+   * `bun run users seed-demo` is what adds them. Read by `seed-demo` for their
+   * names, roles and clearances, and by the reset and the drift check, which
+   * rewrite and compare a demo row only where it is on disk.
+   */
   subjects: Subject[];
   policy_rules: PolicyRule[];
   output_rules: OutputRule[];
 }
 
 /**
- * The fixture with the configured toolkit names and persona emails substituted
- * in, parsed through the strict schemas. Pure; exported so a test can check the
+ * The fixture with the configured toolkit names substituted in, parsed
+ * through the strict schemas. Pure; exported so a test can check the
  * seed compiles before anything touches a database.
  */
 export function loadSeed(options: SeedOptions, raw: unknown = fixture): Seed {
@@ -118,14 +124,12 @@ export function loadSeed(options: SeedOptions, raw: unknown = fixture): Seed {
     return value;
   };
 
-  const subjects = parsed.subjects.map(({ persona, ...subject }) => {
-    const override = options.personaEmails[persona.toLowerCase()];
-    // Lowercased on the way in (#58), by the same rule `subjectKey` applies on
-    // the way out: the role variable carries whatever capitalisation the
-    // Arcade account was invited under, and a roster keyed on
-    // `Alice@…` is a roster the lookup can never hit.
-    const user_id = (override ?? subject.user_id).trim().toLowerCase();
-    const input: SubjectInput = { ...subject, user_id };
+  // The `persona` key is the fixture's internal name for a demo cast member
+  // (DESIGN.md → Cast) and is not a column. The address is lowercased on the
+  // way in (#58), by the same rule `subjectKey` applies on the way out: a
+  // roster keyed on `Alice@…` is a roster the lookup can never hit.
+  const subjects = parsed.subjects.map(({ persona: _persona, ...subject }) => {
+    const input: SubjectInput = { ...subject, user_id: subject.user_id.trim().toLowerCase() };
     return Subject.parse(input);
   });
 
@@ -527,6 +531,13 @@ function columnExists(db: Database, table: string, column: string): boolean {
  * Opens `governance.db`: seeds it from the fixture when it has no schema, and
  * otherwise brings its schema up to `SCHEMA_VERSION` without touching a row.
  *
+ * **The seed writes the policy and no people** (#33). The catalogue and the
+ * rules come from the fixture; `subjects` starts empty, the same as `idp.db`,
+ * and `bun run users add` or `bun run users seed-demo` fills it. Seeding the
+ * demo cast here would leave four subjects nobody can sign in as, and approval
+ * routing picks from every subject: a fresh deployment would route a $95K
+ * request to `charlie@bank.example`, who does not exist.
+ *
  * The two paths are deliberately separate. On a fresh database the DDL and the
  * seed rows go in as *one* transaction — see `seed()` for why that line matters
  * and what breaks if it is crossed. On an existing database only the DDL runs,
@@ -557,7 +568,7 @@ export function openGovernance(
     if (hasSchema(db)) {
       const report = upgradeSchema(db, path);
       if (report !== null) onMigration?.(report);
-    } else seed(db, loadSeed(seedOptions));
+    } else seed(db, { ...loadSeed(seedOptions), subjects: [] });
   } catch (cause) {
     // Leave no half-open handle behind: the caller is about to exit, and on a
     // hosted deployment a lingering WAL lock is one more thing between a crash-looping
@@ -806,67 +817,53 @@ export function seed(db: Database, data: Seed): void {
  * `DELETE` and not `DROP`: the schema, its indexes and the revision triggers
  * are the database's, not the fixture's, and a reset is about rows.
  *
- * **`subjects` is replaced only where the fixture has a row** (#32). Anyone
- * else in the table was added by `bun run users` — a real person, whose role
- * and clearance are the operator's, not the demo's — and a reset that deleted
- * them would leave every real user failing closed with "must register the
- * identity" after a reset meant to put the *demo* back. The fixture's own
- * rows are deleted and written again, so a demo clearance raised on stage
- * still goes back to the seeded one.
+ * **`subjects` is rewritten only where the fixture has a row that is on
+ * disk** (#32, #33). Anyone else in the table was added by `bun run users` — a
+ * real person, whose role and clearance are the operator's, not the demo's —
+ * and a reset that deleted them would leave every real user failing closed
+ * with "must register the identity" after a reset meant to put the *demo*
+ * back. A demo cast member who is on disk is deleted and written again, so a
+ * demo clearance raised on stage still goes back to the seeded one.
  *
- * **Except one the operator removed** (#32, round 1). A demo subject whose
- * latest `subject_changes` row is `remove` was taken out with
- * `bun run users remove`, which deletes the identity too; writing the subject
- * back would leave a role and a clearance for somebody who cannot sign in, and
- * would undo on every reset a removal somebody asked for. So it is left out,
- * and a later `add` (`bun run users add` or `seed-demo`) makes it the demo
- * cast's again. A demo row deleted by hand has no such record and is written
- * back, which is what makes its `missing` drift fixable by a reset.
+ * **A demo cast member who is not on disk stays absent** (#33). The first boot
+ * seeds nobody, so absent is the ordinary state: the cast was never seeded,
+ * or `bun run users remove` took them out. Either way a reset that wrote them
+ * would be a reset adding people, four subjects nobody can sign in as, which
+ * approval routing would then pick from. `bun run users seed-demo` is what
+ * adds them.
  */
 export function replacePolicy(db: Database, data: Seed): void {
   db.transaction(() => {
-    const removed = removedSubjects(db);
+    const present = demoSubjectsOnDisk(db, data);
     const deleteSubject = db.prepare<unknown, [string]>("DELETE FROM subjects WHERE user_id = ?");
     try {
-      for (const subject of data.subjects) deleteSubject.run(subject.user_id);
+      for (const userId of present) deleteSubject.run(userId);
     } finally {
       deleteSubject.finalize();
     }
     for (const table of ["catalogue", "policy_rules", "output_rules"]) {
       db.exec(`DELETE FROM ${table}`);
     }
-    insertPolicy(db, { ...data, subjects: data.subjects.filter((subject) => !removed.has(subject.user_id)) });
+    const rewrite = new Set(present);
+    insertPolicy(db, { ...data, subjects: data.subjects.filter((subject) => rewrite.has(subject.user_id)) });
   })();
 }
 
 /**
- * Every `user_id` whose most recent `subject_changes` row is a `remove`: the
- * people `bun run users remove` took out and nobody has added since (#31).
- * Read by the reset, which does not re-seed them, and by the drift check,
- * which does not call their absence drift. Empty on a disk whose schema
- * predates `subject_changes`, which has recorded no removals.
+ * The demo cast members on disk, by `user_id`: the fixture's subjects that
+ * `seed-demo` (or a hand-written row) put there. What a reset rewrites, and
+ * says it rewrote.
  */
-export function removedSubjects(db: Database): Set<string> {
-  const table = db
-    .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subject_changes'")
-    .get();
-  if (table === null) return new Set();
-  const rows = db
-    .query<{ user_id: string }, []>(
-      `SELECT c.user_id FROM subject_changes c
-       WHERE c.action = 'remove'
-         AND c.seq = (SELECT MAX(seq) FROM subject_changes WHERE user_id = c.user_id)`,
-    )
-    .all();
-  return new Set(rows.map((row) => row.user_id));
-}
-
-/** The demo cast members `bun run users remove` took out: what a reset does not re-seed, and says so. */
-export function removedDemoSubjects(db: Database, data: Seed): string[] {
-  const removed = removedSubjects(db);
+export function demoSubjectsOnDisk(db: Database, data: Seed): string[] {
+  const onDisk = new Set(
+    db
+      .query<{ user_id: string }, []>("SELECT user_id FROM subjects")
+      .all()
+      .map((row) => row.user_id),
+  );
   return data.subjects
     .map((subject) => subject.user_id)
-    .filter((userId) => removed.has(userId))
+    .filter((userId) => onDisk.has(userId))
     .sort();
 }
 

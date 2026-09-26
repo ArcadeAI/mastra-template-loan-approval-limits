@@ -204,9 +204,8 @@ get right and the first thing to check when a rule silently does nothing.
 
 `user_id` is an **email**, lowercase, and it is the join key: Arcade's `user_id`, the
 OAuth subject, and the actor your API records are the same string. If they diverge,
-your audit trail is fiction. The role-based persona email variables override each address at seed time;
-the fixture's own addresses are the local-run fallback and must match
-`lib/identity/provider/fixtures/people.json`.
+your audit trail is fiction. These rows are the demo cast: a first boot seeds none of them,
+and `bun run users seed-demo` adds them (#33).
 
 `clearance` is the one numeric authority this template ships with. Replace it with your
 own scalar or add attributes — the engine reads `subjects.roles`,
@@ -547,10 +546,8 @@ bun test ./packages/governance-core/test/no-app-dependencies.test.ts \
 grep -ri loan packages/
 ```
 
-On `ba0c1fe` every match is one variable name, `PERSONA_LOAN_OFFICER_EMAIL`, in
-`packages/policy-schema/contract/persona-email-contract.ts` and its test (which also
-carries a deliberate misspelling of it). That is a role title in the persona contract,
-not domain vocabulary; anything else this prints is a finding.
+Since #33 removed the persona email contract, it prints nothing; anything it prints is a
+finding.
 
 The domain-specific acts 3 and 4 pin now lives beside the fixture in
 `app-test/loans/acts-3-4-redaction.test.ts`. A forker replaces that test with the

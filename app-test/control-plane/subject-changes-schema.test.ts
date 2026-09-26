@@ -19,8 +19,9 @@ import {
   type SeedOptions,
 } from "../../lib/control-plane/policy-store.ts";
 import { addSubject, subjectChanges } from "../../lib/control-plane/subjects.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
-const OPTIONS: SeedOptions = { loanToolkit: "Loan", approvalsToolkit: "Approvals", personaEmails: {} };
+const OPTIONS: SeedOptions = { loanToolkit: "Loan", approvalsToolkit: "Approvals" };
 
 function withDir(body: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "cg-subject-changes-"));
@@ -34,10 +35,15 @@ function withDir(body: (dir: string) => void): void {
 const tableExists = (db: Database, name: string) =>
   db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)!.n === 1;
 
-/** A disk exactly as version 4 left it: this build's seed with the new table taken back out. */
+/**
+ * A disk exactly as version 4 left it: this build's seed with the new table
+ * taken back out, and the four subjects a version 4 build seeded at first boot
+ * (#33 stopped seeding them; a disk written before it still holds them).
+ */
 function writeDiskAtVersion4(path: string): void {
   openGovernance(path, OPTIONS).close();
   const db = new Database(path);
+  seedDemoSubjects(db);
   db.exec("DROP TRIGGER subject_changes_is_append_only_update");
   db.exec("DROP TRIGGER subject_changes_is_append_only_delete");
   db.exec("DROP TABLE subject_changes");

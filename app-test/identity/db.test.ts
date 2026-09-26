@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -13,13 +13,16 @@ import { hashPassword } from "better-auth/crypto";
 import { createAuth, hashClientSecret } from "../../lib/identity/provider/auth.ts";
 import { ensureOAuthClient } from "../../lib/identity/provider/client.ts";
 import type { PersonSeed } from "../../lib/identity/provider/db.ts";
-import { countPeople, listPeople, loadPeople, openPeople, resetPeople, seed } from "../../lib/identity/provider/db.ts";
+import { countPeople, listPeople, openPeople, resetPeople, seed } from "../../lib/identity/provider/db.ts";
+import { DEMO_PEOPLE } from "../demo-cast.ts";
 
 const SECRET = "test-secret-".padEnd(48, "x");
-const fixture = loadPeople({});
+const REPO = join(import.meta.dir, "..", "..");
+
+/** The demo cast as a test seeds it (`app-test/demo-cast.ts`): the fixture's addresses, the tests' own password. */
+const CAST: PersonSeed[] = DEMO_PEOPLE.map(({ name, email, password }) => ({ name, email, password }));
 
 const ONE_PERSON: PersonSeed = {
-  persona: "dana",
   name: "Placeholder Person",
   email: "placeholder@bank.example",
   password: "placeholder-2026",
@@ -37,6 +40,14 @@ function storedSecret(db: Database): string {
     .clientSecret;
 }
 
+function passwordHash(db: Database, email: string): string {
+  return db
+    .query<{ password: string }, [string]>(
+      'SELECT a."password" FROM "account" a JOIN "user" u ON u."id" = a."userId" WHERE u."email" = ?',
+    )
+    .get(email)!.password;
+}
+
 const tempDirs: string[] = [];
 function tempDb(): string {
   const path = join(tmpdir(), `cg-idp-${crypto.randomUUID()}`, "idp.db");
@@ -47,78 +58,49 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("the fixture", () => {
-  test("holds the four personas from DESIGN.md's Cast table", () => {
-    expect(fixture.map((p) => p.persona).sort()).toEqual(["dana", "morgan", "riley", "sam"]);
-    expect(fixture.map((p) => p.name).sort()).toEqual([
-      "Alice",
-      "Bob",
-      "Charlie",
-      "Michael",
-    ]);
+/**
+ * #33: there is no shipped cast and no shipped password. Until then this
+ * module seeded four personas from `fixtures/people.json` under one checked-in
+ * password, at addresses the `PERSONA_*` variables could override.
+ */
+describe("nobody is shipped (#33)", () => {
+  test("there is no people fixture, and the module reads no persona variable and no password", () => {
+    expect(existsSync(join(REPO, "lib/identity/provider/fixtures/people.json"))).toBe(false);
+    const source = readFileSync(join(REPO, "lib/identity/provider/db.ts"), "utf8");
+    expect(source).not.toMatch(/people\.json|PERSONA_|process\.env|megaforce/);
   });
 
-  test("the loan-officer role variable overrides one persona's address and nothing else", () => {
-    const people = loadPeople({ PERSONA_LOAN_OFFICER_EMAIL: "  alice@example.com " });
-
-    expect(people.find((p) => p.persona === "dana")?.email).toBe("alice@example.com");
-    expect(people.find((p) => p.persona === "sam")?.email).toBe(
-      fixture.find((p) => p.persona === "sam")?.email,
-    );
-  });
-
-  test("an empty override is ignored — .env.example ships these blank", () => {
-    const people = loadPeople({ PERSONA_VP_CREDIT_EMAIL: "" });
-    expect(people.find((p) => p.persona === "riley")?.email).toBe(
-      fixture.find((p) => p.persona === "riley")?.email,
-    );
-  });
-
-  // #58. Better Auth lowercases the address before it looks a user up, so a
-  // row stored with a capital is a persona nobody can sign in as — and the
-  // login page calls that a wrong password. The Arcade accounts are invited by
-  // hand, so the capitalisation arrives here from a human typing it.
-  test("lowercases an override, whatever case the Arcade account was invited under", () => {
-    const people = loadPeople({ PERSONA_LOAN_OFFICER_EMAIL: "  Alice@Example.Test " });
-
-    expect(people.find((p) => p.persona === "dana")?.email).toBe("alice@example.test");
-  });
-
-  test("every address it hands back is already lower case", () => {
-    const people = loadPeople({ PERSONA_CREDIT_ANALYST_EMAIL: "BOB@BANK.EXAMPLE" });
-
-    expect(people.map((p) => p.email)).toEqual(people.map((p) => p.email.toLowerCase()));
-  });
-
-  test("rejects a deprecated name variable before fixture seeding can hide it", () => {
-    expect(() => loadPeople({ PERSONA_DANA_EMAIL: "dana@example.com" })).toThrow(
-      /PERSONA_DANA_EMAIL.*PERSONA_LOAN_OFFICER_EMAIL/,
-    );
+  test("a person to seed is parsed: a real address and a password of at least eight characters", async () => {
+    await expect(openPeople(":memory:", [{ ...ONE_PERSON, email: "not-an-address" }])).rejects.toThrow(/email/i);
+    await expect(openPeople(":memory:", [{ ...ONE_PERSON, password: "short" }])).rejects.toThrow(/password/);
   });
 });
 
 describe("seeding", () => {
-  test("bootstraps the fixture into an empty database", async () => {
+  test("bootstraps the schema and nobody into an empty database", async () => {
     const db = await openPeople(":memory:");
 
-    expect(countPeople(db)).toBe(4);
-    expect(listPeople(db).map((p) => p.email).sort()).toEqual(fixture.map((p) => p.email).sort());
+    expect(countPeople(db)).toBe(0);
+    expect(listPeople(db)).toEqual([]);
   });
 
-  // The half of #58 that `loadPeople`'s unit test cannot see: what actually
-  // reached the table.
-  test("writes lowercase rows even when the personas are configured capitalised", async () => {
-    const db = await openPeople(
-      ":memory:",
-      loadPeople({ PERSONA_LOAN_OFFICER_EMAIL: "Alice@Bank.Example" }),
-    );
+  test("seeds exactly the people it is handed", async () => {
+    const db = await openPeople(":memory:", CAST);
 
-    expect(listPeople(db).map((p) => p.email)).toContain("alice@bank.example");
-    expect(listPeople(db).some((p) => /[A-Z]/.test(p.email))).toBe(false);
+    expect(listPeople(db).map((p) => p.email).sort()).toEqual(CAST.map((p) => p.email).sort());
+  });
+
+  // #58. Better Auth lowercases the address before it looks a user up, so a
+  // row stored with a capital is somebody nobody can sign in as — and the
+  // login page calls that a wrong password.
+  test("writes lowercase rows even when the people are handed over capitalised", async () => {
+    const db = await openPeople(":memory:", [{ ...ONE_PERSON, email: "  Alice@Bank.Example " }]);
+
+    expect(listPeople(db).map((p) => p.email)).toEqual(["alice@bank.example"]);
   });
 
   test("a seed that fails leaves no schema, so the next boot retries", async () => {
-    // Two personas with the same email pass the zod schema and violate the
+    // Two people with the same email pass the zod schema and violate the
     // unique index. If the schema were created outside the seed transaction,
     // the tables would survive the failed inserts, `hasSchema` would report
     // the database as seeded, and every later boot would come up green with
@@ -135,11 +117,11 @@ describe("seeding", () => {
   test("leaves an existing database alone — later boots are not a reset", async () => {
     const path = tempDb();
 
-    const first = await openPeople(path);
+    const first = await openPeople(path, CAST);
     const ids = listPeople(first).map((p) => p.id);
     first.close();
 
-    // A different fixture on the second open changes nothing: the database
+    // Different people on the second open change nothing: the database
     // already has a schema, so it is left as it is.
     const second = await openPeople(path, [ONE_PERSON]);
     const again = listPeople(second).map((p) => p.id);
@@ -150,9 +132,11 @@ describe("seeding", () => {
 });
 
 describe("resetPeople", () => {
-  test("re-seeds the people and keeps the OAuth client, credentials included", async () => {
+  // Changed by #33: the people were deleted and seeded again from the
+  // fixture. There is no fixture password to seed them with, so they are kept.
+  test("keeps the people and the OAuth client, credentials included", async () => {
     const path = tempDb();
-    const db = await openPeople(path);
+    const db = await openPeople(path, CAST);
     const auth = createAuth({ db, baseURL: "http://localhost:1", secret: SECRET });
     const redirectUris = ["http://127.0.0.1:9/callback"];
 
@@ -160,7 +144,7 @@ describe("resetPeople", () => {
     const storedBefore = storedSecret(db);
     const peopleBefore = listPeople(db).map((p) => p.id);
 
-    await resetPeople(db);
+    const result = resetPeople(db);
 
     const after = await ensureOAuthClient(auth, { redirectUris, secret: SECRET });
 
@@ -174,14 +158,14 @@ describe("resetPeople", () => {
     expect(storedSecret(db)).toBe(storedBefore);
     expect(storedBefore).toBe(await hashClientSecret(before.clientSecret!));
 
-    // The people really were replaced, not left alone.
-    expect(countPeople(db)).toBe(4);
-    expect(listPeople(db).map((p) => p.id)).not.toEqual(peopleBefore);
+    // The people are the same rows, not replacements.
+    expect(listPeople(db).map((p) => p.id)).toEqual(peopleBefore);
+    expect(result.kept).toEqual(CAST.map((p) => p.email).sort());
     db.close();
   });
 
-  test("clears sessions, tokens and consents along with the people", async () => {
-    const db = await openPeople(":memory:");
+  test("clears sessions, tokens and consents, and keeps the people", async () => {
+    const db = await openPeople(":memory:", CAST);
     const person = listPeople(db)[0]!;
     const now = new Date().toISOString();
 
@@ -190,20 +174,22 @@ describe("resetPeople", () => {
        VALUES ('s1', $now, 't1', $now, $now, $user)`,
     ).run({ $now: now, $user: person.id });
 
-    await resetPeople(db);
+    resetPeople(db);
 
     expect(db.query('SELECT COUNT(*) AS n FROM "session"').get()).toEqual({ n: 0 });
     expect(db.query('SELECT COUNT(*) AS n FROM "oauthConsent"').get()).toEqual({ n: 0 });
     expect(db.query('SELECT COUNT(*) AS n FROM "oauthAccessToken"').get()).toEqual({ n: 0 });
+    expect(countPeople(db)).toBe(CAST.length);
   });
 
   /**
    * #32: somebody `bun run users add` put in is not the demo's to reset. Their
    * user row, their credential and its password hash are exactly what they
-   * were; only their sessions go, with everybody else's.
+   * were; only their sessions go, with everybody else's. Since #33 the same is
+   * true of the demo cast.
    */
-  test("leaves a user outside the demo cast in place, and signs them out with everyone", async () => {
-    const db = await openPeople(":memory:");
+  test("leaves every user in place, the demo cast included, and signs them all out", async () => {
+    const db = await openPeople(":memory:", CAST);
     const now = new Date().toISOString();
     const hash = await hashPassword("priya-chose-this-one");
     db.query(
@@ -222,10 +208,9 @@ describe("resetPeople", () => {
       ).run({ $id: id, $now: now, $user: user });
     }
 
-    const result = await resetPeople(db);
+    const result = resetPeople(db);
 
-    expect(result.kept).toEqual(["priya@company.test"]);
-    expect(result.demoCast).toEqual(fixture.map((p) => p.email).sort());
+    expect(result.kept).toEqual([...CAST.map((p) => p.email), "priya@company.test"].sort());
     expect(db.query('SELECT "id", "name" FROM "user" WHERE "email" = \'priya@company.test\'').get()).toEqual({
       id: "u-priya",
       name: "Priya",
@@ -235,18 +220,18 @@ describe("resetPeople", () => {
       password: hash,
     });
     expect(db.query('SELECT COUNT(*) AS n FROM "session"').get()).toEqual({ n: 0 });
-    // The demo persona was replaced, the added user was not.
-    expect(listPeople(db).find((p) => p.email === "alice@bank.example")!.id).not.toBe(alice.id);
+    // Changed by #33: the demo person was replaced; now she is the same row.
+    expect(listPeople(db).find((p) => p.email === "alice@bank.example")!.id).toBe(alice.id);
     expect(countPeople(db)).toBe(5);
   });
 
-  test("a demo persona that is not on disk is not added back", async () => {
-    const db = await openPeople(":memory:");
+  test("a demo person who is not on disk is not added back", async () => {
+    const db = await openPeople(":memory:", CAST);
     db.exec('DELETE FROM "user" WHERE "email" = \'bob@bank.example\'');
 
-    const result = await resetPeople(db);
+    const result = resetPeople(db);
 
-    expect(result.demoCast).toEqual(["alice@bank.example", "charlie@bank.example", "michael@bank.example"]);
+    expect(result.kept).toEqual(["alice@bank.example", "charlie@bank.example", "michael@bank.example"]);
     expect(listPeople(db).map((p) => p.email)).toEqual([
       "alice@bank.example",
       "charlie@bank.example",
@@ -254,17 +239,28 @@ describe("resetPeople", () => {
     ]);
   });
 
-  test("a demo persona's edited name and password go back to the fixture's", async () => {
+  test("a reset of an empty database adds nobody", async () => {
     const db = await openPeople(":memory:");
+    expect(resetPeople(db)).toEqual({ kept: [] });
+    expect(countPeople(db)).toBe(0);
+  });
+
+  // Changed by #33: a demo person's edited name and password went back to the
+  // fixture's. With no fixture password there is nothing to go back to, and
+  // resetting a password somebody chose would lock them out.
+  test("an edited name and a changed password are kept", async () => {
+    const db = await openPeople(":memory:", CAST);
     db.exec(`UPDATE "user" SET "name" = 'Alice (edited)' WHERE "email" = 'alice@bank.example'`);
+    const hash = passwordHash(db, "alice@bank.example");
 
-    await resetPeople(db);
+    resetPeople(db);
 
-    expect(listPeople(db).find((p) => p.email === "alice@bank.example")?.name).toBe("Alice");
+    expect(listPeople(db).find((p) => p.email === "alice@bank.example")?.name).toBe("Alice (edited)");
+    expect(passwordHash(db, "alice@bank.example")).toBe(hash);
   });
 
   test("the client is unowned, so deleting every user cannot cascade into it", async () => {
-    const db = await openPeople(":memory:");
+    const db = await openPeople(":memory:", CAST);
     const auth = createAuth({ db, baseURL: "http://localhost:1", secret: SECRET });
     await ensureOAuthClient(auth, { redirectUris: ["http://127.0.0.1:9/callback"], secret: SECRET });
 

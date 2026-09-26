@@ -13,6 +13,7 @@ import { CORRELATION_TOKEN } from "../../lib/control-plane/correlation.ts";
 import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
 import { openGovernance } from "../../lib/control-plane/policy-store.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 /** How long a test waits for the background poll to notice an edit. */
 const POLL_MS = 10;
@@ -32,7 +33,6 @@ const config: HooksConfig = {
   approvalsStoreToken: STORE_TOKEN,
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: 250,
   grantTtlSeconds: 900,
@@ -48,6 +48,7 @@ const logs: string[] = [];
 
 beforeAll(() => {
   db = openGovernance(":memory:", config);
+  seedDemoSubjects(db);
   cache = createPolicyCache(db, { log: (line) => logs.push(line), pollMs: POLL_MS });
   cache.start();
   server = createServer({ config, db, cache, log: (line) => logs.push(line) });
@@ -361,6 +362,7 @@ describe("the hot path never reads policy from the database", () => {
 
   test("a warm /access and /pre make zero policy queries; only the audit write touches SQLite", async () => {
     const real = openGovernance(":memory:", config);
+    seedDemoSubjects(real);
     const counted = counting(real);
     // The cache gets the counted handle; the server's audit writes go to the real one.
     const isolated = createPolicyCache(counted.db, { pollMs: 60_000 });
@@ -394,6 +396,7 @@ describe("the hot path never reads policy from the database", () => {
 
   test("current() is a memory read, even a thousand times", () => {
     const real = openGovernance(":memory:", config);
+    seedDemoSubjects(real);
     const counted = counting(real);
     const isolated = createPolicyCache(counted.db, { pollMs: 60_000 });
     isolated.start();
@@ -406,6 +409,7 @@ describe("the hot path never reads policy from the database", () => {
 
   test("a poll that cannot read the revision keeps serving the cached policy, then fails closed once it is persistent", () => {
     const real = openGovernance(":memory:", config);
+    seedDemoSubjects(real);
     let broken = false;
     const flaky = new Proxy(real, {
       get(target, prop, receiver) {
@@ -432,6 +436,7 @@ describe("the hot path never reads policy from the database", () => {
 describe("a cold cache fails closed", () => {
   test("a server whose cache was never started denies the first /access and loads nothing", async () => {
     const real = openGovernance(":memory:", config);
+    seedDemoSubjects(real);
     const isolated = createPolicyCache(real, { pollMs: 60_000 });
     const srv = createServer({ config, db: real, cache: isolated, log: () => {} });
     try {
@@ -480,6 +485,7 @@ describe("a cold cache fails closed", () => {
 describe("the hook budget covers synchronous work", () => {
   test("an evaluation that runs past HOOK_DEADLINE_MS is denied and audited as a timeout, never returned as OK", async () => {
     const real = openGovernance(":memory:", config);
+    seedDemoSubjects(real);
     const inner = createPolicyCache(real, { pollMs: 60_000 });
     inner.start();
     // A cache whose current() blocks synchronously — the reviewer's scenario.

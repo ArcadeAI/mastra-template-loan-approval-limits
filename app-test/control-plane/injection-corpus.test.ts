@@ -39,6 +39,7 @@ import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/pol
 import { openGovernance, readOutputRules } from "../../lib/control-plane/policy-store.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
 import corpus from "./fixtures/injection-corpus.json" with { type: "json" };
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 const SECRET = "test-secret";
 const DANA = "alice@bank.example";
@@ -51,7 +52,6 @@ const config: HooksConfig = {
   approvalsStoreToken: "test-store-token",
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: 10,
   grantTtlSeconds: 900,
@@ -82,6 +82,7 @@ let base: string;
 
 beforeAll(() => {
   db = openGovernance(":memory:", config);
+  seedDemoSubjects(db);
   cache = createPolicyCache(db, { pollMs: config.policyPollMs, scanners: config.injectionDetection });
   cache.start();
   server = createServer({ config, db, cache, log: () => {} });

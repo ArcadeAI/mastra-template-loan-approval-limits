@@ -57,7 +57,7 @@
 import type { Database } from "bun:sqlite";
 
 import type { PolicyCache } from "./policy-cache.ts";
-import { counts, operatorSubjects, readRevision, removedDemoSubjects, replacePolicy, type Seed } from "./policy-store.ts";
+import { counts, demoSubjectsOnDisk, operatorSubjects, readRevision, replacePolicy, type Seed } from "./policy-store.ts";
 
 export const RESET_PATH = "/admin/reset";
 
@@ -87,11 +87,11 @@ export interface ResetResult {
    */
   kept: { subjects: string[] };
   /**
-   * Demo cast members `bun run users remove` took out, left out rather than
-   * re-seeded (#32, round 1). A later `add` or `seed-demo` makes them present
-   * again.
+   * The demo cast members on disk, rewritten from the fixture (#33). One who
+   * is not on disk is not in this list and was not written: the first boot
+   * seeds nobody, and a reset does not add people.
    */
-  removed: { subjects: string[] };
+  demo_cast: { subjects: string[] };
 }
 
 /**
@@ -107,10 +107,10 @@ export function runReset(mode: ResetMode, deps: ResetDeps): ResetResult {
   const before = counts(db);
 
   let kept: string[] = [];
-  let removed: string[] = [];
+  let demoCast: string[] = [];
   db.transaction(() => {
     kept = operatorSubjects(db, seed);
-    removed = removedDemoSubjects(db, seed);
+    demoCast = demoSubjectsOnDisk(db, seed);
     replacePolicy(db, seed);
     if (mode === "demo") clearDemoState(db);
   })();
@@ -125,11 +125,10 @@ export function runReset(mode: ResetMode, deps: ResetDeps): ResetResult {
         .join(", ") +
       `; kept ${kept.length} subject${kept.length === 1 ? "" : "s"} the fixture does not seed` +
       (kept.length === 0 ? "" : ` (${kept.join(", ")})`) +
-      `; ${removed.length} demo subject${removed.length === 1 ? "" : "s"} removed with bun run users not re-seeded` +
-      (removed.length === 0 ? "" : ` (${removed.join(", ")})`) +
+      `; ${demoCast.length === 0 ? "no demo cast on disk" : `demo cast rewritten from the fixture (${demoCast.join(", ")})`}` +
       `; cache ${state.status}`,
   );
-  return { mode, revision, counts: { before, after }, kept: { subjects: kept }, removed: { subjects: removed } };
+  return { mode, revision, counts: { before, after }, kept: { subjects: kept }, demo_cast: { subjects: demoCast } };
 }
 
 /**

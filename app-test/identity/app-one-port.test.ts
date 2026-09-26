@@ -29,11 +29,13 @@ import { join } from "node:path";
 import { spawnChild } from "../child.ts";
 import { bootApp, type App } from "../../test/app.ts";
 import { childEnv } from "../child-env.ts";
+import { runUsers } from "../demo-cast.ts";
 
 const REPO = join(import.meta.dir, "..", "..");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
 const CONFIGURED_EMAIL = "Alice.Officer@Bank.Example";
-const PASSWORD = "megaforce-demo-2026";
+/** This test's own throwaway password, given to `bun run users add` (#33: nothing is seeded). */
+const PASSWORD = "one-port-test-password";
 
 let app: App;
 let data: string;
@@ -68,9 +70,16 @@ beforeAll(async () => {
     BETTER_AUTH_SECRET: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
     IDP_DB_PATH: join(data, "idp.db"),
     IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
-    PERSONA_LOAN_OFFICER_EMAIL: CONFIGURED_EMAIL,
   };
   app = await bootApp(env);
+
+  // Nobody is seeded (#33), so the person is added the way an operator adds
+  // one, capitalised as a human would type it, into the files the app has open.
+  const added = await runUsers(
+    ["add", CONFIGURED_EMAIL, "--name", "Alice", "--role", "loan_officer", "--clearance", "50000", "--password", PASSWORD],
+    { idp: env.IDP_DB_PATH, governance: app.databases.governance },
+  );
+  if (added.code !== 0) throw new Error(`users add exited ${added.code}:\n${added.out}\n${added.err}`);
 
   // The `arcade` client's secret is stored hashed and was never printed, so
   // mint a readable one the way a developer does, against the app's idp.db.

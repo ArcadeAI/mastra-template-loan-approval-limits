@@ -57,7 +57,9 @@ function environment(world: World, name: string): Record<string, string> {
     NODE_ENV: world.NODE_ENV,
     APP_PUBLIC_HOST: world.APP_PUBLIC_HOST,
     IDP_DB_PATH: world.IDP_DB_PATH ?? join(scratch, `${name}-idp.db`),
-    GOVERNANCE_DB_PATH: ":memory:",
+    // A file, not `:memory:`, so the probe can seed the demo cast into it before
+    // the control plane opens it (#33: a first boot seeds nobody).
+    GOVERNANCE_DB_PATH: join(scratch, `${name}-governance.db`),
     LOANS_DB_PATH: ":memory:",
     ARCADE_HOOK_SIGNING_SECRET: "fails-closed-hook-secret",
     APPROVALS_STORE_TOKEN: "fails-closed-store-token",

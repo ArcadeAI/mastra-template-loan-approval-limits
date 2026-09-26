@@ -1,8 +1,9 @@
 /**
- * Back to a clean rehearsal state: every person, session, token and consent is
- * dropped and the four personas are seeded again. **The OAuth client is not
- * touched**, so the credentials registered in the Arcade dashboard keep
- * working. See `src/reset.ts` for why that is asserted rather than assumed.
+ * Back to a clean rehearsal state: every session, token and consent is
+ * dropped, so everybody is signed out, and every account is kept with the
+ * password it already had (#33). **The OAuth client is not touched**, so the
+ * credentials registered in the Arcade dashboard keep working. See
+ * `lib/identity/provider/reset.ts` for why that is asserted rather than assumed.
  *
  *   bun run identity:reset
  *

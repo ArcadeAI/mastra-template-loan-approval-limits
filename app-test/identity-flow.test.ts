@@ -616,11 +616,14 @@ describe("/health", () => {
       // pinned in `app-test/health-control-plane.test.ts`. Since #5 it carries
       // the loan book's, pinned in `app-test/loans/health.test.ts`. What this
       // test is about is unchanged, and still exact.
-      // Since #6 it carries the identity provider's too, the `identity` field.
-      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, identity, ...web } =
+      // Since #6 it carries the identity provider's too, the `identity` field,
+      // and since #33 `user_drift`, the two databases held against each other:
+      // the demo cast on both sides, so no drift.
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, identity, user_drift, ...web } =
         (await (await GET()).json()) as Record<string, unknown>;
       expect(loans).toMatchObject({ status: "ok" });
       expect(identity).toMatchObject({ status: "ok", people: 4 });
+      expect(user_drift).toBeNull();
       expect(web).toEqual({
         status: "ok",
         service: "web",
@@ -751,8 +754,9 @@ describe("a SESSION_SECRET that is set but too weak", () => {
       expect(answer.status).toBe(200);
       // The control plane's fields are pinned elsewhere since #4, the loan
       // book's since #5 and the identity provider's since #6; see above.
-      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, identity, ...web } =
+      const { policy, fixture_drift, injection_detection, warnings, control_plane, loans, identity, user_drift, ...web } =
         (await answer.json()) as Record<string, unknown>;
+      expect(user_drift).toBeNull();
       expect(loans).toMatchObject({ status: "ok" });
       expect(identity).toMatchObject({ status: "ok" });
       expect({ policy, fixture_drift, injection_detection, warnings, control_plane }).toMatchObject({
