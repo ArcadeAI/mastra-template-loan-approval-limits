@@ -25,9 +25,8 @@ A limit written into a system prompt is a suggestion, and we measured how fragil
   5. Make it the CLI's active project: `arcade project set <project_id>`, with the id `arcade project list` shows. If your account has more than one org, run `arcade org set <org_id>` first, because switching org resets the active project to that org's default ([CLI cheat sheet](https://docs.arcade.dev/en/references/cli-cheat-sheet)).
   6. Check it: `arcade whoami` shows that org and project.
 - **[ngrok domain](https://ngrok.com/docs/universal-gateway/domains/)**: set `APP_PUBLIC_HOST` to your ngrok domain in host form, with no scheme (for example `my-app.ngrok.app`). Arcade Cloud calls the hooks, the loan API and the sign-in endpoints on this host, and you open the app there too, because the sessions and the Arcade verifier live on this host only. Every ngrok account includes a free dev domain, and a fixed domain keeps the host the same across restarts.
-- Four persona emails: set `PERSONA_LOAN_OFFICER_EMAIL` (Alice), `PERSONA_CREDIT_ANALYST_EMAIL` (Bob), `PERSONA_VP_CREDIT_EMAIL` (Charlie) and `PERSONA_CHIEF_CREDIT_OFFICER_EMAIL` (Michael) to four addresses you control. Each persona is a user of the app's own sign-in, and the email is what joins Arcade's user id, the OAuth subject and the loan book's actor. Set them before the first `bun run setup-arcade` or `bun run dev`, because the identity and policy databases seed them once. All four sign in with the demo-only fixture password `megaforce-demo-2026`. For the approval step in Try it out, Charlie's address must also be his account in your Slack workspace.
-  - Invite each persona who requests an approval, Alice among them, to your Arcade project under that same email. Slack's authorization goes through Arcade's own verifier, which only lets project members through (see [Do my users need Arcade accounts?](#faq)).
-- Those seven are the only values you fill in. The second block of `.env.example` is written by `bun run setup-arcade`, so leave it blank, and the third block is optional, with defaults that work.
+- No users are seeded. Add the demo cast with `bun run users seed-demo`, which asks for each person's email and prints each generated password once. Charlie's email must be his Slack account, and Alice's must be invited to your Arcade project (see [Do my users need Arcade accounts?](#faq)).
+- Those three are the only values you fill in. The second block of `.env.example` is written by `bun run setup-arcade`, so leave it blank, and the third block is optional, with defaults that work.
 
 ## Quickstart 🚀
 
@@ -37,7 +36,7 @@ A limit written into a system prompt is a suggestion, and we measured how fragil
 2. **Install dependencies**
    - Run `bun install`. One install covers the app and its workspaces.
 3. **Add your API keys**
-   - Run `cp .env.example .env` and fill in the seven values described under Prerequisites.
+   - Run `cp .env.example .env` and fill in the three values described under Prerequisites.
 4. **Register the app with Arcade**
    - Run `bun run setup-arcade <APP_PUBLIC_HOST> --dry-run` to print every request it would send and every deploy it would run, with every secret as a placeholder. Nothing is written, sent or deployed.
    - Run `bun run setup-arcade <APP_PUBLIC_HOST>`. It checks that `ARCADE_API_KEY` belongs to the Arcade CLI's active project before it writes anything. Then it mints the app's three OAuth clients, fills the second block of `.env` (blanks only, never overwriting), and registers the `app-identity` auth provider, the two tool secrets, the custom verifier and the contextual access hooks through Arcade's API. Last, it runs `arcade deploy` in `tools/loan` and then in `tools/approvals`.
@@ -137,7 +136,7 @@ The toolkits have their own READMEs: [`tools/loan`](./tools/loan/README.md) and 
 
 ## Configuration and readiness
 
-`.env.example` documents every variable in place, in three blocks: the seven you fill in, the ones `bun run setup-arcade` writes, and optional overrides with their defaults.
+`.env.example` documents every variable in place, in three blocks: the three you fill in, the ones `bun run setup-arcade` writes, and optional overrides with their defaults.
 
 - **`/health` names what is missing.** It answers HTTP 200 either way, with `status` `ok` or `degraded` and one field per capability, including `signin`, `gateway`, `verifier`, `agent`, `panel_stream`, `policy`, `loans`, `identity` and `reset`. A fresh clone with nothing filled in answers `degraded` and names `signin`, `gateway`, `verifier` and `agent` as `missing`. Nothing falls back silently. Arcade's own health check is a different path, `/hooks/health`, with its own `healthy|degraded|unhealthy` vocabulary.
 - **The Arcade project.** `bun run setup-arcade` registers the hooks and the gateway in the Arcade CLI's active org and project, as `arcade whoami` shows them, and stops before writing anything if `ARCADE_API_KEY` belongs to another project. To use a different project, set `ARCADE_ORG_ID` and `ARCADE_PROJECT_ID` in `.env`. With no CLI login and neither variable, it prints the hooks and the gateway as dashboard forms instead.
@@ -152,7 +151,7 @@ The toolkits have their own READMEs: [`tools/loan`](./tools/loan/README.md) and 
 The three databases are SQLite files on disk, gitignored, and seeded from their fixtures only when empty. Data persists across restarts on purpose: a policy row edited during one act has to still be there in the next.
 
 - `bun run reset` puts the control plane's policy and audit log and the loan book back, in seconds. It is idempotent.
-- `bun run reset --hard` also resets the identity provider's people, sessions, tokens and consents. That signs all four personas out, so each one needs a sign-in and an authorization card before their next governed call.
+- `bun run reset --hard` also resets the identity provider's sessions, tokens and consents, and keeps every account. That signs everyone out, so each one needs a sign-in and an authorization card before their next governed call.
 - Both call each module's own `/admin/reset` route under `RESET_TOKEN`. With it unset, every reset route answers 404 and `/health` reports `reset: disabled`.
 
 **A reset is not a re-registration.** Nothing in `bun run reset` touches the OAuth client Arcade holds. Deleting `idp.db` or changing `BETTER_AUTH_SECRET` does, and the app refuses to start identity until you re-run `bun run setup-arcade` (see above).

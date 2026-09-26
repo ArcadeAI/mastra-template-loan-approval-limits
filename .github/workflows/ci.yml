@@ -258,7 +258,9 @@ jobs:
           # the secret encrypts the ID-token signing key at rest, and a boot
           # that silently fell back to a known key would be worse than no boot.
           # The app stays up and reports `identity: failed`, so the step checks
-          # that the identity provider booted as well as the policy.
+          # that the identity provider booted as well as the policy. Since #33
+          # a fresh image seeds nobody, so a provider that booted says
+          # `no_users` (never `failed`), and that is what is expected here.
           - service: web
             dockerfile: ./Dockerfile
             smoke_env: >-
@@ -266,7 +268,7 @@ jobs:
               -e APPROVALS_STORE_TOKEN=ci-smoke-only-not-a-real-token
               -e BETTER_AUTH_SECRET=ci-smoke-only-not-a-real-secret-0000
             smoke_expect: '"policy":{"status":"ready"'
-            smoke_expect_also: '"identity":{"status":"ok"'
+            smoke_expect_also: '"identity":{"status":"no_users"'
 
     steps:
       - uses: actions/checkout@v4

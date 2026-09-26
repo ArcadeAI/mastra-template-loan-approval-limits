@@ -26,6 +26,7 @@ import {
   type ControlPlaneStatus,
 } from "../lib/governance/control-plane.ts";
 import { startHooks, type Hooks } from "./harness.ts";
+import { seedDemoGovernance } from "./demo-cast.ts";
 
 const RESET_TOKEN = "reset-token-for-web-tests";
 const DANA = "alice@bank.example";
@@ -38,6 +39,8 @@ let config: { controlPlaneHost: string };
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "cg-web-106-"));
   dbPath = join(dir, "governance.db");
+  // A first boot seeds nobody (#33); the demo cast this file edits is added first.
+  seedDemoGovernance(dbPath);
   hooks = await startHooks({ GOVERNANCE_DB_PATH: dbPath, RESET_TOKEN });
   config = { controlPlaneHost: hooks.host };
 });

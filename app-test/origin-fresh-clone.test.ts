@@ -100,7 +100,18 @@ test("a fresh clone with nothing filled boots, and /health names every missing c
   // What does work, works: the policy, the loan book and the identity provider all came up.
   expect(health.policy.status).toBe("ready");
   expect(health.loans).toMatchObject({ status: "ok" });
-  expect(health.identity.status).toBe("ok");
+  // Nobody is seeded (#33): the identity provider is up with nobody in it, and
+  // says which command adds somebody — degraded, not failed, not a crash.
+  expect(health.identity).toMatchObject({
+    status: "no_users",
+    people: 0,
+    message: "no users: run `bun run users add …` or `bun run users seed-demo`",
+  });
+  expect(health.warnings).toContain("no users: run `bun run users add …` or `bun run users seed-demo`");
+  expect(health.control_plane.counts.subjects).toBe(0);
+  // Nobody on either side is agreement, not drift.
+  expect(health.user_drift).toBeNull();
+  expect(health.fixture_drift).toBeNull();
   // The issuer is the app's own port, not a port pinned in a template.
   expect(health.identity.issuer).toBe(`http://localhost:${app.port}`);
 

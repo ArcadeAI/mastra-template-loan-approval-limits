@@ -32,7 +32,7 @@ import { dirname, join } from "node:path";
 
 import { serveOnFreePort } from "../cdp.ts";
 import { spawnChild } from "../child.ts";
-import { loadPeople } from "../../lib/identity/provider/db.ts";
+import { DEMO_PEOPLE, seedDemoIdentity } from "../demo-cast.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-dual-${crypto.randomUUID()}`, "idp.db");
@@ -40,8 +40,8 @@ const logPath = join(dirname(dbPath), "stdout.log");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
 const SECRET = "test-secret-".padEnd(48, "x");
 
-const people = loadPeople({});
-const dana = people.find((person) => person.persona === "dana")!;
+const people = DEMO_PEOPLE;
+const dana = people.find((person) => person.key === "dana")!;
 
 let child: Subprocess;
 let baseUrl: string;
@@ -219,11 +219,14 @@ const REJECTION = /POST \/oauth2\/token rejected:/;
 beforeAll(async () => {
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+      ([key, value]) => value !== undefined && !key.startsWith("IDP_"),
     ),
   ) as Record<string, string>;
 
   mkdirSync(dirname(logPath), { recursive: true });
+  // Nobody is seeded at first boot (#33): the demo cast is added the way
+  // `bun run users seed-demo` adds it, before the provider opens the file.
+  await seedDemoIdentity(dbPath);
 
   // On a port chosen inside `serveOnFreePort`, which starts the provider again
   // on a new one if another process took it first (#9).

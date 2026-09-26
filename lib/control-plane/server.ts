@@ -407,6 +407,18 @@ export function createControlPlane(deps: ServerDeps) {
     /** The `/health` body, for the app's one readiness response to fold in. */
     health: healthBody,
     /**
+     * Every `subjects.user_id` on disk, lowercase. Read from the table rather
+     * than the policy cache, so it answers when the policy does not compile.
+     * For the app's `/health` to hold against who can sign in (#33,
+     * `lib/user-drift.ts`); served by no route of the control plane's own.
+     */
+    subjectIds(): string[] {
+      return db
+        .query<{ user_id: string }, []>("SELECT user_id FROM subjects ORDER BY user_id")
+        .all()
+        .map((row) => row.user_id.toLowerCase());
+    },
+    /**
      * `pathname` is the path *within* the control plane, which is how Arcade's
      * contract names it (`/pre`, `/health`, …). A caller that mounts the
      * control plane under a prefix (`HOOKS_BASE`, below) passes the path with

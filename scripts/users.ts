@@ -54,7 +54,17 @@
  *
  * Without `--password`, `add` and `seed-demo` generate one and print it once.
  * Only its scrypt hash is stored; it is never logged or written anywhere else.
- * A `--password` typed on the command line lands in your shell history.
+ * A `--password` typed on the command line lands in your shell history. There
+ * is no shipped password (#33): nobody is seeded at first boot, so this is the
+ * only way anybody gets one.
+ *
+ * ## The demo cast, and who counts as it
+ *
+ * `seed-demo` adds Alice, Bob, Charlie and Michael with the fixture's roles and
+ * clearances, under the addresses you give it. The reset and the drift check
+ * know the demo cast by the fixture's own addresses (`@bank.example`), so a
+ * demo person seeded under any other address counts as a real user from then
+ * on — a reset keeps their clearance as it is — and `seed-demo` says so.
  *
  * ## Requesters need an Arcade account
  *
@@ -120,7 +130,6 @@ const config = readConfig();
 const seedOptions = {
   loanToolkit: config.loanToolkit,
   approvalsToolkit: config.approvalsToolkit,
-  personaEmails: config.personaEmails,
 };
 const actor = `cli:${userInfo().username}`;
 
@@ -445,7 +454,24 @@ function demoCast() {
     name: subject.display_name,
     role: subject.role,
     clearance: subject.clearance,
+    /** The fixture's own address: the one the reset and the drift check know as the demo cast's. */
+    fixtureEmail: subject.user_id,
   }));
+}
+
+/**
+ * Said for a demo person seeded under any address but the fixture's (#33).
+ * The reset and the drift check know the demo cast by the fixture's addresses,
+ * so somebody seeded as Charlie under their own email is, from then on, a user
+ * like any other: a reset keeps their role and clearance as they are rather
+ * than putting the demo's back, and a hand edit to their row is not drift.
+ */
+function realUserNote(person: { name: string; fixtureEmail: string }, email: string): string | null {
+  if (email === person.fixtureEmail) return null;
+  return (
+    `  real user  ${email} is not the fixture's ${person.fixtureEmail}, so from here on ${person.name} counts as a real user: ` +
+    "`bun run reset` keeps their role and clearance as they are instead of putting the demo's back, and `/health` does not compare their row to the fixture."
+  );
 }
 
 /** Lines from stdin, one per call; `null` once it ends. */
@@ -521,6 +547,8 @@ async function seedDemo(args: string[]): Promise<void> {
         console.log(describeChange(change));
         if (password === undefined) console.log(describeGeneratedPassword(email, secret));
       }
+      const note = realUserNote(person, email);
+      if (note) console.log(note);
       const reminder = inviteReminder(governance, readSubject(governance, email) ?? subject);
       if (reminder) console.log(reminder);
     }

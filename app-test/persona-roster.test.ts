@@ -117,8 +117,9 @@ describe("looking a person up from the address the IdP asserted", () => {
     expect(roleLabel("regional_credit_head")).toBe("Regional Credit Head");
   });
 
-  test("the PERSONA_* variables no longer decide who the card names", () => {
-    // Before #32 the card was keyed on these, so a user added to the database
+  test("no environment variable decides who the card names", () => {
+    // Before #32 the card was keyed on per-persona email variables, which #33
+    // removed altogether, so a user added to the database
     // was "not in the cast". The lookup takes no environment at all now.
     const source = readFileSync(join(REPO_ROOT, "lib", "identity", "roster.ts"), "utf8");
     expect(source).not.toMatch(/persona-email-contract|readPersonaEmailOverrides|process\.env|\bPERSONAS\b/);

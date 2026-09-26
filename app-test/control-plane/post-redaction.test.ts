@@ -27,6 +27,7 @@ import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/pol
 import { openGovernance, readOutputRules } from "../../lib/control-plane/policy-store.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
 import { loanFixture, loanFixtures } from "./loan-fixture.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 const SECRET = "test-secret";
 const STORE_TOKEN = "test-store-token";
@@ -45,7 +46,6 @@ const config: HooksConfig = {
   approvalsStoreToken: STORE_TOKEN,
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: POLL_MS,
   grantTtlSeconds: 900,
@@ -68,6 +68,7 @@ let base: string;
 
 beforeAll(() => {
   db = openGovernance(":memory:", config);
+  seedDemoSubjects(db);
   cache = createPolicyCache(db, { pollMs: POLL_MS });
   cache.start();
   bus = createEventBus();

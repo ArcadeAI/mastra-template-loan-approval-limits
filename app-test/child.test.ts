@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { childEnv } from "./child-env.ts";
-import { captureOutput, freePort, liveChildren, retryOnPortRace, spawnChild, waitForChildHttp } from "./child.ts";
+import { captureOutput, freePort, liveChildren, lostPortRace, retryOnPortRace, spawnChild, waitForChildHttp } from "./child.ts";
 
 const CHILD = join(import.meta.dir, "child.ts");
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "cg-child-")));
@@ -140,6 +140,65 @@ test("the child sees exactly the environment it was given, not the supervisor's 
   expect(await child.exited).toBe(0);
   expect((await new Response(child.stdout as ReadableStream).text()).trim()).toBe("null");
 });
+
+// The #33 review: `scripts/next.ts` refuses a held port itself (#30), before
+// Next can raise EADDRINUSE, so a `bun run dev` child that lost the race said
+// "Port N is already in use" and exited 1, and the boot gave up instead of
+// retrying. This child refuses exactly the way `scripts/next.ts` does.
+test("a port refused by scripts/next.ts's own check is a lost race too, and is retried", async () => {
+  const dir = mkdtempSync(join(scratch, "refused-"));
+  const server = join(dir, "server.ts");
+  writeFileSync(
+    server,
+    `import { listenersOn, portTakenMessage } from ${JSON.stringify(join(import.meta.dir, "..", "scripts", "port-in-use.ts"))};\n` +
+      `const port = Number(process.env.PORT);\n` +
+      `const held = await listenersOn(port);\n` +
+      `if (held.length > 0) { console.error(\`[next.ts] \${portTakenMessage(port, held)}\`); process.exit(1); }\n` +
+      `Bun.serve({ port, fetch: () => new Response(process.env.NONCE) });\n`,
+  );
+  const thief = Bun.serve({ port: 0, fetch: () => new Response("not yours", { status: 503 }) });
+  const taken = thief.port!;
+  const handed = [taken];
+
+  const boot = async (port: number) => {
+    const child = spawnChild(["bun", server], {
+      env: childEnv({ PORT: String(port), NONCE: `child-on-${port}` }),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output = captureOutput(child);
+    try {
+      await waitForChildHttp(child, `http://127.0.0.1:${port}/`, { output, timeoutMs: 15_000 });
+    } catch (error) {
+      child.kill();
+      await child.exited;
+      throw error;
+    }
+    return { child, port };
+  };
+
+  try {
+    // Control: on the taken port the child refuses in next.ts's words, and no EADDRINUSE appears.
+    const refusal = await boot(taken).then(
+      () => "",
+      (error: Error) => error.message,
+    );
+    expect(refusal).toContain(`Port ${taken} is already in use`);
+    expect(refusal).not.toMatch(/EADDRINUSE/);
+    expect(lostPortRace(refusal)).toBe(true);
+
+    const booted = await retryOnPortRace(boot, { ports: () => handed.shift() ?? freePort() });
+    try {
+      expect(booted.port).not.toBe(taken);
+      expect(await (await fetch(`http://127.0.0.1:${booted.port}/`)).text()).toBe(`child-on-${booted.port}`);
+    } finally {
+      booted.child.kill();
+      await booted.child.exited;
+    }
+  } finally {
+    thief.stop(true);
+  }
+}, 60_000);
 
 test("a lost port race is retried on a new port, and the child that answers is ours", async () => {
   const dir = mkdtempSync(join(scratch, "race-"));

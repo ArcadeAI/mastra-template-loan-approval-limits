@@ -21,7 +21,7 @@
  * sealed-session readers treat every browser as signed out.
  */
 import { linkIdentity } from "../link.ts";
-import { openIdentityProvider, type IdentityProvider } from "./server.ts";
+import { NO_USERS, openIdentityProvider, type IdentityProvider } from "./server.ts";
 
 const KEY = Symbol.for("cg.identity-provider");
 
@@ -94,14 +94,34 @@ export async function identityProviderFailure(): Promise<string | null> {
   return opened.ok ? null : opened.error;
 }
 
-/** What the app's `/health` reports under `identity`. Never a bare count, the same rule as `loans`. */
+/**
+ * What the app's `/health` reports under `identity`. Never a bare count, the
+ * same rule as `loans`.
+ *
+ * `no_users` since #33: the provider booted and nobody can sign in, because a
+ * fresh `idp.db` seeds nobody. It is degraded, not failed, and it says which
+ * command adds somebody, so a first run reads as a step still to take rather
+ * than as a crash.
+ */
 export type IdentityCapability =
   | { status: "ok"; issuer: string; people: number }
+  | { status: "no_users"; issuer: string; people: 0; message: string }
   | { status: "failed"; issuer: null; people: null; error: string };
 
 export async function identityCapability(): Promise<IdentityCapability> {
   const opened = await open();
   if (!opened.ok) return { status: "failed", issuer: null, people: null, error: opened.error };
   const { issuer, people } = opened.provider.health();
+  if (people === 0) return { status: "no_users", issuer, people: 0, message: NO_USERS };
   return { status: "ok", issuer, people };
+}
+
+/**
+ * Every address that can sign in, for the app's `/health` to hold against the
+ * control plane's subjects (#33). `null` when the provider did not boot, which
+ * is not the same as nobody: `identity` already says why.
+ */
+export async function identityEmails(): Promise<string[] | null> {
+  const opened = await open();
+  return opened.ok ? opened.provider.emails() : null;
 }

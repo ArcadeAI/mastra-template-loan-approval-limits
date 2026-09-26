@@ -29,6 +29,7 @@ import { allGrants } from "../../lib/control-plane/grants-store.ts";
 import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
 import { openGovernance } from "../../lib/control-plane/policy-store.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 const DANA = "alice@bank.example";
 const RILEY = "charlie@bank.example";
@@ -44,7 +45,6 @@ const config: HooksConfig = {
   approvalsStoreToken: STORE_TOKEN,
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: 10_000,
   grantTtlSeconds: 900,
@@ -62,6 +62,7 @@ beforeEach(() => {
   cache?.stop();
   db?.close();
   db = openGovernance(":memory:", config);
+  seedDemoSubjects(db);
   cache = createPolicyCache(db, { pollMs: config.policyPollMs });
   cache.start();
   server = createServer({ config, db, cache, log: () => {} });

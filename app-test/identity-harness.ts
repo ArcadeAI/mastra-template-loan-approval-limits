@@ -46,6 +46,7 @@ import {
 } from "../lib/identity/handlers.ts";
 import { childEnv } from "./child-env.ts";
 import { freePort, spawnChild } from "./child.ts";
+import { DEMO_CAST, seedDemoIdentity } from "./demo-cast.ts";
 import { forgetGatewayClients } from "../lib/identity/gateway.ts";
 import { linkIdentity } from "../lib/identity/link.ts";
 import { readConfig as readIdpConfig } from "../lib/identity/provider/config.ts";
@@ -54,12 +55,16 @@ import { nonce, pkce } from "../lib/identity/oidc.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
-/** The four demo people, as `lib/identity/provider/fixtures/people.json` seeds them. */
+/**
+ * The four demo people, as this harness seeds them (`demo-cast.ts`): the
+ * fixture's addresses and the tests' own throwaway password. Nothing is seeded
+ * by the app itself since #33.
+ */
 export const PEOPLE = {
-  dana: { email: "alice@bank.example", password: "megaforce-demo-2026" },
-  sam: { email: "bob@bank.example", password: "megaforce-demo-2026" },
-  riley: { email: "charlie@bank.example", password: "megaforce-demo-2026" },
-  morgan: { email: "michael@bank.example", password: "megaforce-demo-2026" },
+  dana: { email: DEMO_CAST.dana.email, password: DEMO_CAST.dana.password },
+  sam: { email: DEMO_CAST.sam.email, password: DEMO_CAST.sam.password },
+  riley: { email: DEMO_CAST.riley.email, password: DEMO_CAST.riley.password },
+  morgan: { email: DEMO_CAST.morgan.email, password: DEMO_CAST.morgan.password },
 } as const;
 
 export type PersonaKey = keyof typeof PEOPLE;
@@ -966,7 +971,7 @@ export async function startIdentityHarness(
   mkdirSync(dirname(dbPath), { recursive: true });
 
   // The provider's environment, and the credentials script's: an allowlist
-  // (`child-env.ts`), so a developer's own PERSONA_*, IDP_* or host values
+  // (`child-env.ts`), so a developer's own IDP_* or host values
   // never reach it — these tests are about the fixture.
   const idpEnv: Record<string, string> = childEnv({
     PORT: String(webPort),
@@ -1004,6 +1009,9 @@ export async function startIdentityHarness(
   console.log = keep(consoleLog);
   console.error = keep(consoleError);
 
+  // Nobody is seeded at first boot (#33): the demo cast goes in the way
+  // `bun run users seed-demo` puts it, before the provider opens the file.
+  await seedDemoIdentity(dbPath);
   const provider = await openIdentityProvider(readIdpConfig(idpEnv));
 
   // The secret is stored hashed and cannot be printed twice (#70), so the

@@ -40,6 +40,7 @@ import type { Server } from "bun";
 import { join } from "node:path";
 
 import { freePort, spawnChild } from "../app-test/child.ts";
+import { runUsers } from "../app-test/demo-cast.ts";
 import { bootApp, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -175,11 +176,18 @@ beforeAll(async () => {
   app = await bootApp({
     RESET_TOKEN,
     ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
-    PERSONA_LOAN_OFFICER_EMAIL: DANA,
     BETTER_AUTH_SECRET: "root-reset-test-secret-".padEnd(48, "x"),
     IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
     IDENTITY_HOST: `127.0.0.1:${userinfo.port}`,
   });
+
+  // A first boot seeds nobody (#33). The loan officer this file acts as is
+  // added the way an operator adds one, into the files the app has open.
+  const added = await runUsers(
+    ["add", DANA, "--name", "Alice", "--role", "loan_officer", "--clearance", "50000", "--password", "root-reset-test-password"],
+    { idp: app.databases.idp, governance: app.databases.governance },
+  );
+  if (added.code !== 0) throw new Error(`users add exited ${added.code}:\n${added.out}\n${added.err}`);
 }, 240_000);
 
 afterAll(async () => {

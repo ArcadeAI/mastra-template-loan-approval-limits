@@ -22,10 +22,19 @@ import {
   seed,
   type SeedOptions,
 } from "../../lib/control-plane/policy-store.ts";
+import { DEMO_PEOPLE, seedDemoSubjects } from "../demo-cast.ts";
 
-const OPTIONS: SeedOptions = { loanToolkit: "Loan", approvalsToolkit: "Approvals", personaEmails: {} };
+const OPTIONS: SeedOptions = { loanToolkit: "Loan", approvalsToolkit: "Approvals" };
 
-const fresh = () => openGovernance(":memory:", OPTIONS);
+/** A first boot: the policy, and nobody in it (#33). */
+const bare = () => openGovernance(":memory:", OPTIONS);
+
+/** A first boot and then `seed-demo`'s subjects, for the tests that edit a demo row. */
+const fresh = () => {
+  const db = bare();
+  seedDemoSubjects(db);
+  return db;
+};
 
 const anEvent = (overrides: Partial<Parameters<typeof record>[1][number]> = {}) => ({
   id: newEventId(),
@@ -85,29 +94,18 @@ describe("the seed", () => {
     expect(byName["Michael"]).toMatchObject({ role: "chief_credit_officer", clearance: 5_000_000 });
   });
 
-  test("uses the same fallback emails as the identity provider, the join key", async () => {
-    const people = (await import("../../lib/identity/provider/fixtures/people.json")).default.people;
-    const ours = loadSeed(OPTIONS).subjects.map((s) => s.user_id).sort();
-    expect(ours).toEqual(people.map((p) => p.email).sort());
-  });
-
-  test("substitutes a role email variable at seed time", () => {
-    const data = loadSeed({ ...OPTIONS, personaEmails: { dana: "alice@corp.example" } });
-    expect(data.subjects.find((s) => s.display_name === "Alice")?.user_id).toBe("alice@corp.example");
-    expect(data.subjects.find((s) => s.display_name === "Bob")?.user_id).toBe("bob@bank.example");
-  });
-
-  // #58. The override carries whatever capitalisation the Arcade account was
-  // invited under, and `apps/idp` now stores the same person lowercase. A
-  // roster seeded `Alice@…` would be one `subjectKey` can never hit, so
-  // every call Alice makes would be denied as an unregistered subject.
-  test("lowercases the address a role email override carries", () => {
-    const data = loadSeed({ ...OPTIONS, personaEmails: { dana: "Alice@Example.Test" } });
-
-    expect(data.subjects.find((s) => s.display_name === "Alice")?.user_id).toBe(
-      "alice@example.test",
-    );
-    expect(data.subjects.every((s) => s.user_id === s.user_id.toLowerCase())).toBe(true);
+  // #33: the fixture's own addresses are how the reset and the drift check
+  // know the demo cast, so they are the only addresses it carries. No role
+  // variable substitutes another one any more: `SeedOptions` has nowhere to
+  // put one, and `seed-demo` takes the addresses on its command line.
+  test("the demo cast is at the fixture's own @bank.example addresses, lowercase", () => {
+    expect(loadSeed(OPTIONS).subjects.map((s) => s.user_id).sort()).toEqual([
+      "alice@bank.example",
+      "bob@bank.example",
+      "charlie@bank.example",
+      "michael@bank.example",
+    ]);
+    expect(Object.keys(OPTIONS).sort()).toEqual(["approvalsToolkit", "loanToolkit"]);
   });
 
   test("keys every rule and the catalogue on the configured toolkit names, not on literals", () => {
@@ -143,10 +141,10 @@ describe("the seed", () => {
 });
 
 describe("seeding", () => {
-  test("bootstraps the fixture into an empty database", () => {
-    const db = fresh();
+  test("bootstraps the fixture's policy into an empty database, and nobody (#33)", () => {
+    const db = bare();
     expect(counts(db)).toMatchObject({
-      subjects: 4,
+      subjects: 0,
       catalogue: 6,
       policy_rules: 6,
       output_rules: 2,
@@ -160,6 +158,16 @@ describe("seeding", () => {
       "post.redact-borrower-identifiers",
       "post.strip-injected-instructions",
     ]);
+  });
+
+  // Seeding the demo cast would give a fresh deployment four subjects nobody
+  // can sign in as, and approval routing picks from every subject: a $95K
+  // request would go to charlie@bank.example, who does not exist.
+  test("a first boot writes no subject, whatever the fixture's cast holds", () => {
+    const db = bare();
+    expect(readPolicy(db).subjects).toEqual([]);
+    expect(loadSeed(OPTIONS).subjects).toHaveLength(4);
+    expect(db.query("SELECT COUNT(*) AS n FROM subject_changes").get()).toEqual({ n: 0 });
   });
 
   test("a seed that fails leaves no schema, so the next boot retries", () => {
@@ -178,6 +186,7 @@ describe("seeding", () => {
     const path = join(tmpdir(), `cg-governance-${crypto.randomUUID()}`, "governance.db");
 
     const first = openGovernance(path, OPTIONS);
+    seedDemoSubjects(first);
     first.run("UPDATE subjects SET clearance = 100000 WHERE display_name = 'Alice'");
     record(first, [anEvent()]);
     first.close();
@@ -220,6 +229,7 @@ describe("the revision counter", () => {
   test("is visible across connections to the same file", () => {
     const path = join(tmpdir(), `cg-governance-${crypto.randomUUID()}`, "governance.db");
     const server = openGovernance(path, OPTIONS);
+    seedDemoSubjects(server);
     const before = readRevision(server);
 
     // A presenter's sqlite3 shell.
@@ -244,12 +254,15 @@ describe("readPolicy", () => {
   });
 
   test("reads back exactly what was seeded", () => {
-    const db = fresh();
+    const db = bare();
     const data = loadSeed(OPTIONS);
     const snapshot = readPolicy(db);
     expect(snapshot.catalogue).toEqual(data.catalogue);
     expect(snapshot.rules).toEqual([...data.policy_rules].sort((a, b) => a.priority - b.priority));
-    expect(snapshot.subjects.map((s) => s.user_id).sort()).toEqual(data.subjects.map((s) => s.user_id).sort());
+    expect(snapshot.subjects).toEqual([]);
+    // And what `seed-demo` writes afterwards is the fixture's cast, row for row.
+    seedDemoSubjects(db);
+    expect(readPolicy(db).subjects.map((s) => s.user_id).sort()).toEqual(DEMO_PEOPLE.map((p) => p.email).sort());
   });
 });
 

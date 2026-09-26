@@ -107,9 +107,18 @@ export function freePort(): number {
   return port;
 }
 
-/** Whether a child's output or a boot error says it lost the port to somebody else. */
+/**
+ * Whether a child's output or a boot error says it lost the port to somebody else.
+ *
+ * Two spellings of the same loss: the socket's own `EADDRINUSE`, and, since
+ * #30, `scripts/next.ts` refusing the port itself before Next can bind it
+ * (`portTakenMessage` in `scripts/port-in-use.ts`: "Port N is already in use").
+ * Only the first was recognised until the #33 review, so a `bun run dev` child
+ * that lost the race exited 1 and the boot failed instead of retrying — seen
+ * once in a full `env -i` run on a shared machine (`users-live.test.ts`).
+ */
 export function lostPortRace(text: string): boolean {
-  return /EADDRINUSE|address already in use/i.test(text);
+  return /EADDRINUSE|address already in use|Port \d+ is already in use/i.test(text);
 }
 
 /** Thrown by {@link retryOnPortRace} when every attempt lost the race. */

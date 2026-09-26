@@ -26,15 +26,15 @@ import { dirname, join } from "node:path";
 
 import { serveOnFreePort } from "../cdp.ts";
 import { spawnChild } from "../child.ts";
-import { loadPeople } from "../../lib/identity/provider/db.ts";
+import { DEMO_PEOPLE, seedDemoIdentity } from "../demo-cast.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const SECRET = "test-secret-".padEnd(48, "x");
 const ARCADE_URI = "http://127.0.0.1:9/arcade-callback";
 const USER_SOURCE_URI = "http://127.0.0.1:9/user-source-callback";
 
-const people = loadPeople({});
-const dana = people.find((person) => person.persona === "dana")!;
+const people = DEMO_PEOPLE;
+const dana = people.find((person) => person.key === "dana")!;
 
 function basicAuth(id: string, secret: string): string {
   const half = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
@@ -88,11 +88,14 @@ class Service {
     const inherited = Object.fromEntries(
       Object.entries(process.env).filter(
         ([key, value]) =>
-          value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+          value !== undefined && !key.startsWith("IDP_"),
       ),
     ) as Record<string, string>;
 
     mkdirSync(dirname(this.dbPath), { recursive: true });
+    // Nobody is seeded at first boot (#33): the demo cast is added the way
+    // `bun run users seed-demo` adds it, before the provider opens the file.
+    await seedDemoIdentity(this.dbPath);
 
     // On a port chosen inside `serveOnFreePort`, which starts the provider again
     // on a new one if another process took it first (#9).

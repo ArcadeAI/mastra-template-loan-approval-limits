@@ -39,11 +39,11 @@ import {
   type MigrationReport,
   type SeedOptions,
 } from "../../lib/control-plane/policy-store.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 const OPTIONS: SeedOptions = {
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
 };
 
 /** A fresh directory per test; the caller removes it. */
@@ -265,12 +265,12 @@ describe("a database written before a table existed", () => {
 });
 
 describe("a fresh database", () => {
-  test("still seeds the whole fixture, and records the version", () => {
+  test("still seeds the fixture's policy, and nobody (#33), and records the version", () => {
     withPath("fresh", (path) => {
       const db = openGovernance(path, OPTIONS);
       try {
         expect(counts(db)).toMatchObject({
-          subjects: 4,
+          subjects: 0,
           catalogue: 6,
           policy_rules: 6,
           output_rules: 2,
@@ -288,6 +288,7 @@ describe("a fresh database", () => {
   test("reopening it changes nothing — a restart is not a reset", () => {
     withPath("reopen", (path) => {
       const first = openGovernance(path, OPTIONS);
+      seedDemoSubjects(first);
       first.run("UPDATE subjects SET clearance = 123456 WHERE display_name = 'Alice'");
       record(first, [
         {
@@ -730,7 +731,6 @@ describe("GET /health after a migration (#103)", () => {
     resetToken: "",
     loanToolkit: "Loan",
     approvalsToolkit: "Approvals",
-    personaEmails: {},
     deadlineMs: 2500,
     policyPollMs: 250,
     grantTtlSeconds: 900,

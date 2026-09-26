@@ -93,7 +93,7 @@ function page(title: string, body: string): string {
   <div class="brand"><span class="mark">ID</span> Enterprise Identity</div>
   ${body}
   <p class="fixture">Demo identity provider — a stand-in for the enterprise's real IdP.<br>
-  Accounts come from <code>apps/idp/src/fixtures/people.json</code>.</p>
+  Accounts are added with <code>bun run users</code>.</p>
 </main>
 </body>
 </html>`;

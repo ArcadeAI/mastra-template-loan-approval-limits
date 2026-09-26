@@ -27,6 +27,7 @@ import { createServer } from "../../lib/control-plane/server.ts";
 // The reader lives beside this file since #20 needed it for the second event
 // name on the same socket. Same parser, same contract, one copy.
 import { openEventStream as open, type Frame, type Reader } from "./sse-reader.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 const SECRET = "test-secret";
 const STORE_TOKEN = "test-store-token";
@@ -40,7 +41,6 @@ const config: HooksConfig = {
   approvalsStoreToken: STORE_TOKEN,
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: 250,
   grantTtlSeconds: 900,
@@ -63,6 +63,7 @@ let logs: string[];
 function boot(backlogLimit?: number): void {
   logs = [];
   db = openGovernance(":memory:", config);
+  seedDemoSubjects(db);
   cache = createPolicyCache(db, { log: (line) => logs.push(line), pollMs: 10 });
   cache.start();
   bus = createEventBus({ onSubscriberError: (cause) => logs.push(`subscriber: ${String(cause)}`) });

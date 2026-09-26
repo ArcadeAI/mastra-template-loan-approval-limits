@@ -13,12 +13,18 @@
  *
  * `BETTER_AUTH_SECRET` is freshly random per call, never committed, and gone
  * with the directory.
+ *
+ * The demo cast goes into the same `idp.db` before Next starts (#33): the app
+ * seeds nobody at first boot, and these tests sign in as the cast
+ * (`demo-cast.ts`), so they are written the way `bun run users seed-demo`
+ * writes them.
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { childEnv } from "./child-env.ts";
 import { spawnChild } from "./child.ts";
+import { seedDemoIdentity } from "./demo-cast.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -39,9 +45,9 @@ export async function appIdentityEnv(origin: string, dir: string): Promise<AppId
     IDP_OAUTH_REDIRECT_URIS_WEB: `${origin}/api/auth/callback`,
   };
 
-  // An allowlisted environment (`child-env.ts`): a developer's own PERSONA_*
-  // and IDP_* values are not passed through, because these tests are about the
-  // fixture, as the identity harness's are.
+  // An allowlisted environment (`child-env.ts`): a developer's own IDP_* and
+  // host values are not passed through, because these tests are about the
+  // throwaway database, as the identity harness's are.
   const rotate = spawnChild(
     ["bun", join(REPO_ROOT, "scripts", "identity", "oauth-client.ts"), "--json", "--client", "web", "--rotate"],
     { env: childEnv({ ...base, NODE_ENV: "test" }), stdout: "pipe", stderr: "pipe" },
@@ -57,6 +63,8 @@ export async function appIdentityEnv(origin: string, dir: string): Promise<AppId
   };
   const web = printed.clients.find((each) => each.key === "web");
   if (!web?.client_secret) throw new Error(`no readable secret for client C in:\n${out}`);
+
+  await seedDemoIdentity(base.IDP_DB_PATH!);
 
   return {
     env: { ...base, IDP_CLIENT_ID: web.client_id, IDP_CLIENT_SECRET: web.client_secret },

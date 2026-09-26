@@ -78,18 +78,11 @@ export function writeEnvFile(path: string, text: string): void {
 
 /**
  * The variables `bun run setup-arcade` decides about (#30): `.env.example`'s
- * seven required values, which it reads, and its second block, which it
+ * three required values, which it reads, and its second block, which it
  * writes. `app-test/setup-arcade.test.ts` holds both lists to `.env.example`.
+ * No persona addresses since #33: users are added with `bun run users`.
  */
-export const REQUIRED_KEYS = [
-  "ANTHROPIC_API_KEY",
-  "ARCADE_API_KEY",
-  "APP_PUBLIC_HOST",
-  "PERSONA_LOAN_OFFICER_EMAIL",
-  "PERSONA_CREDIT_ANALYST_EMAIL",
-  "PERSONA_VP_CREDIT_EMAIL",
-  "PERSONA_CHIEF_CREDIT_OFFICER_EMAIL",
-] as const;
+export const REQUIRED_KEYS = ["ANTHROPIC_API_KEY", "ARCADE_API_KEY", "APP_PUBLIC_HOST"] as const;
 
 export const WRITTEN_KEYS = [
   "SESSION_SECRET",

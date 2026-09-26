@@ -52,11 +52,9 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// The fixture itself, not the provider's `loadPeople`: the persona-email
-// overrides it applies are deliberately not wanted here — `bootApp` drops
-// every `PERSONA_*` from the environment, so the fixture's own address is the
-// one that gets seeded.
-import people from "../lib/identity/provider/fixtures/people.json" with { type: "json" };
+// The demo cast as the tests seed it (#33: the app seeds nobody): the
+// fixture's own addresses, the tests' own throwaway password.
+import { DEMO_CAST, seedDemoIdentity, seedDemoSubjects } from "../app-test/demo-cast.ts";
 import { childEnv } from "../app-test/child-env.ts";
 import { spawnChild } from "../app-test/child.ts";
 import { bootApp, type App } from "./app.ts";
@@ -68,7 +66,7 @@ const REDIRECT_URI = "http://127.0.0.1:9/callback";
 const BETTER_AUTH_SECRET = "reset-grants-test-secret-".padEnd(48, "x");
 const OVER_LIMIT_LOAN = "LN-2291";
 
-const alice = people.people.find((person) => person.persona === "dana")!;
+const alice = DEMO_CAST.dana;
 
 let app: App;
 /** The access token Arcade would be holding: minted once, never re-minted. */
@@ -238,13 +236,16 @@ beforeAll(async () => {
   appEnv = {
     RESET_TOKEN,
     ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
-    PERSONA_LOAN_OFFICER_EMAIL: alice.email,
     BETTER_AUTH_SECRET,
     IDP_OAUTH_REDIRECT_URIS: REDIRECT_URI,
     // The credentials script below opens the same `idp.db` the app does.
     IDP_DB_PATH: join(data, "idp.db"),
   };
   app = await bootApp(appEnv);
+  // Both halves of the demo cast, as `bun run users seed-demo` writes them,
+  // into the files the running app has open.
+  await seedDemoIdentity(appEnv.IDP_DB_PATH!);
+  seedDemoSubjects(app.databases.governance);
 
   arcadeToken = await authorizeAlice();
 }, 120_000);

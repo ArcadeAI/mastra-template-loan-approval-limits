@@ -34,7 +34,8 @@ import { GovernanceEvent } from "@cg/policy-schema";
 import { newEventId, record } from "../../lib/control-plane/audit-log.ts";
 import type { HooksConfig } from "../../lib/control-plane/config.ts";
 import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
-import { openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { loadSeed, openGovernance } from "../../lib/control-plane/policy-store.ts";
+import { addSubject } from "../../lib/control-plane/subjects.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
 
 const DEFAULT_CLIENT_DIR = resolve(import.meta.dir, "../../lib/governance");
@@ -69,7 +70,6 @@ const config: HooksConfig = {
   approvalsStoreToken: "interop-store-token",
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: 250,
   grantTtlSeconds: 900,
@@ -78,6 +78,8 @@ const config: HooksConfig = {
 };
 
 const db = openGovernance(":memory:", config);
+// A fresh governance.db seeds nobody (#33); this probe acts as the demo cast.
+for (const subject of loadSeed(config).subjects) addSubject(db, subject, "interop-21");
 const cache = createPolicyCache(db, { log: () => {}, pollMs: 20 });
 cache.start();
 const bus = createEventBus({ onSubscriberError: (cause) => console.error("bus:", cause) });

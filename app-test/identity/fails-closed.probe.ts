@@ -49,6 +49,18 @@ async function signedInAsCharlie(): Promise<void> {
   pieces.forEach((piece, index) => jar.set(chunkName(SESSION_COOKIE, index), piece));
 }
 
+// The control world is a working deployment, and since #33 a working one has
+// people in it that somebody added: the demo cast, in both halves, the way
+// `bun run users seed-demo` adds it, before either module opens its file.
+if (!FAILED) {
+  const { seedDemoIdentity, seedDemoSubjects } = await import("../demo-cast.ts");
+  const { openGovernance } = await import("../../lib/control-plane/policy-store.ts");
+  await seedDemoIdentity(process.env.IDP_DB_PATH!);
+  const governance = openGovernance(process.env.GOVERNANCE_DB_PATH!, { loanToolkit: "Loan", approvalsToolkit: "Approvals" });
+  seedDemoSubjects(governance);
+  governance.close();
+}
+
 const { identityProviderFailure, serve } = await import("../../lib/identity/provider/instance.ts");
 const failure = await identityProviderFailure();
 
@@ -70,6 +82,7 @@ test(`/health reports identity as ${FAILED ? "failed" : "ok"}, still with HTTP 2
     expect(body.status).toBe("degraded");
   } else {
     expect(body.identity).toMatchObject({ status: "ok", people: 4 });
+    expect((body as { user_drift?: unknown }).user_drift).toBeNull();
     expect(body.status).toBe("ok");
   }
 });

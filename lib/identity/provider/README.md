@@ -34,7 +34,7 @@ plugin as an OAuth 2.1 authorization server, owning `idp.db`.
 | `GET /login`, `GET /consent` | The two pages a persona sees. Server-rendered HTML, legible on a projector. |
 | `POST /sign-in/email` | Better Auth's own sign-in. The login page calls it in-process. |
 | `GET /identity/health` | The module's own health: the client id, the endpoint URLs, the JWKS URL, what happened to the client secret at boot, and whether the reset route exists. `/health` until #6; the app's `/health` is the app's, and carries `identity: {status, issuer, people}`. |
-| `POST /identity/admin/reset` | Back to the seeded personas, leaving the OAuth client alone. Bearer `RESET_TOKEN`; 404 when that is unset. See below. `/admin/reset` until #6. |
+| `POST /identity/admin/reset` | Everybody signed out, nobody deleted, leaving the OAuth client alone. Bearer `RESET_TOKEN`; 404 when that is unset. See below. `/admin/reset` until #6. |
 
 Every Better Auth route hangs off the site root, so the URLs a human types into the
 Arcade dashboard have no `/api/auth` prefix to forget. Anything else is a 404 from here
@@ -75,25 +75,21 @@ anything holding the old key set.
 
 ## The people
 
-Four personas, seeded from [`fixtures/people.json`](./fixtures/people.json) the
-first time `idp.db` is opened, in one transaction, following the loan book's pattern
-(#29): a seed that fails leaves no schema, so the next boot retries instead of coming up
-green and empty. All four personas use the same checked-in password,
-`megaforce-demo-2026`. It is a demo-only fixture credential, not a production secret;
-never reuse it outside this demo. A merged fixture change reaches a persistent deployment
-only after the new code is deployed **and** `bun run reset` (or the reset control) is run —
-a redeploy alone does not reseed `idp.db`.
+**Nobody is seeded** (#33). The first time `idp.db` is opened it gets its schema, in one
+transaction following the loan book's pattern (#29), and no people: there is no shipped
+cast and no shipped password. Every person is added from the terminal with
+`bun run users add`, or the demo cast (Alice, Bob, Charlie and Michael) with
+`bun run users seed-demo`; each gets a generated password printed once, or one passed with
+`--password`, and only its scrypt hash is stored. Until somebody is added, the app's
+`/health` reports `identity: { status: "no_users" }` and names both commands.
 
 The emails are the join key for the whole system — Arcade `user_id`, OAuth subject, loan
-book actor. The fixture ships placeholder addresses; set
-`PERSONA_LOAN_OFFICER_EMAIL`, `PERSONA_CREDIT_ANALYST_EMAIL`, `PERSONA_VP_CREDIT_EMAIL` and
-`PERSONA_CHIEF_CREDIT_OFFICER_EMAIL` (the same role variables the persona switcher uses)
-**before the first boot** to seed the addresses the Arcade accounts were created under
-(#13). A seed is not re-read; change them afterwards and you need a reset. Deprecated
-name-based variables are refused before seeding.
+book actor — so each person is added under the address they will sign in with, and
+`bun run users` writes the matching `subjects` row in `governance.db` in the same step.
+The app's `/health` names anybody who has one half and not the other (`user_drift`).
 
 **Every address is lowercased on the way in, and `user.email` is `collate nocase`.** Type
-the variables in whatever case the Arcade invites used. Before #58 a persona configured
+the address in whatever case the Arcade invite used. Before #58 a persona configured
 as `Alice@…` could not log in at all: Better Auth lowercases the address before it
 looks the row up, SQLite compares text case-sensitively, and the login page reports the
 unreachable row as "That email and password did not match" — the same sentence it gives a
@@ -472,9 +468,10 @@ curl -s https://<idp-host>/.well-known/openid-configuration \
 and OAuth would break at the next authorize — minutes before presenting, with no hook
 fired and the panel dark.
 
-So the reset for this database is its own script, and it clears **people and their
-state** — users, credentials, sessions, tokens, consents — while leaving the `oauthClient`
-row and the `jwks` signing keys alone:
+So the reset for this database is its own script, and it clears **everybody's state** —
+sessions, tokens, consents, verifications — while leaving every user and credential (each
+person's password is their own since #33, and there is no shipped one to put back), the
+`oauthClient` row and the `jwks` signing keys alone:
 
 ```sh
 bun run identity:reset
@@ -505,7 +502,7 @@ is served by the process that is actually answering requests.
 `reset: "disabled"`, so the 404 has an explanation somebody can find. It is the same
 variable and the same rules `apps/hooks` and `apps/loan-app` use, and `bun run reset` at
 the repo root presents one bearer to all three (#23). `app-test/identity/reset-endpoint.test.ts` holds
-the client id, the re-seeded people signing in again, idempotence and both refusals.
+the client id, the kept people signing in again with their own passwords, idempotence and both refusals.
 
 ## Running it
 
@@ -544,8 +541,9 @@ template's `idp.db` starts fresh instead. `SCHEMA_VERSION` is 2, and there are t
 - **A database this build wrote** — opened as it is, no DDL, no inserts.
 - **Any other version** — newer throws `SchemaTooNewError`, older (0 before #70, 1 from #70
   to #6) throws `SchemaTooOldError`, both from `openPeople`, before anything is served,
-  naming the file and the way out: delete it and restart, which reseeds — and rotates the
-  OAuth client, so Arcade has to be re-registered.
+  naming the file and the way out: delete it and restart, which comes back with nobody in it
+  (add the people again with `bun run users`) — and rotates the OAuth client, so Arcade has
+  to be re-registered.
 
 The demo's upgrade path — replaying the DDL onto a pre-#70 disk and rebuilding `user` with
 `COLLATE NOCASE` for a pre-#58 one (#69, #58) — went with #6, and so did its tests and the
@@ -574,4 +572,3 @@ outside the identity module imports Better Auth, its signing keys or its issuanc
 | `BETTER_AUTH_SECRET` | Signs sessions and the OAuth query, and encrypts the ID-token signing key at rest. Written by `bun run setup-arcade`. Required in production; a fixed dev value otherwise. Changing it on a pre-#70 disk is what turns the client-secret migration into a rotation. |
 | `APP_PUBLIC_HOST` | The app's public host; the issuer is it with its scheme — http for localhost and 127.0.0.1, https otherwise. Falls back to `localhost:PORT`. It replaced `IDP_PUBLIC_URL` on #6. |
 | `IDP_OAUTH_REDIRECT_URIS` | Comma-separated. Defaults to Arcade Cloud's callback. |
-| `PERSONA_LOAN_OFFICER_EMAIL`, `PERSONA_CREDIT_ANALYST_EMAIL`, `PERSONA_VP_CREDIT_EMAIL`, `PERSONA_CHIEF_CREDIT_OFFICER_EMAIL` | The four role addresses, read at first seed. Lowercased before they are stored; case does not have to match Arcade. |

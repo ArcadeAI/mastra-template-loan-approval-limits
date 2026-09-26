@@ -55,7 +55,7 @@ let running: Subprocess | null = null;
 function baseEnv(port: number): Record<string, string> {
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+      ([key, value]) => value !== undefined && !key.startsWith("IDP_"),
     ),
   ) as Record<string, string>;
 

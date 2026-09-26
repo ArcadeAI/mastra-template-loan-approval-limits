@@ -26,6 +26,7 @@ import type { HooksConfig } from "../../lib/control-plane/config.ts";
 import { createPolicyCache, type PolicyCache } from "../../lib/control-plane/policy-cache.ts";
 import { openGovernance } from "../../lib/control-plane/policy-store.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
+import { seedDemoSubjects } from "../demo-cast.ts";
 
 const SECRET = "test-secret";
 const STORE_TOKEN = "test-store-token";
@@ -39,7 +40,6 @@ const config: HooksConfig = {
   approvalsStoreToken: STORE_TOKEN,
   loanToolkit: "Loan",
   approvalsToolkit: "Approvals",
-  personaEmails: {},
   deadlineMs: 2500,
   policyPollMs: 250,
   grantTtlSeconds: 900,
@@ -54,6 +54,7 @@ let base: string;
 
 beforeEach(() => {
   db = openGovernance(":memory:", config);
+  seedDemoSubjects(db);
   cache = createPolicyCache(db, { pollMs: 60_000 });
   cache.start();
   server = createServer({ config, db, cache, log: () => {} });
@@ -395,6 +396,7 @@ describe("reading the log is not on the hook path", () => {
     // queries across twenty warm hook calls). A reviewer paging the log must
     // not put a query back on that handle.
     const real = openGovernance(":memory:", config);
+    seedDemoSubjects(real);
     const counted = counting(real);
     const isolated = createPolicyCache(counted.db, { pollMs: 60_000 });
     isolated.start();

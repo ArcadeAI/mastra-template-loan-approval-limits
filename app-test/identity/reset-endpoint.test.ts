@@ -12,7 +12,8 @@
  *
  *   1. the client id does not move — everything else is recoverable, and this
  *      one costs a re-registration in a dashboard and fails invisibly;
- *   2. the people come back, and a sign-in works against the re-seeded rows;
+ *   2. the people are still there, and each signs in with their own password
+ *      (#33: nobody is re-seeded, because there is no shipped password);
  *   3. running it twice leaves the same state;
  *   4. no bearer, no reset; no `RESET_TOKEN`, no route.
  */
@@ -24,22 +25,15 @@ import { dirname, join } from "node:path";
 
 import { serveOnFreePort } from "../cdp.ts";
 import { spawnChild } from "../child.ts";
-import { loadPeople } from "../../lib/identity/provider/db.ts";
+import { DEMO_PEOPLE, seedDemoIdentity } from "../demo-cast.ts";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const RESET_TOKEN = "idp-reset-token-for-tests";
 const SECRET = "test-secret-".padEnd(48, "x");
 const REDIRECT_URI = "http://127.0.0.1:9/callback";
-const COMMON_PASSWORD = "megaforce-demo-2026";
-const LEGACY_PASSWORDS = {
-  dana: "dana-demo-2026",
-  sam: "sam-demo-2026",
-  riley: "riley-demo-2026",
-  morgan: "morgan-demo-2026",
-} as const;
 
-const people = loadPeople({});
-const dana = people.find((person) => person.persona === "dana")!;
+const people = DEMO_PEOPLE;
+const dana = people.find((person) => person.key === "dana")!;
 
 interface HealthBody {
   status: string;
@@ -68,13 +62,16 @@ async function boot(overrides: Record<string, string>): Promise<Instance> {
   const dbPath = join(tmpdir(), `cg-idp-reset-${crypto.randomUUID()}`, "idp.db");
   const logPath = join(dirname(dbPath), "stdout.log");
   mkdirSync(dirname(dbPath), { recursive: true });
+  // Nobody is seeded at first boot (#33): the demo cast is added the way
+  // `bun run users seed-demo` adds it, before the provider opens the file.
+  await seedDemoIdentity(dbPath);
 
-  // Any PERSONA_* or IDP_* in the developer's shell is deliberately not passed
+  // Any IDP_* in the developer's shell is deliberately not passed
   // on, so this is about the fixture rather than about their environment.
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key, value]) =>
-        value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+        value !== undefined && !key.startsWith("IDP_"),
     ),
   ) as Record<string, string>;
 
@@ -147,7 +144,7 @@ describe("the reset the root command calls", () => {
     expect((await health(live.baseUrl)).oauth.client_id).toBe(before.oauth.client_id);
   });
 
-  test("the people come back, and one of them can still sign in", async () => {
+  test("the people are all still there, and one of them can still sign in", async () => {
     const before = await health(live.baseUrl);
     expect(before.people).toBeGreaterThan(0);
 
@@ -155,7 +152,7 @@ describe("the reset the root command calls", () => {
     expect(body.people.after).toBe(before.people);
     expect((await health(live.baseUrl)).people).toBe(before.people);
 
-    // The rows are not just present, they are usable: a re-seeded persona's
+    // The rows are not just present, they are usable: a kept person's
     // password still authenticates. A reset that wrote unusable credential
     // rows would satisfy every count above and strand the demo at the login
     // page.
@@ -167,7 +164,10 @@ describe("the reset the root command calls", () => {
     expect(signIn.status).toBe(200);
   });
 
-  test("all four personas use the common password and reject legacy passwords after reset", async () => {
+  // Changed by #33: this held all four personas to one shipped password after
+  // a reset. There is none any more; each person keeps the password they were
+  // given, and a reset does not replace it with anything.
+  test("after a reset every person signs in with the password they already had, and no other", async () => {
     const response = await reset(live.baseUrl);
     expect(response.status).toBe(200);
 
@@ -175,19 +175,16 @@ describe("the reset the root command calls", () => {
       const signIn = await fetch(`${live.baseUrl}/sign-in/email`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: live.baseUrl },
-        body: JSON.stringify({ email: person.email, password: COMMON_PASSWORD }),
+        body: JSON.stringify({ email: person.email, password: person.password }),
       });
       expect(signIn.status).toBe(200);
-    }
 
-    for (const person of people) {
-      const legacyPassword = LEGACY_PASSWORDS[person.persona];
-      const signIn = await fetch(`${live.baseUrl}/sign-in/email`, {
+      const wrong = await fetch(`${live.baseUrl}/sign-in/email`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: live.baseUrl },
-        body: JSON.stringify({ email: person.email, password: legacyPassword }),
+        body: JSON.stringify({ email: person.email, password: `${person.key}-demo-2026` }),
       });
-      expect(signIn.status).toBe(401);
+      expect(wrong.status).toBe(401);
     }
   });
 
@@ -203,16 +200,17 @@ describe("the reset the root command calls", () => {
     expect(twice.oauth.client_id).toBe(once.oauth.client_id);
   });
 
-  test("the response says who was re-seeded, who was kept, and that everyone was signed out (#32)", async () => {
+  // Changed by #33: the response split the demo cast (re-seeded) from the
+  // users `bun run users` added (kept). Nobody is re-seeded now, so everybody
+  // is kept, and identity has no notion of a demo cast to split them by.
+  test("the response names everybody it kept, and that everyone was signed out (#32, #33)", async () => {
     const body = (await (await reset(live.baseUrl)).json()) as ResetBody & {
-      demo_cast: string[];
+      demo_cast?: string[];
       kept: string[];
       signed_out: string;
     };
-    expect(body.demo_cast).toEqual(people.map((person) => person.email).sort());
-    // Nobody but the demo cast on this disk; `test/reset-real-users.test.ts`
-    // adds somebody and watches them survive.
-    expect(body.kept).toEqual([]);
+    expect(body.kept).toEqual(people.map((person) => person.email).sort());
+    expect(body.demo_cast).toBeUndefined();
     expect(body.signed_out).toBe("everyone");
   });
 

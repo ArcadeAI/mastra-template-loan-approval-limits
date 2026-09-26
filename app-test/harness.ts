@@ -27,12 +27,15 @@
  * the provider; until then the live round trip has no test in this repo.
  */
 import type { Subprocess } from "bun";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readWebConfig, type WebConfig } from "../lib/config.ts";
 import { createArcadeStandIn } from "../scripts/arcade-stand-in.ts";
 import { spawnChild } from "./child.ts";
+import { seedDemoGovernance } from "./demo-cast.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
@@ -176,6 +179,18 @@ export interface Hooks {
 export async function startHooks(
   env: Record<string, string> = {},
 ): Promise<Hooks> {
+  // A first boot seeds nobody (#33). Unless the caller brings a database of
+  // its own, the control plane gets a throwaway file with the demo cast in it,
+  // written the way `bun run users seed-demo` writes it, before it boots.
+  let scratch: string | null = null;
+  const own = env.GOVERNANCE_DB_PATH !== undefined;
+  if (!own) {
+    scratch = mkdtempSync(join(tmpdir(), "cg-harness-hooks-"));
+    seedDemoGovernance(join(scratch, "governance.db"), {
+      loanToolkit: env.ARCADE_LOAN_TOOLKIT ?? "Loan",
+      approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT ?? "Approvals",
+    });
+  }
   const child = spawnChild({
     cmd: ["bun", join(REPO_ROOT, "scripts", "control-plane.ts")],
     cwd: REPO_ROOT,
@@ -184,7 +199,7 @@ export async function startHooks(
       // 0, so the OS picks. The service prints what it got, and that line is
       // how the port is learned — never a literal and never a guess.
       PORT: "0",
-      GOVERNANCE_DB_PATH: ":memory:",
+      GOVERNANCE_DB_PATH: scratch === null ? ":memory:" : join(scratch, "governance.db"),
       ARCADE_HOOK_SIGNING_SECRET: HOOK_SECRET,
       APPROVALS_STORE_TOKEN: STORE_TOKEN,
       ARCADE_LOAN_TOOLKIT: "Loan",
@@ -195,6 +210,9 @@ export async function startHooks(
     stdout: "pipe",
     stderr: "pipe",
   });
+
+  // The throwaway file goes with the process that held it.
+  if (scratch !== null) void child.exited.then(() => rmSync(scratch!, { recursive: true, force: true }));
 
   const { port } = await readPort(child);
   return { host: `localhost:${port}`, process: child };

@@ -13,8 +13,6 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 
-import { readPersonaEmailOverrides } from "../../../packages/policy-schema/contract/persona-email-contract.ts";
-import fixture from "./fixtures/people.json" with { type: "json" };
 // Generated from the installed Better Auth by `scripts/generate-schema.ts`;
 // `test/schema.test.ts` fails when it is stale. Checked in rather than built
 // at boot because the seed has to create the schema itself, inside the seed
@@ -23,18 +21,22 @@ import fixture from "./fixtures/people.json" with { type: "json" };
 // what actually runs.
 import GENERATED_SCHEMA from "./schema.sql" with { type: "text" };
 
+// Parsed rather than trusted: a caller's typo fails with a field path instead
+// of surfacing as somebody who quietly cannot log in.
 const personSchema = z.object({
-  persona: z.enum(["dana", "sam", "riley", "morgan"]),
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(8),
 });
 
-// Hand-edited, so parsed rather than trusted: a typo fails at boot with a
-// field path instead of surfacing as a persona who quietly cannot log in.
-const fixtureSchema = z.object({ people: z.array(personSchema).min(1) });
-
-/** One person as they appear in the fixture. */
+/**
+ * One person to seed: who they are and the password they sign in with.
+ *
+ * **Nobody is seeded by default** (#33). There is no shipped cast and no
+ * shipped password: a fresh `idp.db` holds nobody, and `bun run users add` or
+ * `bun run users seed-demo` adds each person with a password of their own. A
+ * caller that seeds (a test, with its own throwaway password) passes them.
+ */
 export type PersonSeed = z.infer<typeof personSchema>;
 
 /** What the service tells about a person. Name and email — that is the whole record. */
@@ -45,15 +47,7 @@ export interface Person {
 }
 
 /**
- * The fixture, with each persona's email replaced by the role variable from
- * the shared persona email contract when that variable is set.
- *
- * The email is the join key across the whole system — Arcade `user_id`, OAuth
- * subject, loan-book actor — and the Arcade accounts are created by hand on
- * #13 under whatever addresses are available. `.env.example` already carries
- * these four variables for the persona switcher; reading them here is what
- * keeps `idp.db` and the Arcade accounts on the same string without a second
- * place to edit. The fixture's own addresses are the fallback for a local run.
+ * Each seed parsed, with its address lowercased.
  *
  * **Every address is lowercased on the way in** (#58). Better Auth lowercases
  * the address before it looks a user up, and SQLite compares text
@@ -64,11 +58,10 @@ export interface Person {
  * `collate nocase` on the column is the second line of defence, for a row
  * this function did not write.
  */
-export function loadPeople(env: Record<string, string | undefined> = process.env): PersonSeed[] {
-  const overrides = readPersonaEmailOverrides(env);
-  return fixtureSchema.parse(fixture).people.map((person) => {
-    const override = overrides[person.persona];
-    return { ...person, email: (override || person.email).toLowerCase() };
+function normalise(people: PersonSeed[]): PersonSeed[] {
+  return people.map((person) => {
+    const parsed = personSchema.parse({ ...person, email: person.email.trim() });
+    return { ...parsed, email: parsed.email.toLowerCase() };
   });
 }
 
@@ -86,7 +79,7 @@ export function loadPeople(env: Record<string, string | undefined> = process.env
  *     the old key set would reject the ID token. Same failure, one layer down.
  *
  * `user` and `account` — who somebody *is*, and their password — are not here
- * either: since #32 the reset deletes those only for the demo cast.
+ * either: since #33 the reset deletes nobody (see `resetPeople`).
  */
 const STATE_TABLES = [
   "oauthAccessToken",
@@ -188,7 +181,7 @@ export function readSchemaVersion(db: Database): number {
 function resetAdvice(path: string): string {
   return (
     `Reset it: stop the app, delete ${path} (and its -wal and -shm siblings), ` +
-    `and restart — the fixture reseeds on an empty disk. Note that deleting the file ` +
+    `and restart — it comes back empty, and \`bun run users\` adds the people again. Note that deleting the file ` +
     `also rotates the OAuth client, so Arcade has to be re-registered afterwards.`
   );
 }
@@ -235,15 +228,16 @@ export class SchemaTooOldError extends Error {
 }
 
 /**
- * Opens the people database, bootstrapping it from the fixture only when it
- * has no schema, and refusing one written by any other schema version.
+ * Opens the people database, creating the schema only when it has none, and
+ * refusing one written by any other schema version. The schema is created
+ * with nobody in it unless `people` names somebody (#33).
  *
  * Seed-if-empty rather than seed-on-boot: `idp.db` lives on a disk, so a
  * consent granted on stage is still there after a restart. Getting back to a
  * clean state is the reset, never a side effect of deploying — and that reset
  * leaves the OAuth client alone, see `resetPeople`.
  */
-export async function openPeople(path: string, people: PersonSeed[] = loadPeople()): Promise<Database> {
+export async function openPeople(path: string, people: PersonSeed[] = []): Promise<Database> {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
 
   const db = new Database(path, { create: true });
@@ -268,7 +262,7 @@ export async function openPeople(path: string, people: PersonSeed[] = loadPeople
  * A disk that already has a schema is opened only when it is this build's.
  *
  * **No inserts and no DDL.** The rows on this disk are the state the demo is
- * in, and `resetPeople` is what re-seeds people — deliberately, never at boot.
+ * in, and `bun run users` is what adds or removes people — deliberately, never at boot.
  */
 function checkSchemaVersion(db: Database, path: string): void {
   const found = readSchemaVersion(db);
@@ -299,7 +293,7 @@ interface HashedPerson {
  */
 async function hashAll(people: PersonSeed[]): Promise<HashedPerson[]> {
   return Promise.all(
-    people.map(async ({ name, email, password }) => ({
+    normalise(people).map(async ({ name, email, password }) => ({
       name,
       email,
       passwordHash: await hashPassword(password),
@@ -316,8 +310,8 @@ async function hashAll(people: PersonSeed[]): Promise<HashedPerson[]> {
  * and wrapping only the inserts produces the one failure that cannot recover
  * on its own: a database holding a schema and no rows, which `hasSchema` reads
  * as already seeded. The service then comes up green and nobody can log in —
- * and on a disk that persists, it stays that way. A forker who gives two
- * personas the same email is one boot away from that.
+ * and on a disk that persists, it stays that way. A caller that seeds two
+ * people under one email is one boot away from that.
  *
  * Same shape as the loan book's seed (#29), copied rather than reinvented.
  * Exported for the test that holds this line.
@@ -336,33 +330,27 @@ export async function seed(db: Database, people: PersonSeed[]): Promise<void> {
 
 /** What a reset did to the people, by address. */
 export interface PeopleReset {
-  /** The demo cast members who were on disk, deleted and seeded again from the fixture. */
-  demoCast: string[];
-  /** Everybody else — added by `bun run users` — whose account was left as it was. */
+  /** Everybody on disk, every one of them kept, and every one of them signed out. */
   kept: string[];
 }
 
 /**
  * Signs **everybody** out — every session, token, consent and verification row
- * — and puts the demo cast back the way the fixture seeds it, in one
- * transaction. **The OAuth client is untouched**, so the `client_id` and
- * `client_secret` registered in the Arcade dashboard keep working across a
- * reset.
+ * — in one transaction, and deletes nobody. **The OAuth client is untouched**,
+ * so the `client_id` and `client_secret` registered in the Arcade dashboard
+ * keep working across a reset.
  *
- * ## The demo cast, and only the demo cast (#32)
+ * ## Nobody is deleted, and nobody is seeded (#32, #33)
  *
- * The demo cast is the people whose address the fixture seeds (after the
- * `PERSONA_*` overrides, the same `loadPeople` the first boot used). Each one
- * that is on disk is deleted and inserted again, so a changed password or name
- * goes back to the fixture's. One that is *not* on disk stays absent: the cast
- * is optional since #31, and a reset that invited four people into a
- * deployment that never had them would be a reset adding accounts.
- *
- * Everyone else was added by `bun run users`, and their `user` and credential
- * `account` rows are left exactly as they were — a hard reset is for
- * rehearsing the demo from clean, not for deleting the people who use it. They
- * are signed out with everybody else, and sign in again with the password they
- * already had.
+ * Until #33 the demo cast was the fixture's four people with a shared fixture
+ * password, and a reset deleted and re-inserted them, putting a changed
+ * password or name back. There is no fixture password any more: every person,
+ * the demo cast included, was added by `bun run users` with a password of
+ * their own, printed once and never stored in a form that could be put back.
+ * So there is nothing to restore an account to, and a reset that deleted one
+ * would leave somebody who cannot sign in. Every `user` and credential
+ * `account` row stays exactly as it was; each person signs in again with the
+ * password they already had.
  *
  * Deleting the state also deletes every consent, so the first authorize after
  * a reset shows the login page and the consent page again. That is what a
@@ -370,35 +358,15 @@ export interface PeopleReset {
  *
  * Exported for `scripts/reset.ts` and the test that asserts the client survives.
  */
-export async function resetPeople(db: Database, people: PersonSeed[] = loadPeople()): Promise<PeopleReset> {
-  const cast = new Map(people.map((person) => [person.email.toLowerCase(), person]));
-  const hashed = await hashAll(people);
-
+export function resetPeople(db: Database): PeopleReset {
   return db.transaction(() => {
     for (const table of STATE_TABLES) db.exec(`DELETE FROM "${table}"`);
-
-    const onDisk = db.query<{ id: string; email: string }, []>('SELECT "id", "email" FROM "user"').all();
-    const present = onDisk.filter((row) => cast.has(row.email.toLowerCase()));
-    const kept = onDisk
-      .filter((row) => !cast.has(row.email.toLowerCase()))
+    const kept = db
+      .query<{ email: string }, []>('SELECT "email" FROM "user"')
+      .all()
       .map((row) => row.email.toLowerCase())
       .sort();
-
-    const deleteAccounts = db.prepare<unknown, [string]>('DELETE FROM "account" WHERE "userId" = ?');
-    const deleteUser = db.prepare<unknown, [string]>('DELETE FROM "user" WHERE "id" = ?');
-    try {
-      for (const row of present) {
-        deleteAccounts.run(row.id);
-        deleteUser.run(row.id);
-      }
-    } finally {
-      deleteAccounts.finalize();
-      deleteUser.finalize();
-    }
-
-    const reseeded = new Set(present.map((row) => row.email.toLowerCase()));
-    insertPeople(db, hashed.filter((person) => reseeded.has(person.email.toLowerCase())));
-    return { demoCast: [...reseeded].sort(), kept };
+    return { kept };
   })();
 }
 
@@ -453,7 +421,7 @@ export class PersonExistsError extends Error {
  * One person, added by hand (`bun run users add`, #31): a `user` row and its
  * `credential` account, hashed and inserted exactly as the seed does, in one
  * transaction. The email is lowercased on the way in, for the reason
- * `loadPeople` gives. Refuses an address that already has a user.
+ * `normalise` gives. Refuses an address that already has a user.
  *
  * The password is hashed here and goes nowhere else: not into a log line, and
  * not onto disk in any form but the scrypt hash.

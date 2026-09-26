@@ -34,7 +34,7 @@ import {
   type OAuthClientCredentials,
 } from "./client.ts";
 import { readConfig, resetEnabled, usingDevSecret, type IdpConfig } from "./config.ts";
-import { countPeople, openPeople } from "./db.ts";
+import { countPeople, listPeople, openPeople } from "./db.ts";
 import { renderConsentPage, renderLoginPage, renderMessagePage } from "./pages.ts";
 import { tolerateAuthorizationCodeReplay } from "./replay-tolerance.ts";
 import { OAuthClientRotatedError, RESET_PATH, resetSummary, runIdpReset } from "./reset.ts";
@@ -50,6 +50,14 @@ const SERVICE = "idp";
  */
 export const MOUNT = "/identity";
 export const HEALTH_PATH = `${MOUNT}/health`;
+
+/**
+ * What a fresh `idp.db` says about itself (#33). Nobody is seeded — there is
+ * no shipped cast and no shipped password — so the first boot has nobody who
+ * can sign in, and this names the two commands that add somebody. The app's
+ * `/health` reports it under `identity`, degraded rather than failed.
+ */
+export const NO_USERS = "no users: run `bun run users add …` or `bun run users seed-demo`";
 export const MOUNTED_RESET_PATH = `${MOUNT}${RESET_PATH}`;
 
 /**
@@ -83,6 +91,12 @@ export interface IdentityProvider {
   /** Every path in {@link IDENTITY_PATHS}; a 404 for anything else. */
   fetch(request: Request): Promise<Response>;
   health(): IdentityHealth;
+  /**
+   * Every address that can sign in, lowercase. For the app's `/health`, which
+   * holds them against the control plane's subjects (`lib/user-drift.ts`, #33);
+   * never served on `/identity/health`.
+   */
+  emails(): string[];
   config: IdpConfig;
   /** Closes `idp.db`. For the test harnesses and the runner; the app never closes it. */
   close(): void;
@@ -921,7 +935,9 @@ export async function openIdentityProvider(config: IdpConfig = readConfig()): Pr
 
   console.log(
     `[${SERVICE}] identity provider ready — issuer ${config.baseURL}, ` +
-      `${countPeople(db)} people in ${config.dbPath}, ` +
+      `${countPeople(db)} people in ${config.dbPath}` +
+      (countPeople(db) === 0 ? ` (${NO_USERS})` : "") +
+      ", " +
       `OAuth client${clients.length > 1 ? "s" : ""} ` +
       `${clients.map((each) => `${each.clientId} (${each.key}, ${each.created ? "created" : "existing"})`).join(", ")}, ` +
       `JWKS ${config.baseURL}${JWKS_PATH} (${ID_TOKEN_ALG})` +
@@ -959,5 +975,7 @@ export async function openIdentityProvider(config: IdpConfig = readConfig()): Pr
     );
   }
 
-  return { fetch, health, config, close: () => db.close() };
+  const emails = () => listPeople(db).map((person) => person.email.toLowerCase());
+
+  return { fetch, health, emails, config, close: () => db.close() };
 }

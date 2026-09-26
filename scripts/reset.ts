@@ -14,14 +14,15 @@
  *     loan module     POST /bank/admin/reset   the loan book, LN-2291 unapproved
  *                                         (`apps/loan-app` until #5)
  *     identity        POST /identity/admin/reset   everyone's sessions,
- *                                         tokens and consents, and the demo
- *                                         cast re-seeded — `--hard` only
+ *                                         tokens and consents — `--hard` only
  *                                         (`apps/idp` until #6)
  *
- * **Neither scope deletes a real user** (#32). Somebody added with
+ * **Neither scope deletes a user** (#32, #33). Somebody added with
  * `bun run users` keeps their `subjects` row through both, and their
- * identity account through `--hard`; only the demo cast — the addresses the
- * fixtures seed — is put back, and each line of output names who was kept.
+ * identity account through `--hard`. Only the demo cast's subjects — the
+ * fixture's addresses, where `bun run users seed-demo` put them — are put back
+ * to the demo's roles and clearances; one that is not on disk is not added.
+ * Each line of output names who was kept.
  *
  * All three at one address since #6: `APP_PUBLIC_HOST`. To reset a deployment
  * rather than this checkout's app, run the command with that deployment's
@@ -340,15 +341,13 @@ async function resetOne(
       };
     }
     const people = body.people as { before: number; after: number };
-    const demoCast = (body.demo_cast ?? []) as string[];
     const kept = (body.kept ?? []) as string[];
     return {
       label: spec.label,
       ok: true,
       line:
-        `${label} OK  everyone signed out; ` +
-        (demoCast.length === 0 ? "no demo cast on disk" : `demo cast re-seeded (${demoCast.join(", ")})`) +
-        `; ${kept.length} user${kept.length === 1 ? "" : "s"} added by \`bun run users\` kept` +
+        `${label} OK  everyone signed out; nobody deleted, ${kept.length} account${kept.length === 1 ? "" : "s"} kept ` +
+        `with the password each already had` +
         (kept.length === 0 ? "" : ` (${kept.join(", ")})`) +
         `; people ${people.before}→${people.after}, ` +
         `OAuth client${after.length > 1 ? "s" : ""} ${after.map((each) => each.client_id).join(", ")} unchanged`,
@@ -361,16 +360,18 @@ async function resetOne(
       after: Record<string, number>;
     };
     const kept = ((body.kept as { subjects?: string[] } | undefined)?.subjects ?? []) as string[];
-    const removed = ((body.removed as { subjects?: string[] } | undefined)?.subjects ?? []) as string[];
+    const demoCast = ((body.demo_cast as { subjects?: string[] } | undefined)?.subjects ?? []) as string[];
     return {
       label: spec.label,
       ok: true,
       line:
         `${label} OK  ${String(body.mode)} at revision ${String(body.revision)} — ${deltas(counts.before, counts.after)}` +
-        `; demo cast's subjects re-seeded, ${kept.length} added by \`bun run users\` kept` +
-        (kept.length === 0 ? "" : ` (${kept.join(", ")})`) +
-        `, ${removed.length} removed with \`bun run users remove\` not re-seeded` +
-        (removed.length === 0 ? "" : ` (${removed.join(", ")})`),
+        "; " +
+        (demoCast.length === 0
+          ? "no demo cast on disk, none added"
+          : `demo cast's subjects put back to the demo's roles and clearances (${demoCast.join(", ")})`) +
+        `; ${kept.length} added by \`bun run users\` kept` +
+        (kept.length === 0 ? "" : ` (${kept.join(", ")})`),
     };
   }
 

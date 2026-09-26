@@ -1,6 +1,11 @@
 /**
- * The test #58 says would have caught it: seed with a capitalised
- * role-based persona email configuration and assert `/sign-in/email` answers 200.
+ * The test #58 says would have caught it: put a person in under a capitalised
+ * address and assert `/sign-in/email` answers 200.
+ *
+ * Until #33 the address arrived through a per-persona email variable read at
+ * first seed; that contract is gone. Since #33 nobody is seeded and the only way in is
+ * `bun run users add`, so that is what this runs, as a subprocess against the
+ * provider's own file before it boots.
  *
  * Every other fixture in this directory is lowercase, which is why a persona
  * configured as `Alice@Example.Test` reached a live sitting before
@@ -15,21 +20,23 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Subprocess } from "bun";
 import { Database } from "bun:sqlite";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { serveOnFreePort } from "../cdp.ts";
 import { spawnChild } from "../child.ts";
+import { childEnv } from "../child-env.ts";
+
 const ROOT = join(import.meta.dir, "..", "..");
 const dbPath = join(tmpdir(), `cg-idp-${crypto.randomUUID()}`, "idp.db");
 const SECRET = "test-secret-".padEnd(48, "x");
 
-/** As a human types it into the deployment's environment, copying the Arcade invite. */
+/** As a human types it into `bun run users add`, copying the Arcade invite. */
 const CONFIGURED = "Alice@Bank.Example";
 const STORED = CONFIGURED.toLowerCase();
-/** The fixture's password for Alice, which the override does not change. */
-const PASSWORD = "megaforce-demo-2026";
+/** This test's own throwaway password, given to `users add`. */
+const PASSWORD = "capitalised-address-test-password";
 
 let child: Subprocess;
 let baseUrl: string;
@@ -44,9 +51,41 @@ async function signIn(email: string, password = PASSWORD): Promise<Response> {
 }
 
 beforeAll(async () => {
+  mkdirSync(dirname(dbPath), { recursive: true });
+  const add = spawnChild(
+    [
+      "bun",
+      "--no-env-file",
+      join(ROOT, "scripts", "users.ts"),
+      "add",
+      CONFIGURED,
+      "--name",
+      "Alice",
+      "--role",
+      "loan_officer",
+      "--clearance",
+      "50000",
+      "--password",
+      PASSWORD,
+    ],
+    {
+      cwd: ROOT,
+      env: childEnv({ IDP_DB_PATH: dbPath, GOVERNANCE_DB_PATH: join(dirname(dbPath), "governance.db") }),
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const [addOut, addErr, addCode] = await Promise.all([
+    new Response(add.stdout).text(),
+    new Response(add.stderr).text(),
+    add.exited,
+  ]);
+  if (addCode !== 0) throw new Error(`users add exited ${addCode}:\n${addOut}\n${addErr}`);
+
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key, value]) => value !== undefined && !key.startsWith("PERSONA_") && !key.startsWith("IDP_"),
+      ([key, value]) => value !== undefined && !key.startsWith("IDP_"),
     ),
   ) as Record<string, string>;
 
@@ -62,7 +101,6 @@ beforeAll(async () => {
           APP_PUBLIC_HOST: `127.0.0.1:${port}`,
           IDP_OAUTH_REDIRECT_URIS: "http://127.0.0.1:9/callback",
           BETTER_AUTH_SECRET: SECRET,
-          PERSONA_LOAN_OFFICER_EMAIL: CONFIGURED,
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -80,8 +118,8 @@ afterAll(() => {
   rmSync(dirname(dbPath), { recursive: true, force: true });
 });
 
-describe("a persona configured with a capitalised address", () => {
-  test("can sign in with the address exactly as it was configured", async () => {
+describe("a person added with a capitalised address", () => {
+  test("can sign in with the address exactly as it was typed", async () => {
     const response = await signIn(CONFIGURED);
 
     expect(response.status).toBe(200);

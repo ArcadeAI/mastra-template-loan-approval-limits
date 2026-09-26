@@ -64,12 +64,22 @@
  * signed out. What `cg-idp`'s `/health` said about its OAuth clients is at
  * `/identity/health`, unchanged; `reset` covers `POST /identity/admin/reset`
  * too.
+ *
+ * **Since #33 a fresh start has nobody in it.** No persona is seeded on either
+ * side, so `identity` is `{ status: "no_users", people: 0, message }` until
+ * `bun run users add` or `bun run users seed-demo` adds somebody: degraded,
+ * never a crash, and the message names both commands. And `user_drift` holds
+ * the two databases against each other (`lib/user-drift.ts`): somebody who can
+ * sign in with no subject, or has a subject and cannot sign in, is named by
+ * address and makes the response `degraded`. `null` when they agree, or when
+ * either module did not boot and its own field already says why.
  */
 import { deploymentReadiness, readIdentitySurface } from "../../lib/config.ts";
 import { bootedControlPlane, controlPlaneFailure } from "../../lib/control-plane/instance.ts";
 import { panelStreamHealth } from "../../lib/governance/stream-url.ts";
-import { identityCapability } from "../../lib/identity/provider/instance.ts";
+import { identityCapability, identityEmails } from "../../lib/identity/provider/instance.ts";
 import { loanBookHealth } from "../../lib/loans/instance.ts";
+import { compareUsers, userDriftWarning } from "../../lib/user-drift.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +106,18 @@ export async function GET() {
     ...controlPlane
   } = controlPlaneReport();
 
+  // Who can sign in against who the hooks know (#33). Only when both modules
+  // booted: a failed one is already named, and comparing against an absent
+  // side would call every user drift.
+  const emails = await identityEmails();
+  const subjects = controlPlaneFailure() === null ? bootedControlPlane().plane.subjectIds() : null;
+  const user_drift = emails === null || subjects === null ? null : compareUsers(emails, subjects);
+  const allWarnings = [
+    ...warnings,
+    ...(identity.status === "no_users" ? [identity.message] : []),
+    ...(user_drift === null ? [] : [userDriftWarning(user_drift)]),
+  ];
+
   // `status` first, because it is the field anybody actually reads. `ok` only
   // when every capability is configured, the panel is watching something, and
   // the control plane is `healthy` (a compiled policy that matches the shipped
@@ -108,7 +130,8 @@ export async function GET() {
     panel_stream !== "unconfigured" &&
     controlPlaneStatus === "healthy" &&
     loans.status === "ok" &&
-    identity.status === "ok"
+    identity.status === "ok" &&
+    user_drift === null
       ? "ok"
       : "degraded";
 
@@ -129,8 +152,9 @@ export async function GET() {
     injection_detection,
     loans,
     identity,
+    user_drift,
     reset,
-    warnings,
+    warnings: allWarnings,
     control_plane: { status: controlPlaneStatus, ...controlPlane },
   });
 }

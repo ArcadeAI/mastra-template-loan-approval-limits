@@ -9,9 +9,10 @@
  * them: their account gone, their role gone, and every governed call they made
  * afterwards refused as an identity nobody registered.
  *
- * The app is booted the way a presenter runs it (`test/app.ts`), and a person
- * is added with `bun run users add` itself (#31), a subprocess writing the two
- * files the running app has open. Bob is removed with `bun run users remove`
+ * The app is booted the way a presenter runs it (`test/app.ts`), with nobody
+ * in it (#33), and the demo cast is added with `bun run users seed-demo` and a
+ * person with `bun run users add` itself (#31), each a subprocess writing the
+ * two files the running app has open. Bob is removed with `bun run users remove`
  * and brought back with `bun run users seed-demo`, the same way. The reset command
  * then runs as a subprocess, and what survived is read back over the app's own
  * HTTP surfaces: a sign-in with the password she was given, a `/hooks/pre`
@@ -31,9 +32,10 @@ const ROOT = join(import.meta.dir, "..");
 const RESET_TOKEN = "real-users-reset-token-for-tests";
 const HOOK_SECRET = "real-users-hook-secret-for-tests";
 const STORE_TOKEN = "real-users-store-token-for-tests";
-const DEMO_PASSWORD = "megaforce-demo-2026";
+/** This file's own throwaway password for the demo cast, handed to `seed-demo`. */
+const DEMO_PASSWORD = "real-users-demo-cast-password";
 
-/** The demo cast's addresses on this app: the fixture's, since no PERSONA_* is set. */
+/** The demo cast's addresses on this app: the fixture's, which is what makes them the demo cast's (#33). */
 const ALICE = "alice@bank.example";
 const BOB = "bob@bank.example";
 
@@ -89,6 +91,16 @@ async function users(args: string[]): Promise<{ code: number; out: string; err: 
 async function drift(): Promise<{ ids: string[]; changed: string[]; missing: string[] } | null> {
   const body = (await (await fetch(`${app.origin}/health`)).json()) as { fixture_drift: never };
   return body.fixture_drift;
+}
+
+/** The same page's `user_drift` (#33): who can sign in with no subject, and the reverse. */
+async function userDrift(): Promise<{
+  ids: string[];
+  identity_without_subject: string[];
+  subject_without_identity: string[];
+} | null> {
+  const body = (await (await fetch(`${app.origin}/health`)).json()) as { user_drift: never };
+  return body.user_drift;
 }
 
 /** Waits for a condition the policy cache reaches on its next poll. */
@@ -211,6 +223,15 @@ beforeAll(async () => {
     IDENTITY_HOST: `127.0.0.1:${userinfo.port}`,
   });
 
+  // A first boot seeds nobody (#33). The demo cast comes in the way an
+  // operator brings it in, at the fixture's addresses.
+  const seeded = await users([
+    "seed-demo", "--alice", ALICE, "--bob", BOB, "--charlie", "charlie@bank.example",
+    "--michael", "michael@bank.example", "--password", DEMO_PASSWORD,
+  ]);
+  expect(seeded.out).toContain(`Alice: added ${ALICE}`);
+  expect(seeded.out).not.toContain("real user");
+
   await users([
     "add", PRIYA.email, "--name", PRIYA.name, "--role", PRIYA.role,
     "--clearance", String(PRIYA.clearance), "--password", PRIYA.password,
@@ -252,18 +273,62 @@ describe("drift, with a user `bun run users add` created (#32)", () => {
     await untilDrift((value) => value === null);
   }, 60_000);
 
-  test("a demo row deleted by hand is missing drift, and a reset re-seeds it", async () => {
+  // Changed by #33: this was `fixture_drift` missing, and a reset wrote the
+  // row back. A demo row that is absent is no longer fixture drift, and a reset
+  // no longer adds anybody. What is wrong here is that Charlie can still sign
+  // in with no subject, and that is `user_drift`.
+  test("a demo row deleted by hand is not fixture drift, and a reset does not add it back; user drift names it", async () => {
+    const CHARLIE = "charlie@bank.example";
     const governance = new Database(app.databases.governance);
-    governance.run("DELETE FROM subjects WHERE user_id = ?", ["charlie@bank.example"]);
+    governance.run("DELETE FROM subjects WHERE user_id = ?", [CHARLIE]);
     governance.close();
-    await untilDrift((value) => value !== null);
-    expect((await drift())?.missing).toEqual(["subjects:charlie@bank.example"]);
+    await until(async () => (await userDrift()) !== null);
+    expect(await userDrift()).toEqual({
+      ids: [`identity-without-subject:${CHARLIE}`],
+      identity_without_subject: [CHARLIE],
+      subject_without_identity: [],
+    });
+    expect(await drift()).toBeNull();
+    const health = (await (await fetch(`${app.origin}/health`)).json()) as { status: string; warnings: string[] };
+    expect(health.status).toBe("degraded");
+    expect(health.warnings.join(" ")).toContain(`${CHARLIE} can sign in but has no subject in governance.db`);
 
     const { code, out } = await runReset();
     expect(code).toBe(0);
-    expect(out).toContain("0 removed with `bun run users remove` not re-seeded");
-    expect((await roster()).find((entry) => entry.user_id === "charlie@bank.example")?.clearance).toBe(250_000);
+    const hooksLine = out.split("\n").find((line) => line.startsWith("[reset] hooks "));
+    expect(hooksLine).toContain(`demo cast's subjects put back to the demo's roles and clearances (${ALICE}, ${BOB}, michael@bank.example)`);
+    expect((await roster()).some((entry) => entry.user_id === CHARLIE)).toBe(false);
+    expect(await userDrift()).not.toBeNull();
+
+    // Put back the way an operator would, so the next test starts whole.
+    const back = new Database(app.databases.governance);
+    back.run(
+      "INSERT INTO subjects (user_id, display_name, role, clearance, attributes) VALUES (?, 'Charlie', 'vp_credit', 250000, '{}')",
+      [CHARLIE],
+    );
+    back.close();
+    await until(async () => (await userDrift()) === null);
     expect(await drift()).toBeNull();
+
+    // And the other direction: a subject with nobody who can sign in as it,
+    // which approval routing could still pick.
+    const GHOST = "ghost@company.test";
+    const ghost = new Database(app.databases.governance);
+    ghost.run(
+      "INSERT INTO subjects (user_id, display_name, role, clearance, attributes) VALUES (?, 'Ghost', 'vp_credit', 300000, '{}')",
+      [GHOST],
+    );
+    ghost.close();
+    await until(async () => (await userDrift()) !== null);
+    expect(await userDrift()).toEqual({
+      ids: [`subject-without-identity:${GHOST}`],
+      identity_without_subject: [],
+      subject_without_identity: [GHOST],
+    });
+    const gone = new Database(app.databases.governance);
+    gone.run("DELETE FROM subjects WHERE user_id = ?", [GHOST]);
+    gone.close();
+    await until(async () => (await userDrift()) === null);
   }, 60_000);
 });
 
@@ -297,7 +362,8 @@ describe("`bun run reset` keeps her", () => {
 
 describe("`bun run reset --hard` keeps her too, and signs everybody out", () => {
   test("her account and password survive, her session does not, and the output says both", async () => {
-    // A demo persona whose name was edited, which the hard reset puts back.
+    // A demo persona whose name was edited. Until #33 the hard reset put it
+    // back from the fixture; now every account is kept exactly as it is.
     const idp = new Database(app.databases.idp);
     idp.run(`UPDATE "user" SET "name" = 'Alice (edited)' WHERE "email" = ?`, [ALICE]);
     idp.close();
@@ -311,8 +377,9 @@ describe("`bun run reset --hard` keeps her too, and signs everybody out", () => 
 
     const idpLine = out.split("\n").find((line) => line.startsWith("[reset] idp "));
     expect(idpLine).toContain("OK  everyone signed out");
-    expect(idpLine).toContain(`demo cast re-seeded (${ALICE}, ${BOB}, charlie@bank.example, michael@bank.example)`);
-    expect(idpLine).toContain(`1 user added by \`bun run users\` kept (${PRIYA.email})`);
+    expect(idpLine).toContain(
+      `nobody deleted, 5 accounts kept with the password each already had (${ALICE}, ${BOB}, charlie@bank.example, michael@bank.example, ${PRIYA.email})`,
+    );
     expect(idpLine).toContain("people 5→5");
     expect(out).toContain("Everyone is signed out");
 
@@ -328,8 +395,9 @@ describe("`bun run reset --hard` keeps her too, and signs everybody out", () => 
     expect(await priyaInRoster()).toEqual(EXPECTED_PRIYA_ROW);
     expect(await approve95k(PRIYA.email)).toEqual({ code: "OK" });
 
-    // The demo cast is back the way the fixture seeds it.
-    expect(idpRow(ALICE)?.name).toBe("Alice");
+    // Changed by #33: the demo cast is kept as it is, edited name included,
+    // with the password `seed-demo` gave it.
+    expect(idpRow(ALICE)?.name).toBe("Alice (edited)");
     expect((await signIn(ALICE, DEMO_PASSWORD)).status).toBe(200);
   }, 60_000);
 
@@ -345,7 +413,10 @@ describe("`bun run reset --hard` keeps her too, and signs everybody out", () => 
       const { code, out } = await runReset(args);
       expect(code).toBe(0);
       const hooksLine = out.split("\n").find((line) => line.startsWith("[reset] hooks "));
-      expect(hooksLine).toContain(`1 removed with \`bun run users remove\` not re-seeded (${BOB})`);
+      // Changed by #33: the line names the demo cast it put back, which is
+      // everybody on disk but Bob, instead of naming Bob as removed.
+      expect(hooksLine).toContain(`demo cast's subjects put back to the demo's roles and clearances (${ALICE}, charlie@bank.example, michael@bank.example)`);
+      expect(hooksLine).not.toContain(BOB);
 
       expect(idpRow(BOB)).toBeNull();
       expect((await roster()).some((entry) => entry.user_id === BOB)).toBe(false);
@@ -354,8 +425,9 @@ describe("`bun run reset --hard` keeps her too, and signs everybody out", () => 
     }
     const hard = await runReset(["--hard"]);
     const idpLine = hard.out.split("\n").find((line) => line.startsWith("[reset] idp "));
-    expect(idpLine).toContain(`demo cast re-seeded (${ALICE}, charlie@bank.example, michael@bank.example)`);
+    expect(idpLine).toContain(`4 accounts kept with the password each already had (${ALICE}, charlie@bank.example, michael@bank.example, ${PRIYA.email})`);
     expect((await signIn(PRIYA.email, PRIYA.password)).status).toBe(200);
+    expect(await userDrift()).toBeNull();
   }, 90_000);
 
   test("Bob removed, then `bun run users seed-demo`, is back as a user with no drift", async () => {
@@ -372,8 +444,10 @@ describe("`bun run reset --hard` keeps her too, and signs everybody out", () => 
     // Present again, so both resets treat him as the demo cast once more.
     const { code, out: hardOut } = await runReset(["--hard"]);
     expect(code).toBe(0);
-    expect(hardOut).toContain(`demo cast re-seeded (${ALICE}, ${BOB}, charlie@bank.example, michael@bank.example)`);
-    expect(hardOut).toContain("0 removed with `bun run users remove` not re-seeded");
+    expect(hardOut).toContain(
+      `demo cast's subjects put back to the demo's roles and clearances (${ALICE}, ${BOB}, charlie@bank.example, michael@bank.example)`,
+    );
+    expect(hardOut).toContain(`5 accounts kept with the password each already had (${ALICE}, ${BOB}, charlie@bank.example`);
     expect((await roster()).some((entry) => entry.user_id === BOB)).toBe(true);
     expect(await drift()).toBeNull();
   }, 90_000);

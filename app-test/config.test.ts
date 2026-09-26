@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { baseUrl, readWebConfig } from "../lib/config.ts";
+import { baseUrl, readIdentitySurface, readWebConfig } from "../lib/config.ts";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -153,16 +153,19 @@ describe("addresses", () => {
   });
 });
 
-describe("persona email configuration", () => {
-  test("rejects a deprecated name variable before the web surface can use fixture identity", () => {
-    expect(() => readWebConfig({ PERSONA_DANA_EMAIL: "dana@example.com" })).toThrow(
-      /PERSONA_DANA_EMAIL.*PERSONA_LOAN_OFFICER_EMAIL/,
-    );
-  });
-
-  test("rejects an unknown role variable instead of ignoring a typo", () => {
-    expect(() => readWebConfig({ PERSONA_VP_CREDIT_EMAL: "charlie@example.com" })).toThrow(
-      /PERSONA_VP_CREDIT_EMAL/,
-    );
+// #33: the `PERSONA_*_EMAIL` contract is gone. The web surface reads no persona
+// variable, so a leftover one in somebody's `.env` changes nothing and refuses
+// nothing — people are added with `bun run users`.
+describe("no persona email configuration (#33)", () => {
+  test("a persona variable, current or deprecated or misspelt, is neither read nor refused", () => {
+    const plain = readWebConfig({});
+    for (const extra of [
+      { PERSONA_LOAN_OFFICER_EMAIL: "alice@example.com" },
+      { PERSONA_DANA_EMAIL: "dana@example.com" },
+      { PERSONA_VP_CREDIT_EMAL: "charlie@example.com" },
+    ]) {
+      expect(readWebConfig(extra)).toEqual(plain);
+      expect(() => readIdentitySurface(extra)).not.toThrow();
+    }
   });
 });

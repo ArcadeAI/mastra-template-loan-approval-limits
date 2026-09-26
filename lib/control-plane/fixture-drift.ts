@@ -55,16 +55,23 @@ const ROW_KEY: Record<PolicyTable, (row: Record<string, unknown>) => string> = {
 };
 
 /**
- * Tables where a row the fixture never had is somebody's to add, not drift.
+ * Tables whose rows are people, which the operator adds and removes: a row
+ * the fixture never had is not drift, and neither is a fixture row that is
+ * absent.
  *
- * `subjects` is the cast, and since #31 the cast is not only the fixture's:
+ * `subjects` is the people, and since #31 they are not only the fixture's:
  * `bun run users add` writes a row for every real user. Those rows are the
  * operator's, exactly as a clearance raised on stage is, and a `/health` that
  * went degraded every time somebody was invited would be a warning that is
- * always on, which is a warning nobody reads (#32). So on this table only the
- * fixture's own rows are compared: a demo row edited by hand, or missing, is
- * still named. A rule or a catalogue entry the fixture does not ship is still
- * named too, because nothing adds those on purpose.
+ * always on, which is a warning nobody reads (#32). Since #33 the fixture's
+ * own rows, the demo cast, are not seeded either: a fresh disk has none of
+ * them, and `bun run users seed-demo` adds them. So a demo row is compared
+ * only when it is on disk, and a demo row edited by hand is still named. A
+ * rule or a catalogue entry the fixture does not ship, or one missing, is
+ * still named too, because nothing adds or removes those on purpose.
+ *
+ * Who can sign in without a subject, or has a subject and cannot sign in, is
+ * a different question with its own answer: `user-drift.ts`.
  */
 const OPERATOR_ROWS: ReadonlySet<PolicyTable> = new Set(["subjects"]);
 
@@ -137,16 +144,7 @@ export interface FixtureDrift {
  * policy, row for row, which is the state a fresh deployment is in and the
  * state a reset returns to.
  */
-export function compareToFixture(
-  disk: PolicyDigest,
-  fixture: PolicyDigest,
-  /**
-   * Subjects `bun run users remove` took out (`removedSubjects`). A fixture
-   * subject among them that is absent from the disk is a removal somebody
-   * asked for, recorded in `subject_changes`, not drift (#32, round 1).
-   */
-  removed: ReadonlySet<string> = new Set(),
-): FixtureDrift | null {
+export function compareToFixture(disk: PolicyDigest, fixture: PolicyDigest): FixtureDrift | null {
   const missing: string[] = [];
   const changed: string[] = [];
   const unexpected: string[] = [];
@@ -156,7 +154,7 @@ export function compareToFixture(
     const shipped = fixture[table];
     for (const [key, hash] of shipped) {
       const found = onDisk.get(key);
-      if (found === undefined && table === "subjects" && removed.has(key)) continue;
+      if (found === undefined && OPERATOR_ROWS.has(table)) continue;
       if (found === undefined) missing.push(`${table}:${key}`);
       else if (found !== hash) changed.push(`${table}:${key}`);
     }
