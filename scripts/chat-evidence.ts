@@ -193,11 +193,6 @@ try {
         APPROVALS_STORE_TOKEN: STORE_TOKEN,
         LOANS_DB_PATH: agents.loansDbPath,
         IDENTITY_HOST: agents.idpHost,
-        // The local fixture's cast, so the roster names the persona the page acts as.
-        PERSONA_LOAN_OFFICER_EMAIL: DANA,
-        PERSONA_CREDIT_ANALYST_EMAIL: "bob@bank.example",
-        PERSONA_VP_CREDIT_EMAIL: RILEY,
-        PERSONA_CHIEF_CREDIT_OFFICER_EMAIL: "michael@bank.example",
       }),
       stdout: "pipe",
       stderr: "pipe",

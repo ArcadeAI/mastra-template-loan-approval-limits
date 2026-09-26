@@ -3,7 +3,6 @@
  * Every variable is documented in the repo's `.env.example`.
  */
 
-import { readPersonaEmailOverrides } from "../../../packages/policy-schema/contract/persona-email-contract.ts";
 import { registerSecretFingerprint } from "../../secret-fingerprints.ts";
 
 /** Arcade Cloud's OAuth callback. Confirm against the "Redirect URL" the Arcade dashboard shows (#13). */
@@ -157,10 +156,6 @@ export function idpDbPath(env: Record<string, string | undefined> = process.env)
 }
 
 export function readConfig(env: Record<string, string | undefined> = process.env): IdpConfig {
-  // Validate before opening the database. An obsolete name-based variable
-  // must not leave this service apparently healthy while seeding fixture
-  // addresses.
-  readPersonaEmailOverrides(env);
   const port = Number(env.PORT ?? 3000);
 
   const secret = env.BETTER_AUTH_SECRET?.trim();

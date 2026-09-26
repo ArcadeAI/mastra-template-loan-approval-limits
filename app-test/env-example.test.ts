@@ -14,10 +14,9 @@
  */
 import { Glob } from "bun";
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { PERSONA_EMAIL_CONTRACT } from "@cg/policy-schema/contract/persona-email-contract.ts";
 import { readConfig } from "../lib/identity/provider/config.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -120,12 +119,13 @@ test("every variable the code reads is in .env.example or is set by something el
   expect(Object.keys(SET_ELSEWHERE).filter((key) => named.includes(key))).toEqual([]);
 });
 
-test("the four persona variables are in it, and the contract names no others", () => {
-  const variables = PERSONA_EMAIL_CONTRACT.map((entry) => entry.variable);
-  expect(new Set(variables)).toEqual(
-    new Set(["PERSONA_LOAN_OFFICER_EMAIL", "PERSONA_CREDIT_ANALYST_EMAIL", "PERSONA_VP_CREDIT_EMAIL", "PERSONA_CHIEF_CREDIT_OFFICER_EMAIL"]),
-  );
-  for (const variable of variables) expect(active.map((each) => each.key)).toContain(variable);
+// #33: the four `PERSONA_*_EMAIL` role variables and their contract are gone.
+// Users are added with `bun run users`, so no persona variable is documented,
+// read or refused anywhere, and the contract module no longer exists.
+test("no persona variable is in it, and the persona email contract is gone", () => {
+  expect(example).not.toMatch(/PERSONA_/);
+  expect(existsSync(join(ROOT, "packages/policy-schema/contract/persona-email-contract.ts"))).toBe(false);
+  expect(example).toContain("bun run users seed-demo");
 });
 
 test("the required block is the few a developer fills, and nothing in the file ships a value", () => {
@@ -134,10 +134,6 @@ test("the required block is the few a developer fills, and nothing in the file s
     "ANTHROPIC_API_KEY",
     "ARCADE_API_KEY",
     "APP_PUBLIC_HOST",
-    "PERSONA_LOAN_OFFICER_EMAIL",
-    "PERSONA_CREDIT_ANALYST_EMAIL",
-    "PERSONA_VP_CREDIT_EMAIL",
-    "PERSONA_CHIEF_CREDIT_OFFICER_EMAIL",
   ]);
   // `cp .env.example .env` is the "nothing filled" state the Quickstart boots
   // from, so no active line carries a value. Defaults live in the code and are

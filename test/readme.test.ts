@@ -310,10 +310,6 @@ describe("README.md's variables are .env.example's", () => {
       "ANTHROPIC_API_KEY",
       "APP_PUBLIC_HOST",
       "ARCADE_API_KEY",
-      "PERSONA_CHIEF_CREDIT_OFFICER_EMAIL",
-      "PERSONA_CREDIT_ANALYST_EMAIL",
-      "PERSONA_LOAN_OFFICER_EMAIL",
-      "PERSONA_VP_CREDIT_EMAIL",
     ]);
     expect([...variablesNamed(section(README, "Prerequisites"))].sort()).toEqual([...required].sort());
   });

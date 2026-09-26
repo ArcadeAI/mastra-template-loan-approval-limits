@@ -1204,13 +1204,18 @@ if (import.meta.main) {
           `its own result rather than reporting a message id it did not get.`,
   );
 
-  // A token per persona, printed, because offline there is no hop 1 to mint
-  // one and no User Source to bind it. This is the whole reason this block
-  // must never run anywhere but a laptop.
-  for (const [key, value] of Object.entries(env)) {
-    const match = /^PERSONA_([A-Z0-9_]+)_EMAIL$/.exec(key);
-    if (match && value?.trim()) {
-      console.log(`[gateway-stand-in] ${match[1]!.toLowerCase()}: ${standIn.issueToken(value.trim())}`);
-    }
+  // A token per address named on the command line
+  // (`bun run gateway-stand-in alice@bank.example charlie@bank.example`),
+  // printed, because offline there is no hop 1 to mint one and no User Source
+  // to bind it. This is the whole reason this block must never run anywhere
+  // but a laptop. Since #33 there is no persona list in the environment to
+  // read: the people are whoever `bun run users` added.
+  const emails = process.argv.slice(2).map((arg) => arg.trim().toLowerCase()).filter(Boolean);
+  for (const email of emails) console.log(`[gateway-stand-in] ${email}: ${standIn.issueToken(email)}`);
+  if (emails.length === 0) {
+    console.log(
+      "[gateway-stand-in] no tokens printed: pass the emails of users added with `bun run users` " +
+        "(for example `bun run gateway-stand-in alice@bank.example`) to get one each.",
+    );
   }
 }

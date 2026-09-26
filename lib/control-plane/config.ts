@@ -11,7 +11,6 @@
  */
 
 import { assertPublicHost } from "./public-host.ts";
-import { readPersonaEmailOverrides } from "@cg/policy-schema/contract/persona-email-contract.ts";
 
 /**
  * The bearer token Arcade presents on every hook call. Refused under
@@ -41,14 +40,6 @@ export interface HooksConfig {
   loanToolkit: string;
   /** `tool.toolkit` for `tools/approvals`. Derived, not observed — confirm on #18. */
   approvalsToolkit: string;
-  /**
-   * Per-persona email overrides, keyed by the fixture's persona key. Read only
-   * when `governance.db` is first seeded: the email is the join key across
-   * Arcade `user_id`, the OAuth subject and the loan book's actor, and
-   * `apps/idp` reads the same role variables so the two databases cannot
-   * disagree about who a persona is.
-   */
-  personaEmails: Record<string, string>;
   /**
    * Our own budget for answering a hook, well inside Arcade's 5s. A request
    * that runs past it is failed closed and audited as such; the point is to
@@ -155,11 +146,6 @@ export function readConfig(env: Record<string, string | undefined> = process.env
   // reads its environment, so it is the place to say so.
   assertPublicHost("APP_PUBLIC_HOST", env.APP_PUBLIC_HOST);
 
-  // This validates the complete public contract before the service opens its
-  // database. In particular, a deprecated name-based variable cannot be
-  // ignored and leave fixture identities in a deployment.
-  const personaEmails = readPersonaEmailOverrides(env);
-
   return {
     port: Number(env.PORT ?? 8081),
     dbPath: env.GOVERNANCE_DB_PATH ?? "./governance.db",
@@ -167,7 +153,6 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     approvalsStoreToken: storeToken || DEV_STORE_TOKEN,
     loanToolkit: env.ARCADE_LOAN_TOOLKIT?.trim() || "Loan",
     approvalsToolkit: env.ARCADE_APPROVALS_TOOLKIT?.trim() || "Approvals",
-    personaEmails,
     deadlineMs: Number(env.HOOK_DEADLINE_MS ?? 2500),
     policyPollMs: Number(env.POLICY_POLL_MS ?? 250),
     grantTtlSeconds: Number(env.GRANT_TTL_SECONDS ?? 900),

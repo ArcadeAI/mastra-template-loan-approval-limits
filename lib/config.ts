@@ -16,7 +16,6 @@
  */
 import { publicHost } from "./public-host.ts";
 import { sessionSecretProblem } from "./identity/seal.ts";
-import { readPersonaEmailOverrides } from "@cg/policy-schema/contract/persona-email-contract.ts";
 
 /**
  * Who the browser is signed in as, and the two OAuth hops that follow from it.
@@ -206,10 +205,6 @@ export function configSecrets(config: IdentitySurface & Partial<Pick<WebConfig, 
 export function readIdentitySurface(
   env: Record<string, string | undefined> = process.env,
 ): IdentitySurface {
-  // Validate before any identity route or health response is built. An
-  // obsolete name-based variable must not be ignored while the roster falls
-  // back to fictional fixture addresses.
-  readPersonaEmailOverrides(env);
   return {
     arcadeApiUrl: trimUrl(env.ARCADE_API_URL) || "https://api.arcade.dev",
     arcadeApiKey: env.ARCADE_API_KEY?.trim() ?? "",
