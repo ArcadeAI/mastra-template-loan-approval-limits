@@ -130,13 +130,13 @@ jobs:
   # unless the files the shards actually loaded are exactly the tracked test
   # files, each once, and on any failed test or Bun "error" in any shard. It
   # prints each shard's pass/skip/fail counts and its five slowest files. It
-  # runs whatever the shards concluded (`always()`), so a red shard still gets
-  # its counts printed here.
+  # runs whatever the shards concluded, so a red shard still gets its counts
+  # printed here; only a cancelled run (a newer push to the same ref) skips it.
   tests-ran:
     name: tests ran
     runs-on: ubuntu-latest
     needs: test
-    if: always()
+    if: ${{ !cancelled() }}
     steps:
       - uses: actions/checkout@v4
 
