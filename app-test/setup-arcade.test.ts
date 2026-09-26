@@ -1358,8 +1358,8 @@ test("setup-arcade manages exactly .env.example's required values and its second
   const example = readFileSync(join(ROOT, ".env.example"), "utf8");
   const block = (from: string, to: string) =>
     [...example.slice(example.indexOf(from), example.indexOf(to)).matchAll(/^([A-Z_][A-Z0-9_]*)=/gm)].map(([, key]) => key!).sort();
-  expect([...REQUIRED_KEYS].sort()).toEqual(block("# --- Required", "# --- Filled in by `bun run setup-arcade"));
-  expect([...WRITTEN_KEYS].sort()).toEqual(block("# --- Filled in by `bun run setup-arcade", "# --- Optional"));
+  expect(([...REQUIRED_KEYS] as string[]).sort()).toEqual(block("# --- Required", "# --- Filled in by `bun run setup-arcade"));
+  expect(([...WRITTEN_KEYS] as string[]).sort()).toEqual(block("# --- Filled in by `bun run setup-arcade", "# --- Optional"));
 });
 
 /**
