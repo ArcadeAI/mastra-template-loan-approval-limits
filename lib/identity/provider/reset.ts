@@ -1,7 +1,8 @@
 /**
- * Back to a clean rehearsal state: every person, session, token and consent
- * dropped and the four personas seeded again — and **the OAuth client left
- * exactly as it was**.
+ * Back to a clean rehearsal state: every session, token and consent dropped,
+ * so everybody is signed out; the demo cast, where it is on disk, seeded again;
+ * every user `bun run users` added left in place (#32) — and **the OAuth
+ * client left exactly as it was**.
  *
  * That last clause is the whole reason this file is careful. Better Auth
  * generates the `client_id` and `client_secret`; they cannot be pinned from
@@ -33,6 +34,14 @@ export const RESET_PATH = "/admin/reset";
 
 export interface IdpResetResult {
   people: { before: number; after: number };
+  /**
+   * Who is who after the reset, by address: the demo cast members seeded again
+   * from the fixture, and the users `bun run users` added, kept. Both were
+   * signed out.
+   */
+  demo_cast: string[];
+  kept: string[];
+  signed_out: "everyone";
   /** Every configured client, by key, with the id that must not have moved. */
   clients: { key: string; client_id: string }[];
 }
@@ -76,7 +85,7 @@ export async function runIdpReset(deps: IdpResetDeps): Promise<IdpResetResult> {
 
   const before = await ensure();
   const peopleBefore = countPeople(db);
-  await resetPeople(db);
+  const people = await resetPeople(db);
   const after = await ensure();
 
   // Every configured client, not just the first: a second registration is as
@@ -90,6 +99,9 @@ export async function runIdpReset(deps: IdpResetDeps): Promise<IdpResetResult> {
 
   return {
     people: { before: peopleBefore, after: countPeople(db) },
+    demo_cast: people.demoCast,
+    kept: people.kept,
+    signed_out: "everyone",
     clients: after.map((each) => ({ key: each.key, client_id: each.clientId })),
   };
 }
@@ -97,8 +109,20 @@ export async function runIdpReset(deps: IdpResetDeps): Promise<IdpResetResult> {
 /** The line both callers print, so a shell run and an HTTP run read alike. */
 export function resetSummary(dbPath: string, result: IdpResetResult): string {
   return (
-    `reset ${dbPath}: ${result.people.after} people re-seeded, ` +
+    `reset ${dbPath}: everyone signed out, ${peopleLine(result)}, ` +
     `OAuth client${result.clients.length > 1 ? "s" : ""} ` +
     `${result.clients.map((each) => each.client_id).join(", ")} unchanged`
   );
+}
+
+/**
+ * `demo cast 4 re-seeded, 1 user kept (priya@company.test)`. Shared by the
+ * service's log line and the root command's, so both say who survived.
+ */
+export function peopleLine(result: Pick<IdpResetResult, "demo_cast" | "kept">): string {
+  const cast = result.demo_cast.length === 0 ? "no demo cast on disk" : `demo cast ${result.demo_cast.length} re-seeded`;
+  const kept =
+    `${result.kept.length} user${result.kept.length === 1 ? "" : "s"} added by \`bun run users\` kept` +
+    (result.kept.length === 0 ? "" : ` (${result.kept.join(", ")})`);
+  return `${cast}, ${kept}`;
 }

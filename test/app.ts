@@ -32,6 +32,12 @@ export interface App {
   child: Subprocess;
   /** Everything the app printed, for a failure message. */
   output(): string;
+  /**
+   * Where this app's three databases are, for a test that has to do what
+   * `bun run users` does (#31) — write a person straight into `idp.db` and
+   * `governance.db` — before it asks the app over HTTP what survived.
+   */
+  databases: { governance: string; loans: string; idp: string };
   stop(): Promise<void>;
 }
 
@@ -94,10 +100,16 @@ export async function bootApp(env: Record<string, string>): Promise<App> {
 
   const { child, port, output } = booted;
   const host = `127.0.0.1:${port}`;
+  const dir = join(data, String(port));
+  const databases = {
+    governance: join(dir, "governance.db"),
+    loans: join(dir, "loans.db"),
+    idp: join(dir, "idp.db"),
+  };
   const stop = async () => {
     child.kill();
     await child.exited;
     cleanup();
   };
-  return { origin: `http://${host}`, host, child, output, stop };
+  return { origin: `http://${host}`, host, child, output, databases, stop };
 }

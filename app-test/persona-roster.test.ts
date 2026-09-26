@@ -11,22 +11,17 @@
  * that said "$50,000" while the policy seeded something else would be a control
  * surface misreporting the control.
  *
- * **The address comes from the environment.** Never from this repo. Four
- * variables, the same four `apps/idp` and `apps/hooks` seed from, so the string
- * on screen is the string the hooks decide on (`DESIGN.md` rule 3).
+ * **The person comes from the database** (#32). The card's name, role and
+ * clearance are the `subjects` row the hooks decide on, looked up by the
+ * address the IdP asserted, so the string on screen is the string the hooks
+ * decide on (`DESIGN.md` rule 3) and a user added with `bun run users` is named.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { PERSONAS } from "../lib/identity/personas.ts";
-import {
-  formatAuthority,
-  personaEmailVariable,
-  personaFor,
-  roster,
-  unconfiguredPersonas,
-} from "../lib/identity/roster.ts";
+import { formatAuthority, personIn, roleLabel } from "../lib/identity/roster.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -77,43 +72,56 @@ describe("the role/limit table matches what apps/hooks seeds", () => {
   });
 });
 
-describe("looking a persona up from the address the IdP asserted", () => {
-  const env = {
-    PERSONA_LOAN_OFFICER_EMAIL: "Alice@Example.Test",
-    PERSONA_CREDIT_ANALYST_EMAIL: "bob@example.test",
-  };
+describe("looking a person up from the address the IdP asserted", () => {
+  // What `GET /api/approvals/roster` answers, as far as the lookup reads it.
+  // `roster-from-database.test.tsx` makes it come from a real governance.db.
+  const subjects = [
+    { user_id: "alice@example.test", display_name: "Alice", role: "loan_officer", clearance: 50_000 },
+    { user_id: "priya@company.test", display_name: "Priya", role: "regional_credit_head", clearance: 400_000 },
+  ];
 
   test("the address is matched case-insensitively, as the join key is everywhere else", () => {
-    // #58: a role email variable carries whatever capitalisation somebody
-    // typed, and the session's email is lowercase. A roster keyed on the raw
-    // value is a roster the lookup can never hit.
-    expect(personaFor("alice@example.test", env)?.key).toBe("dana");
-    expect(personaFor("  ALICE@EXAMPLE.TEST  ", env)?.key).toBe("dana");
-  });
-
-  test("an address the environment does not name is null, never a guess", () => {
-    expect(personaFor("someone.else@example.test", env)).toBeNull();
-    expect(personaFor("", env)).toBeNull();
-    expect(personaFor(null, env)).toBeNull();
-    // Not a fallback to the first persona, and not a blank authority: the card
-    // says it cannot name this person rather than labelling them wrongly.
-    expect(roster(env).size).toBe(2);
-  });
-
-  test("the unset variables are reported, so 'unknown persona' is not mistaken for a bug", () => {
-    expect(unconfiguredPersonas(env)).toEqual(["PERSONA_VP_CREDIT_EMAIL", "PERSONA_CHIEF_CREDIT_OFFICER_EMAIL"]);
-    expect(unconfiguredPersonas({})).toHaveLength(4);
-    expect(personaEmailVariable("morgan")).toBe("PERSONA_CHIEF_CREDIT_OFFICER_EMAIL");
-  });
-
-  test("a blank variable is unset, not an address", () => {
-    expect(personaFor("alice@example.test", { PERSONA_LOAN_OFFICER_EMAIL: "   " })).toBeNull();
-  });
-
-  test("a deprecated name variable fails loudly instead of falling back to a fixture address", () => {
-    expect(() => roster({ PERSONA_DANA_EMAIL: "dana@example.com" })).toThrow(
-      /PERSONA_DANA_EMAIL.*PERSONA_LOAN_OFFICER_EMAIL/,
+    // #58: the session's email is lowercase and a row may not be; a roster
+    // keyed on the raw value is a roster the lookup can never hit.
+    expect(personIn(subjects, "alice@example.test")?.name).toBe("Alice");
+    expect(personIn(subjects, "  ALICE@EXAMPLE.TEST  ")?.name).toBe("Alice");
+    expect(personIn([{ ...subjects[0]!, user_id: "Alice@Example.Test" }], "alice@example.test")?.email).toBe(
+      "alice@example.test",
     );
+  });
+
+  test("name, role and clearance are the row's, whoever added it", () => {
+    expect(personIn(subjects, "priya@company.test")).toEqual({
+      email: "priya@company.test",
+      name: "Priya",
+      role: "Regional Credit Head",
+      roleKey: "regional_credit_head",
+      clearance: 400_000,
+    });
+  });
+
+  test("an address the roster does not hold is null, never a guess", () => {
+    expect(personIn(subjects, "someone.else@example.test")).toBeNull();
+    expect(personIn(subjects, "")).toBeNull();
+    expect(personIn(subjects, null)).toBeNull();
+    expect(personIn([], "alice@example.test")).toBeNull();
+  });
+
+  test("the demo roles read as DESIGN.md writes them, any other as title-cased words", () => {
+    expect(PERSONAS.map((persona) => roleLabel(persona.roleKey))).toEqual([
+      "Loan Officer",
+      "Credit Analyst",
+      "VP Credit",
+      "Chief Credit Officer",
+    ]);
+    expect(roleLabel("regional_credit_head")).toBe("Regional Credit Head");
+  });
+
+  test("the PERSONA_* variables no longer decide who the card names", () => {
+    // Before #32 the card was keyed on these, so a user added to the database
+    // was "not in the cast". The lookup takes no environment at all now.
+    const source = readFileSync(join(REPO_ROOT, "lib", "identity", "roster.ts"), "utf8");
+    expect(source).not.toMatch(/persona-email-contract|readPersonaEmailOverrides|process\.env|\bPERSONAS\b/);
   });
 });
 

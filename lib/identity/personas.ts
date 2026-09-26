@@ -13,21 +13,18 @@
  * The cast is `DESIGN.md`'s. It is a demo fixture in the same category as the
  * IdP itself: a forker deletes both and points at their own directory.
  *
- * ## The authority figure is duplicated, and a test says so
+ * ## Not the roster
  *
- * `clearance` and `roleKey` are the same values `apps/hooks` seeds
- * `governance.db`'s `subjects` table with. They are copied rather than imported
- * because `apps/web` does not depend on `apps/hooks` in the package graph and
- * should not start to — the same argument, and the same remedy, as
- * `DEV_STORE_TOKEN` in `lib/config.ts`: `app-test/persona-roster.test.ts` reads
- * `lib/control-plane/fixtures/governance.json` and fails if the two ever disagree.
+ * Since #32 nothing on screen reads a name, a role or a clearance from this
+ * list. The card beside a signed-in person reads `governance.db`'s `subjects`
+ * row through the control plane (`roster.ts`), because a user added with
+ * `bun run users` is not in this list and a clearance raised live is not in it
+ * either. What stays here is the sign-in hint's key and the words each demo
+ * role reads as, `ROLE_LABELS`.
  *
- * What that test cannot catch is a clearance a presenter raises live on stage,
- * which `DESIGN.md` explicitly allows (Policy source: *editable live on
- * stage*). So the number rendered beside a persona is labelled as the seeded
- * authority, and the audit row on the panel is what says what the control plane
- * actually decided. A figure presented as live truth would be a UI asserting a
- * policy value it never read.
+ * The figures are still the fixture's, and `app-test/persona-roster.test.ts`
+ * still reads `lib/control-plane/fixtures/governance.json` and fails if the
+ * two ever disagree, so the cast written down here is the cast that seeds.
  */
 export interface PersonaButton {
   /** The key the sign-in route echoes back as a label. Never an identity. */
@@ -53,6 +50,14 @@ export const PERSONAS: readonly PersonaButton[] = [
     clearance: 5_000_000,
   },
 ] as const;
+
+/**
+ * `subjects.role` → the words a person reads, for the demo cast's roles.
+ * `roster.ts` title-cases any role not listed here.
+ */
+export const ROLE_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
+  PERSONAS.map((persona) => [persona.roleKey, persona.role]),
+);
 
 /** A persona key the roster knows, or `undefined`. An unknown key is dropped, never echoed. */
 export function knownPersona(key: string | null | undefined): string | undefined {

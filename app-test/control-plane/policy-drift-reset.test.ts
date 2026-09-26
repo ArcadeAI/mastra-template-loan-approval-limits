@@ -38,6 +38,7 @@ import { createPolicyCache } from "../../lib/control-plane/policy-cache.ts";
 import { recoverStalePolicy } from "../../lib/control-plane/policy-recovery.ts";
 import { loadSeed, openGovernance, seed as seedInto, type Seed } from "../../lib/control-plane/policy-store.ts";
 import { createServer } from "../../lib/control-plane/server.ts";
+import { addSubject, removeSubject, subjectChanges } from "../../lib/control-plane/subjects.ts";
 import rawFixture from "../../lib/control-plane/fixtures/governance.json" with { type: "json" };
 
 const SECRET = "test-secret";
@@ -534,5 +535,178 @@ describe("POST /admin/reset (#106)", () => {
       injection_detection: { patterns: number };
     };
     expect(patterns.injection_detection.patterns).toBe(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #32: real users are the operator's, not the fixture's
+// ---------------------------------------------------------------------------
+
+/**
+ * A person `bun run users add` put in the cast (#31): a `subjects` row whose
+ * address the fixture does not seed. Written the way that command writes it,
+ * straight into the table the policy cache polls, because that is the whole of
+ * what makes somebody a subject.
+ */
+const REAL_USER = { user_id: "priya@company.test", display_name: "Priya", role: "vp_credit", clearance: 400_000 };
+
+function addRealUser(db: Database): void {
+  db.run(
+    "INSERT INTO subjects (user_id, display_name, role, clearance, attributes) VALUES (?, ?, ?, ?, '{}')",
+    [REAL_USER.user_id, REAL_USER.display_name, REAL_USER.role, REAL_USER.clearance],
+  );
+}
+
+const preAs = (base: string, userId: string, tool: string, inputs: Record<string, unknown>) =>
+  fetch(`${base}/pre`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${SECRET}` },
+    body: JSON.stringify({
+      execution_id: `tc_${Math.random().toString(36).slice(2)}`,
+      tool: { name: tool, toolkit: "Loan", version: "1.0.0" },
+      inputs,
+      context: { authorization: [{}], user_id: userId },
+    }),
+  });
+
+const subjectRow = (db: Database, userId: string) =>
+  db
+    .query<{ user_id: string; display_name: string; role: string; clearance: number }, [string]>(
+      "SELECT user_id, display_name, role, clearance FROM subjects WHERE user_id = ?",
+    )
+    .get(userId);
+
+describe("a user added by `bun run users` is not drift (#32)", () => {
+  test("adding one leaves /health healthy, and the user is served within one poll", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    addRealUser(instance.db);
+    await Bun.sleep(POLL_MS * 8);
+
+    const body = await health(instance.base);
+    expect(body.fixture_drift).toBeNull();
+    expect(body.status).toBe("healthy");
+    expect(body.counts.subjects).toBe(5);
+
+    // Not ignored by the policy, only by the drift check: the row is live.
+    // $95K is over Alice's $50K and within this user's $400K.
+    const allowed = await preAs(instance.base, REAL_USER.user_id, "ApproveLoan", { loan_id: "LN-2291", amount: 95_000 });
+    expect(await allowed.json()).toEqual({ code: "OK" });
+  });
+
+  test("a hand-edited demo row beside it is still drift, and is the only thing named", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    addRealUser(instance.db);
+    instance.db.run("UPDATE subjects SET clearance = 250000 WHERE user_id = ?", [DANA]);
+    await Bun.sleep(POLL_MS * 8);
+
+    const drift = (await health(instance.base)).fixture_drift;
+    expect(drift?.ids).toEqual([`subjects:${DANA}`]);
+    expect(drift?.changed).toEqual([`subjects:${DANA}`]);
+    expect(drift?.unexpected).toEqual([]);
+  });
+
+  test("a demo row deleted is still drift, and a rule the fixture never shipped still is", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    addRealUser(instance.db);
+    instance.db.run("DELETE FROM subjects WHERE user_id = ?", [DANA]);
+    instance.db.run(
+      `INSERT INTO policy_rules (id, description, hook, toolkit, tool, subjects, conditions, effect, reason, priority, enabled)
+       SELECT 'pre.planted', description, hook, toolkit, tool, subjects, conditions, effect, reason, priority, enabled
+       FROM policy_rules WHERE id = 'pre.decide-only-while-pending'`,
+    );
+    await Bun.sleep(POLL_MS * 8);
+
+    const drift = (await health(instance.base)).fixture_drift;
+    expect(drift?.missing).toEqual([`subjects:${DANA}`]);
+    expect(drift?.unexpected).toEqual(["policy_rules:pre.planted"]);
+  });
+});
+
+describe("a reset keeps real users' subjects rows (#32)", () => {
+  for (const mode of ["policy", "demo"] as const) {
+    test(`${mode} mode puts the demo cast back and leaves a real user exactly as they were`, async () => {
+      const instance = boot(diskSeededFrom(rawFixture));
+      addRealUser(instance.db);
+      // A stage edit to a demo row, which the reset is meant to undo.
+      instance.db.run("UPDATE subjects SET clearance = 250000 WHERE user_id = ?", [DANA]);
+
+      const response = await reset(instance.base, { mode });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { kept: { subjects: string[] } };
+      expect(body.kept.subjects).toEqual([REAL_USER.user_id]);
+
+      expect(subjectRow(instance.db, REAL_USER.user_id)).toEqual(REAL_USER);
+      expect(subjectRow(instance.db, DANA)?.clearance).toBe(50_000);
+      expect((await health(instance.base)).fixture_drift).toBeNull();
+      expect(instance.logs.some((line) => line.includes(`kept 1 subject the fixture does not seed (${REAL_USER.user_id})`))).toBe(true);
+
+      // And the control plane still knows them, rather than "must register the identity".
+      const allowed = await preAs(instance.base, REAL_USER.user_id, "ApproveLoan", { loan_id: "LN-2291", amount: 95_000 });
+      expect(await allowed.json()).toEqual({ code: "OK" });
+    });
+  }
+
+  test("with no real users, the reset says it kept nobody", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    const body = (await (await reset(instance.base, { mode: "demo" })).json()) as { kept: { subjects: string[] } };
+    expect(body.kept.subjects).toEqual([]);
+    expect((await health(instance.base)).counts.subjects).toBe(4);
+  });
+});
+
+describe("a demo subject removed with `bun run users remove` stays removed (#32, round 1)", () => {
+  const BOB = "bob@bank.example";
+  const BOB_SUBJECT = { user_id: BOB, display_name: "Bob", role: "credit_analyst", clearance: 0 };
+
+  test("it is not drift", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    expect(removeSubject(instance.db, BOB, "cli:test")?.action).toBe("remove");
+    await Bun.sleep(POLL_MS * 8);
+
+    expect((await health(instance.base)).fixture_drift).toBeNull();
+  });
+
+  for (const mode of ["policy", "demo"] as const) {
+    test(`${mode} mode does not re-seed it, says so, and keeps the record of the removal`, async () => {
+      const instance = boot(diskSeededFrom(rawFixture));
+      removeSubject(instance.db, BOB, "cli:test");
+
+      const body = (await (await reset(instance.base, { mode })).json()) as {
+        removed: { subjects: string[] };
+        kept: { subjects: string[] };
+      };
+      expect(body.removed.subjects).toEqual([BOB]);
+      expect(subjectRow(instance.db, BOB)).toBeNull();
+      expect(subjectRow(instance.db, DANA)?.clearance).toBe(50_000);
+      expect((await health(instance.base)).fixture_drift).toBeNull();
+      // The removal is the record the next reset reads, so no reset may erase it.
+      expect(subjectChanges(instance.db, BOB).map((change) => change.action)).toEqual(["remove"]);
+    });
+  }
+
+  test("added back (seed-demo writes an `add` row), it is the demo cast again and a reset re-seeds it", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    removeSubject(instance.db, BOB, "cli:test");
+    addSubject(instance.db, BOB_SUBJECT, "cli:test");
+    instance.db.run("UPDATE subjects SET clearance = 10 WHERE user_id = ?", [BOB]);
+    await Bun.sleep(POLL_MS * 8);
+    expect((await health(instance.base)).fixture_drift?.changed).toEqual([`subjects:${BOB}`]);
+
+    const body = (await (await reset(instance.base, { mode: "demo" })).json()) as { removed: { subjects: string[] } };
+    expect(body.removed.subjects).toEqual([]);
+    expect(subjectRow(instance.db, BOB)?.clearance).toBe(0);
+    expect((await health(instance.base)).fixture_drift).toBeNull();
+  });
+
+  test("deleted by hand, with no recorded removal, it is still missing drift and a reset re-seeds it", async () => {
+    const instance = boot(diskSeededFrom(rawFixture));
+    instance.db.run("DELETE FROM subjects WHERE user_id = ?", [BOB]);
+    await Bun.sleep(POLL_MS * 8);
+    expect((await health(instance.base)).fixture_drift?.missing).toEqual([`subjects:${BOB}`]);
+
+    const body = (await (await reset(instance.base, { mode: "policy" })).json()) as { removed: { subjects: string[] } };
+    expect(body.removed.subjects).toEqual([]);
+    expect(subjectRow(instance.db, BOB)).toEqual(BOB_SUBJECT);
+    expect((await health(instance.base)).fixture_drift).toBeNull();
   });
 });

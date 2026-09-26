@@ -216,7 +216,7 @@ describe("one command, three databases", () => {
     expect(code).toBe(0);
 
     // One line per service, each naming what moved.
-    expect(out).toMatch(/\[reset\] idp\s+OK\s+people \d+→\d+, OAuth client \S+ unchanged/);
+    expect(out).toMatch(/\[reset\] idp\s+OK\s+everyone signed out;.*; people \d+→\d+, OAuth client \S+ unchanged/);
     expect(out).toMatch(/\[reset\] hooks\s+OK\s+demo at revision \d+ .*audit_log \d+→0/);
     expect(out).toMatch(/\[reset\] loan-app\s+OK\s+loans \d+→\d+, decisions \d+→\d+/);
 

@@ -304,6 +304,15 @@ It is a **warning, not a revert**. A clearance raised on stage looks exactly lik
 change that never landed, and the first of those is meant to survive a deploy (#29). What is
 fixed is the silence.
 
+**A subject the fixture does not seed is not drift** (#32). `bun run users add` writes a
+`subjects` row for every real user, and a `/health` that went degraded each time somebody was
+invited would be a warning that is always on. So on `subjects` only the fixture's own rows are
+compared: a demo row edited by hand is `changed`, one deleted by hand is `missing`, and a row for
+anybody else is ignored. A demo subject taken out with `bun run users remove` is not `missing`:
+its latest `subject_changes` row is the `remove`, which is a record of intent, and a later `add`
+or `seed-demo` makes it the demo cast's again. A rule or a catalogue entry the fixture does not
+ship is still `unexpected`.
+
 **The outage.** `/health` used to answer 503 while the policy failed to compile. The stage
 demo's host health-checked that path, so when #89's compile guard met a disk still holding the
 dot-spelled remediation text, the host marked the instance dead and served its own 502 over a
@@ -335,8 +344,15 @@ curl -fsS -X POST "https://$APP_PUBLIC_HOST/hooks/admin/reset" \
 
 | mode | replaces | leaves |
 |---|---|---|
-| `policy` (the endpoint's default) | `subjects`, `catalogue`, `policy_rules`, `output_rules` | grants, approval requests, audit log |
-| `demo` | the above, **and empties** `grants`, `approval_requests`, `audit_log` | nothing of the demo's own state |
+| `policy` (the endpoint's default) | the fixture's `subjects` rows, `catalogue`, `policy_rules`, `output_rules` | grants, approval requests, audit log, every subject the fixture does not seed |
+| `demo` | the above, **and empties** `grants`, `approval_requests`, `audit_log` | every subject the fixture does not seed |
+
+Neither mode deletes a real user (#32): a `subjects` row whose address the fixture does not seed
+was added by `bun run users`, and both modes keep it as it was and name it in the response's
+`kept.subjects`. Neither mode brings back a demo subject removed with `bun run users remove`
+either: it is listed in `removed.subjects` and left out, so a removed person has neither half
+after a reset. A demo row deleted by hand, with no recorded removal, is written back. Neither
+mode touches `subject_changes`, which is append-only and is what the next reset reads.
 
 One transaction, then an immediate cache reload, so the `revision` in the response is the
 revision being served rather than one that will be shortly.
