@@ -23,7 +23,7 @@ control layers, two OAuth hops, three databases.
 |---|---|---|
 | `lib/loans/` | **replace** | The system of record, a module of the app served under `/bank`. A plain HTTP API over `loans.db`. Yours already exists — you probably delete this directory rather than edit it |
 | `tools/loan` | **replace** | Four Python `arcade-mcp` tools, each a stateless client of the API above |
-| `lib/control-plane/fixtures/governance.json` | **rewrite** | The catalogue, the roster, the rules |
+| `lib/control-plane/fixtures/governance.json` | **rewrite** | The catalogue, the demo cast, the rules. Your own people come from `bun run users` (§3) |
 | `lib/identity/provider/` | **delete** | The enterprise IdP, as a demo fixture the app serves on its own port. You have an Okta |
 | `lib/identity/session.ts` | **repoint** | One function pair, `readSession` / `readSessionFromCookies` |
 | the rest of the app (`app/`, `components/`, `lib/`) | **keep** | Chat, panel, approval page, the bank's screen |
@@ -204,8 +204,35 @@ get right and the first thing to check when a rule silently does nothing.
 
 `user_id` is an **email**, lowercase, and it is the join key: Arcade's `user_id`, the
 OAuth subject, and the actor your API records are the same string. If they diverge,
-your audit trail is fiction. These rows are the demo cast: a first boot seeds none of them,
-and `bun run users seed-demo` adds them (#33).
+your audit trail is fiction.
+
+These rows are the demo cast, not your people. A first boot seeds none of them, and
+`bun run users seed-demo` adds them under the addresses you give it (#33). Your own people
+come from the terminal, not from this file:
+
+```sh
+bun run users add <email> --name <name> --role <role> --clearance <n>
+bun run users set-role <email> <role>
+bun run users set-clearance <email> <n>
+bun run users remove <email>
+bun run users list
+```
+
+Each command writes the person's `subjects` row in `governance.db` and their sign-in in the
+identity provider's `idp.db`, both or neither, and records the change in `governance.db`'s
+append-only `subject_changes`. A running app sees the change within one poll, so there is
+no restart and no reset. A reset leaves these people as they are (#32). It puts back only a
+demo-cast row at the fixture's own address, and those are the only `subjects` rows
+`fixture_drift` compares.
+
+`--role` has to be a role the policy already knows: one a `subjects` row holds, one a rule
+narrows on with `subjects.roles`, or one this fixture's cast holds. So a new role starts in
+this file, as a rule that names it or a demo-cast row that holds it, and then
+`bun run users` accepts it. `--clearance` is required unless `/access` hides the approval
+tool from the role, and `scripts/users.ts` names that tool and the one that requests an
+approval as `APPROVE_TOOL` (`ApproveLoan`) and `REQUEST_TOOL` (`RequestApproval`): point
+them at your own tools' names. `REQUEST_TOOL` decides who gets the reminder that they need
+an Arcade account (§5).
 
 `clearance` is the one numeric authority this template ships with. Replace it with your
 own scalar or add attributes — the engine reads `subjects.roles`,
@@ -283,6 +310,13 @@ directory plus what mounts it:
 - `lib/identity/provider` in the root `package.json`'s `workspaces`, then `bun install`
   to drop it from the lockfile.
 
+`bun run users` goes with it in part. `scripts/users.ts` writes the identity half of each
+person through `scripts/identity/people.ts`, which is in the list above, and the
+control-plane half through `lib/control-plane/subjects.ts`, which stays. Your IdP owns the
+accounts, so keep the control-plane half and drop the identity half: every person who
+signs in still needs a `subjects` row under the email your IdP asserts, or every hook
+denies them.
+
 Two places reference it from outside and both are configuration rather than code:
 
 | | |
@@ -329,6 +363,12 @@ Two things to align with your domain:
   book) must be the ones `POST /approvals` receives.
 - The Slack message body in `tools/approvals/approvals/message.py` names the action and
   the resource. It is domain-flavoured prose, not domain-coupled code.
+
+Whoever requests an approval must be a member of your Arcade project, because
+`Approvals_RequestApproval` uses Arcade's stock Slack provider, and Arcade sends that
+through its own verifier rather than your custom one. The README's FAQ,
+[Do my users need Arcade accounts?](../README.md#faq), has the detail and the way out:
+your own Slack app, registered as a custom OAuth provider.
 
 The approval link **carries no authority** — no token, no signature, no query string —
 and `tools/approvals/tests/test_message.py` asserts it, because that is exactly the
@@ -578,7 +618,7 @@ cp .env.example .env                # then fill it in
 
 bun run typecheck
 bun test                            # every group, including both boundary tests
-bun run reset                       # the policy, audit log and loan book back to their fixtures
+bun run reset                       # the policy, audit log and loan book back to their fixtures; your users stay
 ```
 
 Then the whole system, with your domain in it, against a real Arcade project: the
@@ -593,7 +633,8 @@ try once it runs is its Try it out section.
 - [ ] Seed fixture carries an over-authority record, sensitive fields, an injected note, and a control record
 - [ ] Toolkit copied, renamed, `MCPApp(name=…)` set; descriptions carry no behavioural instruction
 - [ ] `arcade deploy` run, toolkit name **read back** and put in `ARCADE_LOAN_TOOLKIT`
-- [ ] `lib/control-plane/fixtures/governance.json` rewritten: catalogue, roster, policy rules, output rules
+- [ ] `lib/control-plane/fixtures/governance.json` rewritten: catalogue, demo cast, policy rules, output rules
+- [ ] Your people added with `bun run users add`, or, with your own IdP, each given a `subjects` row under the email it asserts
 - [ ] Every injection pattern has both halves of a corpus entry; `bun test ./app-test/control-plane/` green
 - [ ] `readSession` pointed at your IdP; `lib/identity/provider/` and its routes deleted; Arcade's provider and User Source repointed
 - [ ] `"cg": { "governed": true }` on your app's manifest, and its `knows-nothing` test shipped
