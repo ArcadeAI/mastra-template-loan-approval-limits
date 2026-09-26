@@ -64,12 +64,13 @@ as the wire spells it (#89). No prompt steering is an acceptable fix for either.
 | Model | Claude Sonnet 5 via `@ai-sdk/anthropic`, temperature 0, model id from env |
 | **Tool layer** | **Both toolkits are Python `arcade-mcp`, shipped with `arcade deploy` into one Arcade project and exposed through one gateway. `arcade-mcp` is the tool-authoring framework; it is Python-only, which is why the TS-everywhere rule does not reach the toolkits. Decided on #32, confirmed in session.** |
 | **Business system** | **The loan module is the bank's system of record: a plain HTTP API under the app, owning `loans.db`. It is not an MCP server and knows nothing about Arcade or governance. `tools/loan` is a stateless client of it, reaching it through `APP_PUBLIC_HOST`.** The demo split this into its own service to make "governance is outside the business system" literal. The template keeps that claim as a **module** boundary enforced by a test (see **Services**), not a process boundary. The bank UI's loan cards and `/loans` board read the loan module directly as the signed-in person, never through the gateway (#157 in the demo), so every MCP call still originates in the chat. |
-| **Identity** | **Every persona is a user of the app's own Better Auth, with a real email, and the web UI signs in against it.** Each persona runs in its own browser profile, so there is no persona switcher (#176 in the demo). `context.user_id` on every hook payload is that email, lowercase. Personas are *not* Arcade project members, unless the members-mode fallback is taken (below). |
+| **Identity** | **Every persona is a user of the app's own Better Auth, with a real email, and the web UI signs in against it.** Each persona runs in its own browser profile, so there is no persona switcher (#176 in the demo). `context.user_id` on every hook payload is that email, lowercase. Personas are *not* Arcade project members, unless the members-mode fallback is taken (below), **except requesters: see Slack and Arcade accounts.** |
 | **Two hops, two mechanisms** | **Hop 1, MCP client → gateway: a User Source whose issuer is the app's own Better Auth.** Tried first because it already works in the demo. **The fallback is members mode**, taken only if the live sitting shows the User Source can't be set up easily: then the README asks for two Arcade accounts (Alice and Charlie) whose emails match the app's users. **Arcade Headers mode is ruled out and never proposed.** **Hop 2, tool-level OAuth: the Loan toolkit's `requires_auth` names the app's provider under a fixed generic id**, and a custom user verifier route in the app binds the signed-in email. Neither hop's mechanism moves the other. Decided 2026-09-23. **Amended the same day: build on the User Source without a sitting first, and verify with a real Arcade account once, at the end (#7).** |
 | **Gateway token storage** | **`apps/web` drives the gateway OAuth itself (Mastra's `MCPClient.authenticate()` refuses non-loopback redirects) and hands `MCPClient` a static token. The gateway access + refresh token and the persona email live in a sealed, HTTP-only, per-browser cookie (AES-GCM under `SESSION_SECRET`, chunked when over 4KB). One persona per browser. No fourth database. Refresh is server-side. Decided 2026-09-11.** |
 | **Arcade config is read-only** | **The auth provider's advanced configuration is never edited; its `client_id`/`client_secret` request parameters stay. The app's Better Auth adapts instead (the demo's #79: Basic header plus identical body credentials accepted). Read provider config back through `GET /v1/admin/auth_providers/<id>`, not off dashboard labels.** |
 | **Authorization** | **The loan tools require OAuth against the app's own provider, so they call the loan module on behalf of the user, not as a service account.** The loan module derives the actor from the token, never from a parameter. OAuth carries *identity*; hooks carry *authority*. **The provider is Better Auth inside the app**, which reverses the demo's #36. See **Identity and OAuth** for the objection that reverses, and what now answers it. |
 | **One identity, not two** | **The Arcade `user_id`, the OAuth subject, and the actor `apps/loan-app` records are the same person, joined on email. If these ever diverge, `governance.db` and `loans.db` describe different people and the audit trail is fiction.** |
+| **Slack and Arcade accounts** | **Anyone who requests an approval is a member of the Arcade project, invited under their email. Decided 2026-09-26 (the human, at the gate on #7).** Measured by the human and undocumented by Arcade: Arcade routes its built-in OAuth providers through its own user verifier, which demands a project member, and not through the app's custom verifier, which covers custom providers such as `app-identity` only. `Approvals_RequestApproval` uses the stock Slack provider, so its requester must be a member; approvers and the loan tools need no Arcade account. **The alternative, also measured by the human:** registering your own Slack app as a custom OAuth provider routes Slack through the custom verifier, so nobody needs an Arcade account. It is not the default, because it asks every forker to create a Slack app; it is documented for teams that do not want their users to have Arcade accounts. |
 | Policy source | Policy DB owned by the hook server. Editable live on stage. |
 | HITL | Custom `request_approval` tool posts Block Kit to Slack; approval link carries **no authority** |
 | Approval authz | `approvals.decide` is itself a governed tool call — pre-hook enforces role, limit, and requester ≠ approver |
@@ -184,11 +185,16 @@ cost a day on #75.
             → the loan module validates it, actor = alice@…
         → /post     hooks rewrite the output               ← layer 4
 
-Arcade's default verifier demands an Arcade account that is a project member. Our
-personas are not, and a persona verified against the wrong account binds the grant to
-the wrong user and the tool re-challenges forever (observed 2026-09-11 15:40Z). The
-custom verifier is what makes the IdP-asserted email the identity on hop 2, exactly as
-the User Source makes it the identity on hop 1.
+Arcade's default verifier demands an Arcade account that is a project member. For the
+app's own provider, `app-identity`, our personas need no such account, because a persona
+verified against the wrong account binds the grant to the wrong user and the tool
+re-challenges forever (observed 2026-09-11 15:40Z). The custom verifier is what makes the
+IdP-asserted email the identity on hop 2, exactly as the User Source makes it the identity
+on hop 1. **It covers custom providers only.** Arcade routes its built-in providers through
+its own verifier, so the stock Slack provider that `Approvals_RequestApproval` uses demands
+an Arcade project member: anyone who requests an approval must be invited to the Arcade
+project under their email (measured by the human, undocumented by Arcade, 2026-09-26; see
+**Slack and Arcade accounts** under Decisions).
 
 Three rules this has to hold to:
 
@@ -259,9 +265,11 @@ reader sees. The local fixture domain is `@bank.example`.
 | Charlie | `riley` | VP Credit | $250,000 | The minimum-sufficient approver for $95K |
 | Michael | `morgan` | Chief Credit Officer | $5,000,000 | Deliberately *not* bothered, which proves routing |
 
-Each persona is a user of the app's Better Auth, not an Arcade project member unless the
-members-mode fallback is taken. Each accepts Arcade's gateway consent screen once per
-browser profile per MCP client id.
+Each persona is a user of the app's Better Auth. A persona who requests an approval (Alice)
+must also be a member of the Arcade project under the same email, because the stock Slack
+provider goes through Arcade's own verifier (2026-09-26); the others need no Arcade account
+unless the members-mode fallback is taken. Each accepts Arcade's gateway consent screen once
+per browser profile per MCP client id.
 
 Seed loan `LN-2291`, Northwind Bakery LLC, $95,000. Carries `bank_account_number` and
 `tax_id` (act 3) and an `underwriter_notes` field containing an injected instruction (act 4).

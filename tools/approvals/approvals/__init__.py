@@ -85,6 +85,10 @@ app = MCPApp(
 # a prerequisite for `users:read.email`, and Slack refuses the authorize
 # request outright without it (spike #3). The token this grants is the
 # requester's own, so the DM arrives under her name — there is no bot here.
+# Arcade routes this built-in provider through its own user verifier, not the
+# app's custom one, so the requester must be a member of the Arcade project
+# (measured by the human on 2026-09-26, undocumented by Arcade; DESIGN.md →
+# Slack and Arcade accounts).
 #
 # This requirement is a credential check, not the governance gate. Arcade
 # evaluates it *before* the `/pre` hook, so a refusal fires no hook, writes no
