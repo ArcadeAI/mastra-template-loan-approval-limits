@@ -23,7 +23,9 @@
  * administrator must register the identity"); a subject without an identity
  * can never sign in. So `add` writes both or neither: the identity first, then
  * the subject, and if the subject cannot be written the identity is removed
- * again. Each half is written through the module that owns its file.
+ * again. Each half is written through the module that owns its file, and
+ * identity only through the provider's own tool, `scripts/identity/people.ts`,
+ * which hands back people and nothing that can sign a token.
  *
  * ## The role is mandatory, and read from the policy
  *
@@ -86,8 +88,7 @@ import {
   type NewSubject,
   type SubjectChange,
 } from "../lib/control-plane/subjects.ts";
-import { idpDbPath } from "../lib/identity/provider/config.ts";
-import { addPerson, findPerson, listPeople, openPeople, removePerson } from "../lib/identity/provider/db.ts";
+import { openPeopleStore, type People } from "./identity/people.ts";
 
 /** Where a requester is invited. One constant, so the wording has one place to be corrected. */
 const ARCADE_INVITE_WHERE = "Arcade dashboard (https://api.arcade.dev/dashboard), your project, Members";
@@ -173,11 +174,9 @@ function openControlPlane(): Database {
   return db;
 }
 
-async function openIdentity(): Promise<Database> {
-  const db = await openPeople(idpDbPath());
-  // The app holds the same file open; wait out its write lock rather than fail.
-  db.exec("PRAGMA busy_timeout = 1000");
-  return db;
+/** Identity through the provider's own tool, which hands back people and nothing that signs. */
+function openIdentity(): Promise<People> {
+  return openPeopleStore();
 }
 
 /** The shipped fixture's cast, for the roles it names and for `seed-demo`. */
@@ -246,8 +245,8 @@ function impliesNoClearance(governance: Database, role: string): boolean {
 }
 
 /** Refuses an address either half already holds, naming which. */
-function checkAbsent(identity: Database, governance: Database, email: string): void {
-  const person = findPerson(identity, email) !== null;
+function checkAbsent(identity: People, governance: Database, email: string): void {
+  const person = identity.find(email) !== null;
   const subject = readSubject(governance, email) !== null;
   if (person && subject) throw new Refusal(`${email} already exists; change them with set-role or set-clearance`);
   if (person || subject) {
@@ -263,16 +262,16 @@ function checkAbsent(identity: Database, governance: Database, email: string): v
  * left to fail is the write itself, and then the identity is taken back out.
  */
 async function createUser(
-  identity: Database,
+  identity: People,
   governance: Database,
   subject: NewSubject,
   password: string,
 ): Promise<SubjectChange> {
-  await addPerson(identity, { name: subject.display_name, email: subject.user_id, password });
+  await identity.add({ name: subject.display_name, email: subject.user_id, password });
   try {
     return addSubject(governance, subject, actor);
   } catch (cause) {
-    removePerson(identity, subject.user_id);
+    identity.remove(subject.user_id);
     const why = cause instanceof Error ? cause.message : String(cause);
     throw new Refusal(`${subject.user_id}: the subject could not be written (${why}), so the identity was removed again and nothing was added`);
   }
@@ -334,7 +333,7 @@ async function list(args: string[]): Promise<void> {
   const governance = openControlPlane();
   const identity = await openIdentity();
   try {
-    const people = new Map(listPeople(identity).map((person) => [person.email.toLowerCase(), person]));
+    const people = new Map(identity.list().map((person) => [person.email.toLowerCase(), person]));
     const subjects = new Map(listSubjects(governance).map((subject) => [subjectId(subject.user_id), subject]));
     const emails = [...new Set([...people.keys(), ...subjects.keys()])].sort();
     if (emails.length === 0) {
@@ -421,7 +420,7 @@ async function remove(args: string[]): Promise<void> {
   try {
     // The subject first: from this commit on, every hook denies them.
     const change = removeSubject(governance, email, actor);
-    const removal = removePerson(identity, email);
+    const removal = identity.remove(email);
     if (change === null && removal === null) throw new Refusal(`there is no user ${email}`);
 
     console.log(`removed ${email}`);
@@ -499,7 +498,7 @@ async function seedDemo(args: string[]): Promise<void> {
     for (const person of cast) {
       const email = emails.get(person.flag)!;
       const subject: NewSubject = { user_id: email, display_name: person.name, role: person.role, clearance: person.clearance };
-      const hasPerson = findPerson(identity, email) !== null;
+      const hasPerson = identity.find(email) !== null;
       const existing = readSubject(governance, email);
 
       if (hasPerson && existing) {
