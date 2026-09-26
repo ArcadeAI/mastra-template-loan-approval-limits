@@ -108,6 +108,10 @@ class StandIn {
   omitEndpointUrl: string | null = null;
   /** When set, a PUT to the verifier settings is accepted and ignored. */
   verifierIgnoresPut = false;
+  /** The servers Arcade already runs, by name, as `GET …/workers/<name>` finds them. */
+  workers = new Set<string>();
+  /** When set, `GET …/workers/<name>` answers this instead. */
+  workerLookup: { status: number; body: Json } | null = null;
   /** The callback Arcade generates for the next provider created: one per provider, `…/oauth/<ap_ id>/callback`. */
   nextCallback = CALLBACK;
   /**
@@ -264,6 +268,14 @@ class StandIn {
       return page(this.hooks.filter((hook) => plugin === null || hook.plugin_id === plugin));
     }
     if (method === "GET" && rest === "/gateways") return page([...this.gateways.values()]);
+    // The Arcade CLI's `server_already_exists`: org-scoped, 404 when the server is missing.
+    const worker = /^\/workers\/([^/]+)$/.exec(rest)?.[1];
+    if (worker !== undefined && method === "GET") {
+      if (this.workerLookup !== null) return Response.json(this.workerLookup.body, { status: this.workerLookup.status });
+      return this.workers.has(worker)
+        ? Response.json({ id: worker, enabled: true, managed: true, type: "mcp" })
+        : Response.json({ name: "not_found", message: `worker ${worker} not found` }, { status: 404 });
+    }
     if (method === "POST" && rest === "/gateways") {
       if (!body?.name) return Response.json({ name: "malformed_request", message: "name is required" }, { status: 400 });
       if (body.auth_type === "user_source" && !/^us_/.test(body.user_source_id ?? "")) {
@@ -368,8 +380,11 @@ function project(
   cli: { orgId: string; projectId: string } | null = { orgId: ORG, projectId: PROJECT },
 ): string {
   const dir = join(scratch, name);
-  mkdirSync(join(dir, "tools", "loan"), { recursive: true });
-  mkdirSync(join(dir, "tools", "approvals"), { recursive: true });
+  // Each toolkit names its server the way this template's do: `[project] name`.
+  for (const toolkit of ["loan", "approvals"]) {
+    mkdirSync(join(dir, "tools", toolkit), { recursive: true });
+    writeFileSync(join(dir, "tools", toolkit, "pyproject.toml"), `[project]\nname = "${toolkit}"\nversion = "1.0.0"\n`);
+  }
   git(dir, "init", "-q");
   writeFileSync(join(dir, ".gitignore"), ".env\n*.db\n*.db-*\n");
   copyFileSync(join(ROOT, ".env.example"), join(dir, ".env.example"));
@@ -465,6 +480,8 @@ const FIRST_RUN = [
   `POST ${SCOPED}/plugins`,
   `GET ${SCOPED}/plugins/{id}`,
   `GET ${SCOPED}/hooks?plugin_id={id}`,
+  `GET ${SCOPED}/workers/loan`,
+  `GET ${SCOPED}/workers/approvals`,
 ];
 /** A rerun's, once everything the first run did is there. */
 const RERUN = [
@@ -475,6 +492,8 @@ const RERUN = [
   "PUT /v1/admin/settings/session_verification",
   "GET /v1/admin/settings/session_verification",
   `GET ${SCOPED}/hooks?plugin_id={id}`,
+  `GET ${SCOPED}/workers/loan`,
+  `GET ${SCOPED}/workers/approvals`,
 ];
 const DEPLOYS = ["tools/loan|deploy", "tools/approvals|deploy"];
 
@@ -740,7 +759,9 @@ test("--dry-run from a fresh project prints the requests a real run makes, in or
   const plugin = bodyAfter(run.stdout, `  POST ${arcade.url}${SCOPED}/plugins\n`);
   expect(plugin.webhook_config.auth).toEqual({ type: "bearer", token: "<generated ARCADE_HOOK_SIGNING_SECRET>" });
   expect(plugin.webhook_config.endpoints.pre).toEqual({ url: `${ORIGIN}/hooks/pre`, phase: "before", failure_mode: "fail_closed", status: "active" });
-  expect(run.stdout).toContain("Deploys, after the hooks and before the gateway, each stopping the run if it fails:\n  arcade deploy   (in tools/loan)\n  arcade deploy   (in tools/approvals)");
+  expect(run.stdout).toContain(
+    "Deploys, after the hooks and before the gateway, each stopping the run if it fails, unless Arcade already runs it:\n  arcade deploy   (in tools/loan)\n  arcade deploy   (in tools/approvals)",
+  );
   expect(run.stdout).not.toContain("POST " + arcade.url + "/v1/admin/secrets");
   expect(run.stdout).toMatch(/would fill .*\bBETTER_AUTH_SECRET\b/);
   expect(run.stdout).not.toContain(KEY);
@@ -979,7 +1000,7 @@ test("hooks that differ are updated, because they are not the access model, and 
   expect(run.stdout).toContain("hooks: loan-approval-limits-hooks is registered and differs from what this app needs, so it is updated:");
   expect(run.stdout).toContain(`webhook_config.endpoints.post.url: Arcade has "https://old-host.example/hooks/post", this app needs "${ORIGIN}/hooks/post"`);
   expect(run.stdout).toContain('tool.pre.failure_mode: Arcade has "fail_open", this app needs "fail_closed"');
-  expect(sequence(arcade.requests).slice(-4)).toEqual([
+  expect(sequence(arcade.requests).slice(-6, -2)).toEqual([
     `GET ${SCOPED}/hooks?plugin_id={id}`,
     `PATCH ${SCOPED}/plugins/{id}`,
     `GET ${SCOPED}/plugins/{id}`,
@@ -1564,3 +1585,58 @@ test("a provider recreated with a new callback: the rerun replaces it in .env an
   expect(again.stdout).not.toContain("replaced the provider's callback");
   expect(again.stdout).not.toContain("allowlisted the provider's callback");
 }, 90_000);
+
+// --- A rerun does not redeploy what Arcade already runs (#30, run 4) ----------
+
+/**
+ * Run 4: finishing with --user-source cost two full deploys of unchanged code.
+ * Before each deploy the run asks what the Arcade CLI asks
+ * (`server_already_exists`, `GET …/workers/<name>`): 404 deploys it, found
+ * skips it. Arcade's answer has no version to compare, so --redeploy is the
+ * way to ship a changed toolkit.
+ */
+test("a toolkit Arcade already runs is skipped, and one it does not is deployed", async () => {
+  const dir = project("deploy-skip");
+  arcade.workers.add("loan");
+  const run = await setupArcade(dir);
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  expect(run.stdout).toContain("  tools/loan: already deployed on Arcade, skipped (pass --redeploy after changing it)");
+  expect(run.stdout).not.toContain("arcade deploy   (in tools/loan):");
+  // approvals answered 404, so it was deployed.
+  expect(projects.get(dir)!.deploys()).toEqual(["tools/approvals|deploy"]);
+  expect(sequence(arcade.requests).filter((each) => each.includes("/workers/"))).toEqual([`GET ${SCOPED}/workers/loan`, `GET ${SCOPED}/workers/approvals`]);
+}, 60_000);
+
+test("a rerun with both toolkits on Arcade deploys nothing, and the gateway still follows", async () => {
+  const dir = project("deploy-skip-both");
+  arcade.workers.add("loan");
+  arcade.workers.add("approvals");
+  const run = await setupArcade(dir, "--user-source", USER_SOURCE);
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  expect(projects.get(dir)!.deploys()).toEqual([]);
+  expect(run.stdout).toContain("  tools/approvals: already deployed on Arcade, skipped (pass --redeploy after changing it)");
+  expect(arcade.gateways.size).toBe(1);
+}, 60_000);
+
+test("--redeploy deploys both whatever Arcade runs, and asks it nothing", async () => {
+  const dir = project("deploy-redeploy");
+  arcade.workers.add("loan");
+  arcade.workers.add("approvals");
+  const run = await setupArcade(dir, "--redeploy");
+  expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+  expect(projects.get(dir)!.deploys()).toEqual(DEPLOYS);
+  expect(arcade.requests.filter((each) => each.path.includes("/workers/"))).toEqual([]);
+  const dry = await setupArcade(dir, "--dry-run", "--redeploy");
+  expect(dry.stdout).toContain("(--redeploy: both, whatever Arcade already runs)");
+  expect(dry.stdout).not.toContain("/workers/");
+}, 60_000);
+
+test("a worker lookup that fails for another reason stops the run with Arcade's message", async () => {
+  const dir = project("deploy-lookup-fails");
+  arcade.workerLookup = { status: 500, body: { name: "internal", message: "the engine is having a moment" } };
+  const run = await setupArcade(dir);
+  expect(run.code).toBe(1);
+  expect(run.stderr).toContain(`checking whether tools/loan is deployed failed: GET ${SCOPED}/workers/loan answered 500`);
+  expect(run.stderr).toContain("Arcade says: the engine is having a moment");
+  expect(projects.get(dir)!.deploys()).toEqual([]);
+}, 60_000);

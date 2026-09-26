@@ -1,5 +1,5 @@
 /**
- * `bun run setup-arcade <ngrok-host> [--dry-run] [--user-source <id>] [--skip-deploy] [--gateway <slug>]` (#9, #30)
+ * `bun run setup-arcade <ngrok-host> [--dry-run] [--user-source <id>] [--skip-deploy] [--redeploy] [--gateway <slug>]` (#9, #30)
  *
  * Everything the Arcade side of this template needs, from one command, after
  * the developer has filled in the few required values in `.env`
@@ -28,7 +28,9 @@
  *    access hooks (#30), each read back.
  * 7. **Deploys both toolkits**: `arcade deploy` in `tools/loan`, then in
  *    `tools/approvals`, streaming their output and stopping on a failure
- *    (#30). `--skip-deploy` leaves them to the developer.
+ *    (#30). A toolkit Arcade already runs is skipped: `GET …/workers/<name>`,
+ *    the CLI's own check, answers 404 when it is missing. `--redeploy`
+ *    deploys it anyway, and `--skip-deploy` leaves both to the developer.
  * 8. **Creates the gateway** by API, through the User Source, once it has the
  *    User Source's id (`--user-source`, or `ARCADE_USER_SOURCE_ID`). Without
  *    one it prints the User Source form, the one registration Arcade's API
@@ -86,6 +88,7 @@ import {
 import { type ArcadeContext, resolveContext } from "./setup-arcade/context.ts";
 import { fillBlanks, MANAGED_KEYS, parseEnv, readEnvFile, replaceValue, shellConflicts, writeEnvFile } from "./setup-arcade/env-file.ts";
 import { gatewayForm, hooksForm, nextSteps, userSourceCommand, userSourceForm } from "./setup-arcade/forms.ts";
+import { serverName } from "./setup-arcade/toolkit.ts";
 
 const USER_SOURCE_CALLBACK = "https://cloud.arcade.dev/oauth2/intermediate_callback";
 const CLIENT_KEYS = ["arcade", "arcade-user-source", "web"] as const;
@@ -104,6 +107,7 @@ function fail(message: string, code = 1): never {
 const argv = process.argv.slice(2);
 const dryRun = argv.includes("--dry-run");
 const skipDeploy = argv.includes("--skip-deploy");
+const redeploy = argv.includes("--redeploy");
 /** The value after a flag that takes one, or `null` when the flag is absent. */
 const valueOf = (flag: string): string | null => (argv.includes(flag) ? (argv[argv.indexOf(flag) + 1] ?? "") : null);
 const gatewaySlug = valueOf("--gateway");
@@ -113,7 +117,7 @@ const positional = argv.filter((arg, i) => !arg.startsWith("--") && !valued.has(
 
 if (positional.length !== 1) {
   fail(
-    "usage: bun run setup-arcade <ngrok-host> [--dry-run] [--user-source <id>] [--skip-deploy] [--gateway <slug>]\n" +
+    "usage: bun run setup-arcade <ngrok-host> [--dry-run] [--user-source <id>] [--skip-deploy] [--redeploy] [--gateway <slug>]\n" +
       "  <ngrok-host> is the public host Arcade reaches this app at, e.g. my-app.ngrok.app",
     64,
   );
@@ -420,13 +424,25 @@ if (dryRun) {
     await admin.request("GET", projectPath(scope, "/plugins/<plugin_id>"));
     await admin.request("GET", projectPath(scope, "/hooks?plugin_id=<plugin_id>"));
   }
+  if (scope !== null && !skipDeploy && !redeploy) {
+    for (const dir of TOOLKIT_DIRS) {
+      const name = serverName(join(cwd, dir));
+      if (name === null) continue;
+      await admin.request("GET", projectPath(scope, `/workers/${encodeURIComponent(name)}`));
+    }
+    out("    (the deploys' check, one per toolkit: 404 deploys it, found skips it; --redeploy deploys both anyway)");
+  }
   if (scope !== null && userSourceId !== null) {
     await admin.request("GET", projectPath(scope, "/gateways?limit=100"));
     out(`    (searched for the slug ${slug}. With none, it is created; one that differs stops the run, and one that matches is left:)`);
     await admin.request("POST", projectPath(scope, "/gateways"), gatewayBody(gatewaySpec(userSourceId)));
     await admin.request("GET", projectPath(scope, "/gateways/<gateway_id>"));
   }
-  out(skipDeploy ? "\nDeploys: skipped (--skip-deploy)." : "\nDeploys, after the hooks and before the gateway, each stopping the run if it fails:");
+  out(
+    skipDeploy
+      ? "\nDeploys: skipped (--skip-deploy)."
+      : `\nDeploys, after the hooks and before the gateway, each stopping the run if it fails${redeploy ? " (--redeploy: both, whatever Arcade already runs)" : ", unless Arcade already runs it"}:`,
+  );
   if (!skipDeploy) {
     for (const dir of TOOLKIT_DIRS) out(deployLine(dir));
     out(DEPLOY_SECRETS_NOTE);
@@ -690,6 +706,25 @@ if (skipDeploy) {
   for (const dir of TOOLKIT_DIRS) {
     const where = join(cwd, dir);
     if (!existsSync(where)) fail(`there is no ${dir} under ${cwd} to deploy. Run this from the project's root, or pass --skip-deploy.`);
+    // Already on Arcade: skipped, because a rerun (the second run, with
+    // --user-source) otherwise pays for two full deploys of unchanged code
+    // (#30). The CLI's own check, `server_already_exists`: 404 is missing.
+    // Arcade's answer carries no version to compare (schemas.WorkerResponse),
+    // so a changed toolkit needs --redeploy.
+    const name = serverName(where);
+    if (scope !== null && name !== null && !redeploy) {
+      const path = projectPath(scope, `/workers/${encodeURIComponent(name)}`);
+      const found = await admin.request("GET", path);
+      if (found.status === 200) {
+        out(`  ${dir}: already deployed on Arcade, skipped (pass --redeploy after changing it)`);
+        continue;
+      }
+      if (found.status !== 404) {
+        const error = new ArcadeError("GET", path, found.status, JSON.stringify(found.json));
+        const said = arcadeMessage(error);
+        fail(`checking whether ${dir} is deployed failed: ${error.message}${said ? `\nArcade says: ${said}` : ""}`);
+      }
+    }
     out(`\n${deployLine(dir).trim()}:`);
     let code: number;
     try {
