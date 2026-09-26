@@ -393,6 +393,87 @@ function insertPeople(db: Database, people: HashedPerson[]): void {
   }
 }
 
+export class PersonExistsError extends Error {
+  constructor(readonly email: string) {
+    super(`idp.db already has a user for ${email}`);
+    this.name = "PersonExistsError";
+  }
+}
+
+/**
+ * One person, added by hand (`bun run users add`, #31): a `user` row and its
+ * `credential` account, hashed and inserted exactly as the seed does, in one
+ * transaction. The email is lowercased on the way in, for the reason
+ * `loadPeople` gives. Refuses an address that already has a user.
+ *
+ * The password is hashed here and goes nowhere else: not into a log line, and
+ * not onto disk in any form but the scrypt hash.
+ */
+export async function addPerson(
+  db: Database,
+  person: { name: string; email: string; password: string },
+): Promise<Person> {
+  const email = person.email.trim().toLowerCase();
+  const passwordHash = await hashPassword(person.password);
+  return db.transaction(() => {
+    if (findPerson(db, email) !== null) throw new PersonExistsError(email);
+    insertPeople(db, [{ name: person.name, email, passwordHash }]);
+    return findPerson(db, email)!;
+  })();
+}
+
+export function findPerson(db: Database, email: string): Person | null {
+  return db
+    .query<Person, [string]>('SELECT "id", "name", "email" FROM "user" WHERE "email" = ?')
+    .get(email.trim().toLowerCase());
+}
+
+/** What removing a person took with them. */
+export interface Removal {
+  person: Person;
+  sessions: number;
+  accessTokens: number;
+  refreshTokens: number;
+  consents: number;
+}
+
+/**
+ * Deletes a person and everything that lets them in: their credential, their
+ * sessions, and every OAuth access token, refresh token and consent issued to
+ * them, in one transaction. `null` when there is nobody at that address.
+ *
+ * The rows are deleted by name rather than left to `on delete cascade`, so the
+ * revocation does not depend on the connection having `foreign_keys` on, and
+ * so the counts are what was actually removed. `oauthClient` is never touched:
+ * the clients belong to nobody (`client.ts`), and one that did belong to this
+ * person would make this a rotation, so it is refused instead.
+ */
+export function removePerson(db: Database, email: string): Removal | null {
+  return db.transaction(() => {
+    const person = findPerson(db, email);
+    if (person === null) return null;
+
+    const owned = db
+      .query<{ n: number }, [string]>('SELECT COUNT(*) AS n FROM "oauthClient" WHERE "userId" = ?')
+      .get(person.id);
+    if ((owned?.n ?? 0) > 0) {
+      throw new Error(
+        `${person.email} owns an OAuth client in idp.db; removing them would delete it and ` +
+          `rotate the registration Arcade holds, so nothing was removed`,
+      );
+    }
+
+    const remove = (table: string) => db.query(`DELETE FROM "${table}" WHERE "userId" = ?`).run(person.id).changes;
+    const accessTokens = remove("oauthAccessToken");
+    const refreshTokens = remove("oauthRefreshToken");
+    const consents = remove("oauthConsent");
+    const sessions = remove("session");
+    remove("account");
+    db.query('DELETE FROM "user" WHERE "id" = ?').run(person.id);
+    return { person, sessions, accessTokens, refreshTokens, consents };
+  })();
+}
+
 export function listPeople(db: Database): Person[] {
   return db
     .query<Person, []>('SELECT "id", "name", "email" FROM "user" ORDER BY "email" ASC')
