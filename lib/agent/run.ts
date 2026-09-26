@@ -399,25 +399,31 @@ export async function runTurn(options: RunOptions): Promise<void> {
         // control plane" about a socket error is the one lie this UI must not
         // tell — see `isHookDecision`.
         if (!isHookDecision(text)) {
-          await emit({ kind: "fault", tool, message: text });
+          // A fault's text can echo the arguments back, so it gets the same
+          // withholding as the arguments did (#37).
+          await emit({ kind: "fault", tool, message: withholdSecrets(text, secrets).value });
           continue;
         }
 
         const reason = remediationText(text);
-        await emit({ kind: "denied", tool, reason, ref: correlationRef(reason) });
+        // The rule author's sentence, verbatim, except a secret it may have
+        // echoed from the arguments (#37). The `[ref …]` token is not one.
+        const shownReason = withholdSecrets(reason, secrets).value;
+        await emit({ kind: "denied", tool, reason: shownReason, ref: correlationRef(shownReason) });
         continue;
       }
 
       // A failure of the run itself, not of a tool: the model refused, the
       // provider errored, the stream broke. Never a governance decision.
       if (chunk.type === "error") {
-        await emit({ kind: "error", message: failureText(payload.error ?? payload) });
+        await emit({ kind: "error", message: withholdSecrets(failureText(payload.error ?? payload), secrets).value });
       }
     }
   } catch (cause) {
     // An abort we asked for is not a failure. Anything else is, and says so.
     if (!endedOnEscalation && !endedOnAuthorization) {
-      await emit({ kind: "error", message: cause instanceof Error ? cause.message : String(cause) });
+      const message = cause instanceof Error ? cause.message : String(cause);
+      await emit({ kind: "error", message: withholdSecrets(message, secrets).value });
     }
   }
 
