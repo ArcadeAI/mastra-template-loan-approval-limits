@@ -146,6 +146,15 @@ export function issuerOf(env: Record<string, string | undefined>): string {
   return `${local ? "http" : "https"}://${host}`.replace(/\/+$/, "");
 }
 
+/**
+ * Where `idp.db` is, and nothing else. `readConfig` needs the signing secret
+ * and refuses a public issuer without one; `bun run users` (#31) only writes
+ * people and never signs anything, so it reads the path alone.
+ */
+export function idpDbPath(env: Record<string, string | undefined> = process.env): string {
+  return env.IDP_DB_PATH ?? "./idp.db";
+}
+
 export function readConfig(env: Record<string, string | undefined> = process.env): IdpConfig {
   // Validate before opening the database. An obsolete name-based variable
   // must not leave this service apparently healthy while seeding fixture
@@ -172,7 +181,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
 
   return {
     port,
-    dbPath: env.IDP_DB_PATH ?? "./idp.db",
+    dbPath: idpDbPath(env),
     baseURL,
     baseURLIsFallback: !env.APP_PUBLIC_HOST?.trim(),
     secret: secret || DEV_SECRET,

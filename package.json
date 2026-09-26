@@ -17,6 +17,7 @@
     "oauth-client": "bun scripts/identity/oauth-client.ts",
     "setup-arcade": "bun --no-env-file scripts/setup-arcade.ts",
     "identity:reset": "bun scripts/identity/reset.ts",
+    "users": "bun scripts/users.ts",
     "generate:identity-schema": "bun scripts/identity/generate-schema.ts",
     "generate:identity-schema:check": "bun scripts/identity/generate-schema.ts --check",
     "arcade-stand-in": "bun scripts/arcade-stand-in.ts",

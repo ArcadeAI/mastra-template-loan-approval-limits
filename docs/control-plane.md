@@ -195,7 +195,7 @@ the difference in behaviour.
 
 ## `governance.db`
 
-Six tables you can read at a glance, because one gets edited live on stage:
+The tables you can read at a glance, because one gets edited live on stage:
 
 | table | what | edited on stage? |
 |---|---|---|
@@ -206,6 +206,7 @@ Six tables you can read at a glance, because one gets edited live on stage:
 | `grants` | narrow permissions produced by approvals; minted **only** by `/pre`, activated **only** by the transaction that records the approval | — |
 | `approval_requests` | escalations the approvals toolkit writes and the approval page reads; empty on seed | — |
 | `audit_log` | one row per decision, append-only | never |
+| `subject_changes` | one row per change `bun run users` makes to `subjects` — added, removed, a role or a clearance changed — with before and after, append-only (#31). Not `audit_log`, whose rows are hook decisions, and not on the panel | never |
 
 Seeded from `lib/control-plane/fixtures/governance.json` **only when the database has no
 schema** (decided on #29). It sits wherever `GOVERNANCE_DB_PATH` points (`./governance.db` by
@@ -241,6 +242,7 @@ retried too. That is why #103 spends two versions on one change:
 | 2 | #16 | `audit_log.redactions` added |
 | 3 | #103 | `audit_log.before` and `audit_log.after` dropped |
 | 4 | #103 | `VACUUM`, so the payloads those columns held leave the file |
+| 5 | #31 | `subject_changes` added; a disk that still owes the `VACUUM` is stamped 5 once it has run |
 
 **The `VACUUM` is not housekeeping.** `DROP COLUMN` rewrites every row and SQLite zeroes the gap
 it defragments *inside* a page, but the overflow pages a long payload spilled onto go to the
