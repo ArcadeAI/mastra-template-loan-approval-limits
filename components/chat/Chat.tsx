@@ -18,7 +18,10 @@
  * 2. **It shows the tool calls.** A denial that only appeared as prose would
  *    leave nothing on screen distinguishing "the hook refused" from "the model
  *    decided not to" — and those are the two readings this whole demo exists to
- *    separate.
+ *    separate. Since #37 each call is a row that opens onto its exact
+ *    arguments and the exact result the model received, after `/post`, in
+ *    `JsonView.tsx`; the server has already withheld any secret from both
+ *    (`lib/agent/withhold.ts`).
  * 3. **It renders an authorization link as a link.** Layer 2 is a step for a
  *    person to take, not a refusal (`lib/agent/authorization.ts`). Printing the
  *    URL as text would leave a persona stuck on their first call with no
@@ -30,6 +33,15 @@
  *    A `fault` is grey and describes the outcome as incomplete, because a demo
  *    whose claim is *"the control plane stopped this"* must not put that claim on
  *    screen when an unreachable API stopped it or a tool partially completed.
+ *
+ * ## What #37 changed
+ *
+ * The chat reads as one conversation rather than a stack of boxes: no border
+ * on a turn or a message, while the cards keep theirs. A status line under the
+ * transcript says what the agent is waiting on (`status.ts`). And while an
+ * authorization card waits, a typed message resumes the paused turn through
+ * the same path as Continue, so it sends the same request and takes the same
+ * one-attempt guard; the words are shown and not sent to the model.
  *
  * ## What #22 changed, and why it is not decoration
  *
