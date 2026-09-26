@@ -124,6 +124,7 @@
     "app-test/studio-authorization.test.ts": 0.7,
     "app-test/studio-dev-server.test.ts": 13.6,
     "app-test/studio-entry.test.ts": 1.6,
+    "app-test/studio-memory.test.ts": 1.5,
     "app-test/subscribe.test.ts": 0.4,
     "app-test/timeline.test.ts": 0.1,
     "app-test/tracer-bullet.test.ts": 0.9,

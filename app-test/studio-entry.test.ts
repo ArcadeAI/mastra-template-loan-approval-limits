@@ -21,7 +21,8 @@
  * stand-in with an authorization server behind it.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { DANA, GATEWAY_ID, startAgentHarness, type AgentHarness } from "./agent-harness.ts";
@@ -91,6 +92,9 @@ describe("one agent, two entries", () => {
   let chatModel: () => unknown = () => null;
   const saved: Record<string, string | undefined> = {};
   let mastra: typeof import("../src/mastra/index.ts")["mastra"];
+  // Studio's thread memory (#36) opens on its first turn. Here, not in the
+  // `memory.db` of whoever is running the suite.
+  const memoryDir = mkdtempSync(join(tmpdir(), "cg-studio-entry-memory-"));
 
   beforeAll(async () => {
     harness = await startAgentHarness();
@@ -114,6 +118,7 @@ describe("one agent, two entries", () => {
       ARCADE_APPROVALS_TOOLKIT: harness.config.agent.approvalsToolkit,
       ANTHROPIC_API_KEY: harness.config.agent.anthropicApiKey,
       MODEL_ID: harness.config.agent.modelId,
+      MEMORY_DB_PATH: join(memoryDir, "memory.db"),
     };
     for (const [key, value] of Object.entries(env)) {
       saved[key] = process.env[key];
@@ -130,6 +135,7 @@ describe("one agent, two entries", () => {
     await forgetStudioGrant();
     web?.stop(true);
     await harness?.stop();
+    rmSync(memoryDir, { recursive: true, force: true });
   });
 
   test("src/mastra/index.ts registers the agent the chat route builds", async () => {

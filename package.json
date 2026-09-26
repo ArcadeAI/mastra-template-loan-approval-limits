@@ -45,7 +45,9 @@
     "@cg/governance-core": "workspace:*",
     "@cg/policy-schema": "workspace:*",
     "@mastra/core": "^1.69.0",
+    "@mastra/libsql": "1.23.3",
     "@mastra/mcp": "^2.0.0",
+    "@mastra/memory": "1.32.1",
     "ai": "^7.0.112",
     "better-auth": "1.7.5",
     "next": "^16.3.6",
@@ -54,6 +56,7 @@
     "ws": "^8.21.0",
     "zod": "4.6.5"
   },
+  "//memory": "`@mastra/memory` and `@mastra/libsql` are Studio's thread memory (#36), pinned exactly: both declare `@mastra/core` as a peer (`>=1.4.1` and `>=1.68.0`, below 2), and `@mastra/memory` 1.32.1 depends on the same `@mastra/schema-compat` 1.3.11 as the installed core, so the lockfile holds one core, one schema-compat and one zod. Only `lib/agent/memory.ts` imports them, and only Studio reaches that module: the chat route's agent has no memory, so libsql never enters the Next bundle or the standalone image. See docs/studio-memory.md.",
   "//gc": "`@cg/governance-core` is a runtime dependency since #4: the control plane is a module of this app (`lib/control-plane/`), and it is the engine's one consumer. The edge that matters runs the other way and still does not exist: `packages/governance-core` imports nothing from any app, and its `no-app-dependencies.test.ts` fails if it starts to. The UI side of the app still reaches the control plane only through its routes and `lib/control-plane/`'s exports, never the engine directly.",
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.5",

@@ -36,8 +36,13 @@ export interface App {
    * Where this app's three databases are, for a test that has to do what
    * `bun run users` does (#31) — write a person straight into `idp.db` and
    * `governance.db` — before it asks the app over HTTP what survived.
+   *
+   * And where Studio's memory is for this app's tests (#36). The app never
+   * opens it; `bun run reset` empties it, so every test that runs the reset
+   * hands it this path as `MEMORY_DB_PATH` rather than letting it find the
+   * `memory.db` of whoever is running the suite.
    */
-  databases: { governance: string; loans: string; idp: string };
+  databases: { governance: string; loans: string; idp: string; memory: string };
   stop(): Promise<void>;
 }
 
@@ -105,6 +110,7 @@ export async function bootApp(env: Record<string, string>): Promise<App> {
     governance: join(dir, "governance.db"),
     loans: join(dir, "loans.db"),
     idp: join(dir, "idp.db"),
+    memory: join(dir, "memory.db"),
   };
   const stop = async () => {
     child.kill();

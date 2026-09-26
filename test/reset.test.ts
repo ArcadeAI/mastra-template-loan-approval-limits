@@ -35,12 +35,16 @@
  * to read one loan, which is `app-test/identity/flow.test.ts`'s job and
  * `test/reset-grants.test.ts`'s, not this file's.
  */
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Server } from "bun";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { freePort, spawnChild } from "../app-test/child.ts";
 import { runUsers } from "../app-test/demo-cast.ts";
+import { threadMemory } from "../lib/agent/memory.ts";
 import { bootApp, type App } from "./app.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -92,6 +96,7 @@ async function runResetCommand(
       ...process.env,
       RESET_TOKEN,
       APP_PUBLIC_HOST: app.host,
+      MEMORY_DB_PATH: app.databases.memory,
       ...overrides,
     },
     stdout: "pipe",
@@ -357,6 +362,96 @@ describe("when it cannot do its job it says so and exits non-zero", () => {
       expect(err).toContain("APP_PUBLIC_HOST");
       // Refused before anything ran, not after.
       expect(out).toBe("");
+    }
+  });
+});
+
+/**
+ * Studio's thread memory (#36), which `bun run reset` empties on both scopes.
+ *
+ * The one place this file opens a database: the memory store belongs to
+ * Studio, a separate process with no HTTP surface here, and the reset empties
+ * the file directly. So the store is filled the way Studio fills it, through
+ * Mastra's own memory API, and read back the same way.
+ */
+describe("and Studio's memory, on both scopes", () => {
+  const NOTHING = { values: [], fingerprints: [] };
+
+  /** One thread with two messages in the app's memory store, written by Mastra. */
+  async function fillMemory(path: string) {
+    const { memory } = threadMemory({ path, secrets: () => NOTHING });
+    const threadId = `reset-${crypto.randomUUID()}`;
+    const now = new Date();
+    await memory.saveThread({ thread: { id: threadId, resourceId: "loan-operations", title: "", metadata: {}, createdAt: now, updatedAt: now } });
+    await memory.saveMessages({
+      messages: (["user", "assistant"] as const).map((role, index) => ({
+        id: `${threadId}-${index}`,
+        role,
+        threadId,
+        resourceId: "loan-operations",
+        createdAt: new Date(now.getTime() + index),
+        content: { format: 2 as const, parts: [{ type: "text" as const, text: `${role} said something about ${OVER_LIMIT_LOAN}` }] },
+      })),
+    });
+    expect((await memory.recall({ threadId, resourceId: "loan-operations" })).messages).toHaveLength(2);
+    return { memory, threadId };
+  }
+
+  for (const [scope, run] of [
+    ["bun run reset", () => runResetCommand()],
+    ["bun run reset --hard", () => runHardReset()],
+  ] as const) {
+    test(`${scope} empties it in place`, async () => {
+      const path = app.databases.memory;
+      const { memory, threadId } = await fillMemory(path);
+
+      const { code, out, err } = await run();
+      expect(err).toBe("");
+      expect(code).toBe(0);
+      expect(out).toMatch(
+        /\[reset\] memory\s+OK\s+Studio's threads and messages emptied at \S+memory\.db — .*mastra_messages [1-9]\d*→0.*mastra_threads [1-9]\d*→0/,
+      );
+      expect(out).toContain("services back to the seeded state and Studio's memory empty");
+
+      // Rows, never the file: a running Studio keeps the one it opened.
+      expect(existsSync(path)).toBe(true);
+      expect(await memory.getThreadById({ threadId })).toBeNull();
+      await expect(memory.recall({ threadId, resourceId: "loan-operations" })).rejects.toThrow(`No thread found with id ${threadId}`);
+    });
+  }
+
+  test("no memory.db yet is nothing to clear, and creates none", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cg-reset-no-memory-"));
+    try {
+      const path = join(dir, "memory.db");
+      const { code, out } = await runResetCommand({ MEMORY_DB_PATH: path });
+      expect(code).toBe(0);
+      expect(out).toContain(`[reset] memory   OK  nothing to clear: no ${path} yet`);
+      expect(existsSync(path)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a MEMORY_DB_PATH pointed at another database is refused, untouched, and the command fails", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cg-reset-foreign-memory-"));
+    try {
+      const path = join(dir, "loans.db");
+      const db = new Database(path);
+      db.run("CREATE TABLE loans (loan_id TEXT PRIMARY KEY)");
+      db.run("INSERT INTO loans VALUES ('LN-2291')");
+      db.close();
+
+      const { code, out } = await runResetCommand({ MEMORY_DB_PATH: path });
+      expect(code).not.toBe(0);
+      expect(out).toMatch(/\[reset\] memory\s+REFUSED\s+\S+loans\.db holds tables that are not Mastra's \(loans\)/);
+      expect(out).toContain("The demo is NOT in a known state");
+
+      const after = new Database(path, { readonly: true });
+      expect(after.query("SELECT loan_id FROM loans").all()).toEqual([{ loan_id: "LN-2291" }]);
+      after.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

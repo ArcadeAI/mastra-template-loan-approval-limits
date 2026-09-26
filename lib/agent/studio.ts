@@ -38,10 +38,14 @@
  *
  * **One grant per Studio process**, held in memory and gone on restart. That is
  * the browser rule restated for a process that serves one developer: one
- * persona per browser there, one per Studio here, no fourth database. Signing
- * in again replaces the grant. The redirect must be loopback, so this is a
- * local development surface and nothing else; the routes refuse any other
- * origin rather than hold a bearer for whoever reached them.
+ * persona per browser there, one per Studio here, and no database holds it.
+ * Signing in again replaces the grant. The redirect must be loopback, so this
+ * is a local development surface and nothing else; the routes refuse any
+ * other origin rather than hold a bearer for whoever reached them.
+ *
+ * Studio's thread memory (#36) is a file, `memory.db` (`memory.ts`), and it
+ * keeps conversations, never the grant: every message is written with its
+ * secrets withheld, this grant's tokens first among them (`studioSecrets`).
  *
  * What this rests on that only a real Arcade account can confirm is listed on
  * #7, and the first line of it is that Arcade's gateway authorization server
@@ -49,7 +53,7 @@
  */
 import type { MCPClient } from "@mastra/mcp";
 
-import { readIdentitySurface, type IdentitySurface } from "../config.ts";
+import { configSecrets, readIdentitySurface, type IdentitySurface } from "../config.ts";
 import {
   accessTokenOf,
   exchangeGatewayCode,
@@ -60,14 +64,18 @@ import {
   probeGatewayToken,
 } from "../identity/gateway.ts";
 import { nonce, pkce } from "../identity/oidc.ts";
+import { sessionSecrets } from "../identity/handlers.ts";
 import { escapeHtml, page, redirect, verbatim } from "../identity/pages.ts";
-import type { GatewayToken } from "../identity/session.ts";
+import type { GatewayToken, Session } from "../identity/session.ts";
+import { secretFingerprints } from "../secret-fingerprints.ts";
 import { anthropicModel, buildAgent } from "./agent.ts";
 import { authorizationRequired } from "./authorization.ts";
 import { closeTurnOnEscalation } from "./escalation.ts";
 import { gatewayToken, type GatewayHolder } from "./gateway-token.ts";
+import { memoryDbPath, threadMemory, type ThreadMemory } from "./memory.ts";
 import { readNativeUrlElicitations } from "./native-elicitation.ts";
 import { gatewayClient, governedToolset } from "./tools.ts";
+import { environmentSecrets, secretValues, type WithheldSet } from "./withhold.ts";
 
 /** Registered on Studio's own server by `src/mastra/index.ts`. Mastra reserves `/api`. */
 export const STUDIO_AUTHORIZE_PATH = "/arcade/authorize";
@@ -114,7 +122,9 @@ const studio: {
   connection: { token: string; client: MCPClient } | null;
   /** Every authorization link the gateway sent as a native URL elicitation, in arrival order. */
   elicited: string[];
-} = { holder: {}, legs: new Map(), connection: null, elicited: [] };
+  /** The thread memory, opened on the first turn that needs it (#36). */
+  memory: ThreadMemory | null;
+} = { holder: {}, legs: new Map(), connection: null, elicited: [], memory: null };
 
 /** What Studio needs from the environment, and only that: no sign-in, no cookie secret. */
 export function studioProblems(config: IdentitySurface): string[] {
@@ -514,9 +524,55 @@ async function connection(config: IdentitySurface, token: string): Promise<MCPCl
 }
 
 /**
+ * Everything Studio's memory must never keep (#36): the chat route's list
+ * (`turnSecrets` in `handlers.ts`) for a process whose one session is its
+ * gateway grant.
+ *
+ * - every token in the grant, read where stored tokens are read, in the
+ *   identity module (`sessionSecrets`);
+ * - every secret field of the configuration (`configSecrets`);
+ * - the service secrets from the environment, by name (`SECRET_ENV`);
+ * - the fingerprints of secrets this process may not read, of which Studio
+ *   usually has none: they are registered by the identity provider, which
+ *   Studio never loads.
+ *
+ * Key names and token shapes are withheld whether or not anything is listed.
+ */
+export function studioSecrets(
+  config: IdentitySurface = readIdentitySurface(),
+  env: Record<string, string | undefined> = process.env,
+): WithheldSet {
+  return {
+    values: secretValues([
+      // A holder is a session with only its gateway half, as `gatewayToken` reads it.
+      ...sessionSecrets(studio.holder as unknown as Session),
+      ...configSecrets(config),
+      ...environmentSecrets(env),
+    ]),
+    fingerprints: secretFingerprints(),
+  };
+}
+
+/**
+ * The thread memory, at `MEMORY_DB_PATH` as it reads now.
+ *
+ * Opened on first use rather than at import, so loading Studio's entry writes
+ * nothing to disk, and reopened if the path moved, which only a test does.
+ * Mastra asks for an agent's memory several times a turn, so it is kept, not
+ * rebuilt per ask.
+ */
+function studioMemory(config: () => IdentitySurface): ThreadMemory["memory"] {
+  const path = memoryDbPath();
+  if (studio.memory?.path !== path) {
+    studio.memory = threadMemory({ path, secrets: () => studioSecrets(config()) });
+  }
+  return studio.memory.memory;
+}
+
+/**
  * The agent Studio registers.
  *
- * Model and tools are resolved per request rather than at import, so
+ * Model, tools and memory are resolved per request rather than at import, so
  * `mastra dev` boots on an unconfigured checkout and says what is missing when
  * someone asks the agent something, rather than refusing to start.
  */
@@ -532,6 +588,7 @@ export function studioAgent(
       return anthropicModel({ modelId: surface.agent.modelId, apiKey: surface.agent.anthropicApiKey });
     },
     tools: () => studioTools(config(), origin),
+    memory: () => studioMemory(config),
   });
 }
 

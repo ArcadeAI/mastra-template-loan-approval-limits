@@ -17,7 +17,8 @@
  * `{}`. The output is on #30's PR.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DANA, OVER_LIMIT_LOAN, startAgentHarness, type AgentHarness } from "./agent-harness.ts";
@@ -56,6 +57,9 @@ function drawn(chunk: { type: string; payload: Record<string, unknown> }, errorT
 let harness: AgentHarness;
 let errorText: (error: unknown) => string;
 const saved: Record<string, string | undefined> = {};
+// Studio's thread memory (#36) opens on its first turn. Here, not in the
+// `memory.db` of whoever is running the suite.
+const memoryDir = mkdtempSync(join(tmpdir(), "cg-studio-authorization-memory-"));
 
 beforeAll(async () => {
   errorText = studioErrorText();
@@ -69,6 +73,7 @@ beforeAll(async () => {
     ANTHROPIC_API_KEY: harness.config.agent.anthropicApiKey,
     MODEL_ID: harness.config.agent.modelId,
     APP_PUBLIC_HOST: "lal-tunnel.example",
+    MEMORY_DB_PATH: join(memoryDir, "memory.db"),
   };
   for (const [key, value] of Object.entries(env)) {
     saved[key] = process.env[key];
@@ -83,6 +88,7 @@ afterAll(async () => {
   }
   await forgetStudioGrant();
   await harness?.stop();
+  rmSync(memoryDir, { recursive: true, force: true });
 });
 
 /** One Studio turn in which the model reads LN-2291; what Studio draws for the call, and what the model read next. */

@@ -121,7 +121,8 @@ One TypeScript app at the repo root (Next.js plus `src/mastra`, running on Bun) 
 
 ```
 src/mastra/index.ts        The Mastra entry. Registers the loan-operations agent, the same one the chat runs.
-lib/agent/                 The agent: instructions, the governed toolset, Studio's own gateway authorization.
+lib/agent/                 The agent: instructions, the governed toolset, Studio's own gateway authorization
+                           and thread memory (memory.db).
 lib/control-plane/         /hooks/access, /hooks/pre, /hooks/post: the policy engine, audit log and event
                            stream. Owns governance.db. The policy fixture is fixtures/governance.json.
 lib/loans/                 The bank's system of record, a plain HTTP API under /bank. Owns loans.db.
@@ -161,6 +162,7 @@ The three databases are SQLite files on disk, gitignored, and seeded from their 
 
 - `bun run reset` puts the control plane's policy and audit log and the loan book back, in seconds. It is idempotent.
 - `bun run reset --hard` also resets the identity provider's sessions, tokens and consents, and keeps every account. That signs everyone out, so each one needs a sign-in and an authorization card before their next governed call.
+- Both empty Mastra Studio's thread memory, `memory.db`, in place. `--hard` does nothing more to it. See [`docs/studio-memory.md`](./docs/studio-memory.md).
 - Neither deletes a user. Everyone you added with `bun run users` under an address of your own keeps their account, role and clearance through both, and a clearance you changed with `set-clearance` stays changed. Each reset's output names who it kept.
 - Both call each module's own `/admin/reset` route under `RESET_TOKEN`. With it unset, every reset route answers 404 and `/health` reports `reset: disabled`.
 
@@ -188,7 +190,7 @@ Documentation could not answer several of these, so we measured them against a r
 
 **Why does it need a public host when it runs on my machine?** Because Arcade Cloud makes the calls. Arcade calls the hooks, the deployed loan toolkit calls the loan API, and both OAuth hops reach the app's sign-in and verifier endpoints, all on `APP_PUBLIC_HOST`. One ngrok domain carries all of them, and a fixed domain keeps that host the same across restarts, which matters because `bun run setup-arcade` registers it with Arcade. If you host the image instead, as [Deploying](#deploying) describes, `APP_PUBLIC_HOST` is the deployment's own host.
 
-**Why Bun?** The three databases use `bun:sqlite`, which Node cannot load, so `next dev`, `next build` and the standalone server all run under Bun. Mastra Studio runs `mastra dev` as a separate Node process, so the agent never imports a module that opens a database, and a test enforces it.
+**Why Bun?** The three databases use `bun:sqlite`, which Node cannot load, so `next dev`, `next build` and the standalone server all run under Bun. Mastra Studio runs `mastra dev` as a separate Node process, so the agent never imports a module that opens one of them, and a test enforces it. Studio's own thread memory is a fourth file, `memory.db`, opened with libsql, which Node can load.
 
 **Can I use a model other than Claude Sonnet 5?** Another Anthropic model, yes, with no code change. Set `MODEL_ID` in `.env` to its Anthropic model id, and both the chat and Studio pass it to `@ai-sdk/anthropic` with your `ANTHROPIC_API_KEY`. `MODEL_ID` is a bare Anthropic model id, not a `provider/model` string for Mastra's model router, so a model from another provider needs a code change: `anthropicModel` in `lib/agent/agent.ts`, and the `ANTHROPIC_API_KEY` checks in `lib/config.ts` and `lib/agent/studio.ts`. We measured the 5-of-5 result above on Claude Sonnet 5 at temperature 0, so a different model needs it measured again.
 
@@ -206,6 +208,7 @@ The Quickstart runs the app on your machine behind ngrok. To host it instead, bu
 - [`DESIGN.md`](./DESIGN.md) is the authoritative record: architecture, contracts, and the reasoning behind each decision.
 - [`docs/DOMAIN-SWAP.md`](./docs/DOMAIN-SWAP.md) walks through pointing the template at your own business system.
 - [`docs/control-plane.md`](./docs/control-plane.md) is the control plane's own reference: the hooks, `governance.db`, drift and reset, the live stream and the audit log.
+- [`docs/studio-memory.md`](./docs/studio-memory.md) covers Studio's thread memory: why `memory.db` is libsql, what it never keeps, and how the reset empties it.
 
 ## About Mastra templates
 
