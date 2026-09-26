@@ -141,7 +141,6 @@
     "packages/policy-schema/test/fixtures.test.ts": 0,
     "packages/policy-schema/test/generator.test.ts": 0,
     "packages/policy-schema/test/hook-contract.test.ts": 0,
-    "packages/policy-schema/test/persona-email-contract.test.ts": 0,
     "test/docs-paths.test.ts": 0,
     "test/orca-archive.test.ts": 1.2,
     "test/orca-setup.test.ts": 0.6,
