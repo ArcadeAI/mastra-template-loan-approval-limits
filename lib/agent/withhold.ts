@@ -31,11 +31,14 @@ export const WITHHELD = "[withheld: secret]";
 /**
  * The environment variables whose values are secrets. Read by name, so a
  * value that is set is withheld wherever it turns up.
+ *
+ * Not the identity module's signing secret: only that module may read it
+ * (`app-test/identity/only-identity-mints.test.ts`), and nothing on the MCP
+ * path holds it to echo back.
  */
 export const SECRET_ENV = [
   "APPROVALS_STORE_TOKEN",
   "SESSION_SECRET",
-  "BETTER_AUTH_SECRET",
   "RESET_TOKEN",
   "ARCADE_API_KEY",
   "ARCADE_HOOK_SIGNING_SECRET",
