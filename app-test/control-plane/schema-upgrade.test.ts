@@ -670,7 +670,7 @@ describe("a database carrying the retired payload columns (#103)", () => {
 
       const line = describeMigration(seen!);
       expect(line).toContain("MIGRATED ONCE");
-      expect(line).toContain("schema 2 → 4");
+      expect(line).toContain(`schema 2 → ${SCHEMA_VERSION}`);
       expect(line).toContain("31 audit rows");
       expect(line).toMatch(/DDL \d+ms/);
       expect(line).toMatch(/VACUUM \d+ms/);
