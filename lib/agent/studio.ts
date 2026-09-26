@@ -532,7 +532,9 @@ async function connection(config: IdentitySurface, token: string): Promise<MCPCl
  *   identity module (`sessionSecrets`);
  * - every secret field of the configuration (`configSecrets`);
  * - the service secrets from the environment, by name (`SECRET_ENV`);
- * - the fingerprints of secrets this process may not read.
+ * - the fingerprints of secrets this process may not read, of which Studio
+ *   usually has none: they are registered by the identity provider, which
+ *   Studio never loads.
  *
  * Key names and token shapes are withheld whether or not anything is listed.
  */
