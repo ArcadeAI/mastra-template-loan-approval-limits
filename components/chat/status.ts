@@ -32,11 +32,14 @@ export interface StatusInput {
 }
 
 export function statusLine(input: StatusInput): Status {
-  const last = input.events[input.events.length - 1];
+  // `done` is always the last event of a turn, so it is read separately:
+  // what came before it is what the turn ended on.
+  const finished = input.events.some((event) => event.kind === "done");
+  const last = input.events.filter((event) => event.kind !== "done").at(-1);
 
   if (last?.kind === "fault" || last?.kind === "error") return null;
 
-  if (input.running && last?.kind !== "done") {
+  if (input.running && !finished) {
     // Both waits end the turn, so once either has arrived the rest of the
     // stream is closing words, and the wait is what is true.
     const ended = input.events.find(
