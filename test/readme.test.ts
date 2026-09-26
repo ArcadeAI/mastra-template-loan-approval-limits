@@ -43,6 +43,15 @@ const VERIFIED_URLS = new Set([
   "https://docs.arcade.dev/en/build/arcade-deploy",
   // Fetched on #10: ngrok's "Domains", on the free dev domain every account has.
   "https://ngrok.com/docs/universal-gateway/domains/",
+  // Fetched on #30, for the Arcade CLI steps under Prerequisites: the CLI
+  // reference (`uv tool install arcade-mcp`, `arcade login`), the cheat sheet
+  // (`arcade org set`, `arcade project set`, `arcade whoami`, and "switching
+  // organization also resets your active project"), the API key page, and the
+  // Operate quickstart ("create administrator credentials and a project").
+  "https://docs.arcade.dev/en/references/arcade-cli",
+  "https://docs.arcade.dev/en/references/cli-cheat-sheet",
+  "https://docs.arcade.dev/en/get-started/setup/api-keys",
+  "https://docs.arcade.dev/en/operate/quickstart",
 ]);
 
 /** Upper-snake words in the README that are not environment variables. Each is also proved absent from `.env.example`. */
@@ -166,21 +175,43 @@ function boldTitles(markdown: string): number[] {
 }
 
 /**
- * The Quickstart's remaining steps, from starting the app, in a working order
- * (#28): the User Source reads its issuer and the hooks answer their health
- * check through the tunnel, so both forms come after it, and the gateway form
- * lists the toolkits' tools only once both are deployed. `setup-arcade`'s
- * "Then:" list is held to the same order in `app-test/setup-arcade.test.ts`.
+ * The Quickstart's remaining steps, from starting the app, in the one order
+ * the dependencies allow (#28, #30): Arcade reads the User Source's issuer
+ * through the tunnel, so the form comes after it, and the gateway
+ * authenticates through the User Source, so the second `setup-arcade` run that
+ * creates it needs the User Source's id. The hooks and the deploys are the
+ * first run's, in step 4. `setup-arcade`'s "Then:" list is held to the same
+ * order in `app-test/setup-arcade.test.ts`.
  */
 const QUICKSTART_ORDER: Array<[string, RegExp]> = [
   ["start the app", /Run `bun run dev`/],
   ["start the tunnel", /`ngrok http --url=/],
   ["the User Source form", /fill in the User Source form/i],
-  ["the hooks form", /fill in the contextual access hooks form/i],
-  ["deploy both toolkits", /run `arcade deploy`/],
-  ["the gateway form", /fill in the gateway form/i],
+  ["the gateway, by the second run", /`bun run setup-arcade <APP_PUBLIC_HOST> --user-source <id>`/],
   ["open the app", /Open `https:\/\/<APP_PUBLIC_HOST>`/],
 ];
+
+/**
+ * The Arcade CLI's setup under Prerequisites, in the order it has to happen
+ * (#30): `setup-arcade` takes the org and project from the CLI's active
+ * context, so the CLI is installed, logged in and pointed at the project the
+ * key belongs to before the first run. `arcade org set` comes before
+ * `arcade project set` because switching org resets the active project.
+ */
+const CLI_SETUP: Array<[string, RegExp]> = [
+  ["install the CLI", /`uv tool install arcade-mcp`/],
+  ["log in", /`arcade login`/],
+  ["create a project", /Create a project for this template in the Arcade dashboard/],
+  ["an API key in that project", /Create an API key in that project and set `ARCADE_API_KEY`/],
+  ["make it the active project", /`arcade project set <project_id>`/],
+  ["check it", /`arcade whoami` shows that org and project/],
+];
+
+function inOrder(text: string, steps: Array<[string, RegExp]>): string[] {
+  const found = steps.map(([name, pattern]) => ({ name, at: text.search(pattern) }));
+  const missing = found.filter(({ at }) => at === -1).map(({ name }) => `missing: ${name}`);
+  return missing.length > 0 ? missing : found.sort((a, b) => a.at - b.at).map(({ name }) => name);
+}
 
 /** The steps in the order the Quickstart's remainder first names them, or the ones it never does. */
 function quickstartOrder(markdown: string): string[] {
@@ -231,8 +262,31 @@ describe("README.md follows Mastra's outline", () => {
     expect(quickstart).not.toContain("git clone");
   });
 
-  test("the Quickstart's last steps run in a working order: tunnel, User Source, hooks, deploys, gateway", () => {
+  test("the Quickstart's last steps run in the order the dependencies allow: tunnel, User Source, the gateway run, the app", () => {
     expect(quickstartOrder(README)).toEqual(QUICKSTART_ORDER.map(([name]) => name));
+  });
+
+  test("step 4 is the run that registers the hooks and deploys both toolkits", () => {
+    const quickstart = section(README, "Quickstart 🚀");
+    const register = quickstart.slice(quickstart.indexOf("4. **Register the app with Arcade**"), quickstart.indexOf("5. **Start the app"));
+    expect(register).toContain("the contextual access hooks through Arcade's API");
+    expect(register).toContain("it runs `arcade deploy` in `tools/loan` and then in `tools/approvals`");
+    expect(register).toContain("the one form Arcade's API cannot fill, the User Source");
+    expect(quickstart).not.toMatch(/fill in the (gateway|contextual access hooks) form/i);
+  });
+
+  test("Prerequisites sets up the Arcade CLI in order, each step with its command", () => {
+    const prerequisites = section(README, "Prerequisites");
+    expect(inOrder(prerequisites, CLI_SETUP)).toEqual(CLI_SETUP.map(([name]) => name));
+    expect(prerequisites).toContain("run `arcade org set <org_id>` first, because switching org resets the active project");
+  });
+
+  test("the Quickstart warns about ngrok's page on a free domain, once, where the app is first opened", () => {
+    const quickstart = section(README, "Quickstart 🚀");
+    const open = quickstart.slice(quickstart.indexOf("8. **Ask for the $95K approval**"));
+    expect(open).toContain("The first time a browser opens a free ngrok domain, ngrok shows its own warning page first: click **Visit Site**.");
+    expect(open).toContain("Arcade's own calls to the app never see that page.");
+    expect(README.match(/Visit Site/g)).toHaveLength(1);
   });
 
   test("About Mastra templates is the partnership pattern, with no monorepo language", () => {
@@ -324,15 +378,27 @@ describe("each check bites on a planted violation", () => {
     ]);
   });
 
-  test("a Quickstart with the hooks form before the tunnel, or without it", () => {
-    const lines = README.split("\n");
-    const hooks = lines.findIndex((line) => /fill in the contextual access hooks form/i.test(line));
-    expect(hooks).toBeGreaterThan(-1);
-    const [moved] = lines.splice(hooks, 1);
-    const withoutIt = lines.join("\n");
-    expect(quickstartOrder(withoutIt)).toEqual(["missing: the hooks form"]);
-    lines.splice(lines.findIndex((line) => /`ngrok http --url=/.test(line)), 0, moved!);
-    expect(quickstartOrder(lines.join("\n"))).not.toEqual(QUICKSTART_ORDER.map(([name]) => name));
+  test("a Quickstart with the gateway run before the User Source form, or the form before the tunnel, or no form", () => {
+    const order = QUICKSTART_ORDER.map(([name]) => name);
+    const gatewayFirst = README.split("\n");
+    const [gateway] = gatewayFirst.splice(gatewayFirst.findIndex((line) => line.includes("--user-source <id>`")), 1);
+    gatewayFirst.splice(gatewayFirst.findIndex((line) => /fill in the User Source form/i.test(line)), 0, gateway!);
+    expect(quickstartOrder(gatewayFirst.join("\n"))).not.toEqual(order);
+    const early = README.split("\n");
+    const form = early.findIndex((line) => /fill in the User Source form/i.test(line));
+    const [moved] = early.splice(form, 1);
+    expect(quickstartOrder(early.join("\n"))).toEqual(["missing: the User Source form"]);
+    early.splice(early.findIndex((line) => /`ngrok http --url=/.test(line)), 0, moved!);
+    expect(quickstartOrder(early.join("\n"))).not.toEqual(order);
+  });
+
+  test("a Prerequisites whose CLI steps are out of order, or missing one", () => {
+    const prerequisites = section(README, "Prerequisites");
+    const lines = prerequisites.split("\n");
+    const [whoami] = lines.splice(lines.findIndex((line) => line.includes("`arcade whoami`")), 1);
+    expect(inOrder(lines.join("\n"), CLI_SETUP)).toContain("missing: check it");
+    lines.splice(lines.findIndex((line) => line.includes("`arcade login`")), 0, whoami!);
+    expect(inOrder(lines.join("\n"), CLI_SETUP)).not.toEqual(CLI_SETUP.map(([name]) => name));
   });
 
   test("a URL nobody verified", () => {

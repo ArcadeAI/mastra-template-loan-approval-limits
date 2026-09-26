@@ -63,6 +63,9 @@ const SET_ELSEWHERE: Record<string, string> = {
   NEXT_RUNTIME: "set by Next",
   CG_NEXT_DIST_DIR: "set by test harnesses, to run a second `next dev`",
   SLACK_API_BASE_URL: "the approvals toolkit's test override, in Arcade's worker, not the app",
+  ARCADE_WORK_DIR: "the Arcade CLI's own, naming its config directory; setup-arcade reads the CLI's context where the CLI does",
+  ARCADE_CONTEXT: "the Arcade CLI's own, choosing a saved context; setup-arcade honours it as the CLI does",
+  HOME: "the shell's, where the Arcade CLI keeps ~/.arcade",
 };
 
 /** Dynamic names: `IDP_OAUTH_REDIRECT_URIS_<KEY>` for each client key. */

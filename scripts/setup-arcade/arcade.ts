@@ -28,15 +28,33 @@
  *   `GET` on the same path, because a verifier that did not take is open
  *   risk 2 (DESIGN.md) and fails where no hook fires.
  *
- * The User Source, the hooks and the gateway are printed as dashboard forms
- * instead (`forms.ts`): the spec has no User Source endpoint, and
- * `POST /v1/gateways` has no field that attaches one. The hooks were sent to
- * `/v1/plugins` until #28, and real Arcade has no such route: plugins and hooks
- * live only under `/v1/orgs/{org_id}/projects/{project_id}/…`, and a project
- * key has no route that names its org or project. Nothing here calls a plugins
- * or hooks route, nothing ever creates a gateway, and
- * nothing names the header auth type, which is Arcade Headers mode (DESIGN.md
- * rules it out); `app-test/setup-arcade.test.ts` fails if either appears.
+ * Since #30 two more go through the API, under the org and project
+ * `context.ts` resolves, because the human measured that a project key is
+ * answered there (`GET …/plugins` and `GET …/gateways`, 200). Field names are
+ * the live swagger's (`api.arcade.dev/v1/swagger`, fetched on #30); methods
+ * are the swagger's too, and unproven until the live run, which is how the
+ * secrets' POST turned out wrong (#26):
+ *
+ * - the hooks: one webhook plugin, `POST /v1/orgs/{org_id}/projects/{project_id}/plugins`
+ *   (`schemas.CreatePluginRequest`), whose `webhook_config.endpoints` are the
+ *   three inline hooks. Found by name first (`GET …/plugins`), and `PATCH`ed
+ *   (`schemas.PatchPluginRequest`) when it differs: hooks are not the access
+ *   model the way the provider is. Read back with `GET …/plugins/{id}` and the
+ *   hooks it made, `GET …/hooks?plugin_id=`, which is where a hook's phase and
+ *   failure mode are reported;
+ * - the gateway: `POST /v1/orgs/{org_id}/projects/{project_id}/gateways`
+ *   (`schemas.CreateGatewayRequest`), in the shape the Arcade CLI sends it
+ *   (`arcade_cli/connect.py` `create_gateway`: `tool_filter.allowed_tools`,
+ *   qualified `Toolkit.Tool` names), with `auth_type: "user_source"` and the
+ *   User Source's `us_` id. Found by slug first, and create-only like the
+ *   provider: the gateway's authentication is hop 1, the access model itself.
+ *   Read back with `GET …/gateways/{id}`.
+ *
+ * The User Source stays a dashboard form (`forms.ts`): the spec has no User
+ * Source route at all. Nothing here calls the bare `/v1/plugins`, which real
+ * Arcade answers 404 (#28), and nothing names the header auth type, which is
+ * Arcade Headers mode (DESIGN.md rules it out); `app-test/setup-arcade.test.ts`
+ * fails if either appears.
  *
  * Auth is `Authorization: Bearer <ARCADE_API_KEY>`, a project key, which
  * selects the project (spec `securitySchemes.Bearer`).
@@ -249,4 +267,222 @@ export class ArcadeAdmin {
     }
     return answer.json;
   }
+}
+
+// --- The org and project routes (#30) ---------------------------------------
+
+export interface ProjectScope {
+  orgId: string;
+  projectId: string;
+}
+
+/** `/v1/orgs/{org_id}/projects/{project_id}<suffix>`. */
+export function projectPath(scope: ProjectScope, suffix: string): string {
+  return `/v1/orgs/${encodeURIComponent(scope.orgId)}/projects/${encodeURIComponent(scope.projectId)}${suffix}`;
+}
+
+/** The name the hooks go by in Arcade, which is how a rerun finds them. */
+export const HOOKS_NAME = "loan-approval-limits-hooks";
+
+/**
+ * The three hook points, each a full URL because the extension has no base
+ * URL (`schemas.WebhookEndpointRequest`, measured by #4 and recorded on #7).
+ * `phase` is what the remote-MCP hooks spike registered, and `failure_mode` is
+ * required on every endpoint: fail closed, so an unreachable control plane
+ * refuses rather than permits.
+ */
+export const HOOK_POINTS = [
+  { point: "access", hookPoint: "tool.access", phase: "before" },
+  { point: "pre", hookPoint: "tool.pre", phase: "before" },
+  { point: "post", hookPoint: "tool.post", phase: "after" },
+] as const;
+
+export const HEALTH_CHECK_PATH = "/hooks/health";
+
+/**
+ * The health check as Arcade takes it: a full URL on the public host. The
+ * field is named a path, and the fourth live run (#7) sent the path: Arcade
+ * answered 400 `malformed_request`, "health_check_path must be a valid URL".
+ */
+export function healthCheckUrl(origin: string): string {
+  return `${origin}${HEALTH_CHECK_PATH}`;
+}
+
+/** The webhook plugin, with the three hooks inline and `.env`'s bearer. */
+export function pluginBody(origin: string, hookToken: string) {
+  return {
+    name: HOOKS_NAME,
+    description: "The Loan Approval Limits control plane: /hooks/access, /hooks/pre, /hooks/post",
+    plugin_type: "webhook",
+    status: "active",
+    webhook_config: webhookConfig(origin, hookToken),
+  };
+}
+
+/** The same configuration as a `PATCH` (`schemas.PatchPluginRequest`), which has no `name` or `plugin_type` to change. */
+export function pluginPatch(origin: string, hookToken: string) {
+  const { description, status, webhook_config } = pluginBody(origin, hookToken);
+  return { description, status, webhook_config };
+}
+
+function webhookConfig(origin: string, hookToken: string) {
+  return {
+    auth: { type: "bearer", token: hookToken },
+    health_check_path: healthCheckUrl(origin),
+    endpoints: Object.fromEntries(
+      HOOK_POINTS.map(({ point, phase }) => [
+        point,
+        { url: `${origin}/hooks/${point}`, phase, failure_mode: "fail_closed", status: "active" },
+      ]),
+    ),
+  };
+}
+
+/** What comparing a plugin read back with what this app needs found. */
+export interface PluginComparison {
+  /** `path: Arcade has X, this app needs Y`: present and different, or required and absent. */
+  differences: string[];
+  /** `path` and what was sent, for a field Arcade's read-back leaves out, which cannot be checked either way. */
+  unverified: Array<{ path: string; sent: string }>;
+}
+
+/**
+ * A plugin as Arcade reads it back (`schemas.PluginResponse`) plus the hooks it
+ * made (`schemas.HookResponse`), against what this app needs.
+ *
+ * **Absent is not different** (#30). On the fourth live run's retry Arcade
+ * created the plugin, and its read-back had no `webhook_config.health_check_path`
+ * at all, so a run that treated absence as a difference stopped with "the hooks
+ * did not take" over a field it had just sent and Arcade had just accepted. A
+ * field Arcade leaves out is reported as unverified and the run carries on; a
+ * rerun then does not PATCH for it either, so it cannot loop. A field that is
+ * **present and different** is still a difference.
+ *
+ * Except for what proves the hooks exist: the three endpoint URLs, a hook on
+ * each hook point, its phase, and fail-closed. Absent, those mean the hooks did
+ * not take, so they are differences whether missing or wrong. The bearer
+ * cannot be read back (`schemas.SecretResponse`), so only its `exists` is.
+ */
+export function pluginDifferences(plugin: unknown, hooks: unknown[], origin: string): PluginComparison {
+  const result: PluginComparison = { differences: [], unverified: [] };
+  const check = (path: string, have: unknown, want: unknown, { required = false, sent }: { required?: boolean; sent?: string } = {}) => {
+    if (have === undefined && !required) {
+      result.unverified.push({ path, sent: sent ?? JSON.stringify(want) });
+      return;
+    }
+    if (JSON.stringify(have) !== JSON.stringify(want)) {
+      result.differences.push(`${path}: Arcade has ${JSON.stringify(have) ?? "nothing"}, this app needs ${JSON.stringify(want)}`);
+    }
+  };
+  check("plugin_type", at(plugin, "plugin_type"), "webhook");
+  check("status", at(plugin, "status"), "active");
+  check("webhook_config.health_check_path", at(plugin, "webhook_config.health_check_path"), healthCheckUrl(origin), { sent: healthCheckUrl(origin) });
+  check("webhook_config.auth.type", at(plugin, "webhook_config.auth.type"), "bearer");
+  const token = at(plugin, "webhook_config.auth.token.exists");
+  if (token === undefined) result.unverified.push({ path: "webhook_config.auth.token", sent: "the value of ARCADE_HOOK_SIGNING_SECRET in .env" });
+  else if (token !== true) result.differences.push("webhook_config.auth.token: Arcade holds no bearer token");
+  for (const { point, hookPoint, phase } of HOOK_POINTS) {
+    check(`webhook_config.endpoints.${point}.url`, at(plugin, `webhook_config.endpoints.${point}.url`), `${origin}/hooks/${point}`, { required: true });
+    const hook = hooks.find((each) => at(each, "hook_point") === hookPoint);
+    if (hook === undefined) {
+      result.differences.push(`hooks: Arcade has no ${hookPoint} hook on this plugin`);
+      continue;
+    }
+    check(`${hookPoint}.phase`, at(hook, "phase"), phase, { required: true });
+    check(`${hookPoint}.failure_mode`, at(hook, "failure_mode"), "fail_closed", { required: true });
+    check(`${hookPoint}.status`, at(hook, "status"), "active");
+  }
+  return result;
+}
+
+/** The line a run prints for each field it could not check. */
+export function unverifiedLine({ path, sent }: { path: string; sent: string }): string {
+  return `hooks: Arcade doesn't echo ${path} back; it was sent as ${sent} and can't be verified`;
+}
+
+/** The six tools the agent is given, as a gateway's `tool_filter` names them: `Toolkit.Tool`. */
+export function gatewayTools(loanToolkit: string, approvalsToolkit: string): string[] {
+  return [
+    ...["SearchLoans", "GetLoan", "ApproveLoan", "DenyLoan"].map((tool) => `${loanToolkit}.${tool}`),
+    ...["RequestApproval", "Decide"].map((tool) => `${approvalsToolkit}.${tool}`),
+  ];
+}
+
+/** The authentication hop 1 needs: the app's own sign-in, through the User Source. */
+export const GATEWAY_AUTH_TYPE = "user_source";
+
+export interface GatewaySpec {
+  slug: string;
+  userSourceId: string;
+  loanToolkit: string;
+  approvalsToolkit: string;
+}
+
+export function gatewayBody(spec: GatewaySpec) {
+  return {
+    name: "Loan Approval Limits",
+    description: "The loan officer's agent",
+    slug: spec.slug,
+    auth_type: GATEWAY_AUTH_TYPE,
+    user_source_id: spec.userSourceId,
+    tool_filter: { allowed_tools: gatewayTools(spec.loanToolkit, spec.approvalsToolkit) },
+  };
+}
+
+/** The same form of report as {@link pluginDifferences}, for a gateway read back (`schemas.GatewayResponse`). */
+export function gatewayDifferences(gateway: unknown, spec: GatewaySpec): string[] {
+  const differences: string[] = [];
+  const compare = (path: string, have: unknown, want: unknown) => {
+    if (JSON.stringify(have) !== JSON.stringify(want)) {
+      differences.push(`${path}: Arcade has ${JSON.stringify(have) ?? "nothing"}, this app needs ${JSON.stringify(want)}`);
+    }
+  };
+  compare("slug", at(gateway, "slug"), spec.slug);
+  compare("auth_type", at(gateway, "auth_type"), GATEWAY_AUTH_TYPE);
+  compare("user_source_id", at(gateway, "user_source_id"), spec.userSourceId);
+  const tools = at(gateway, "tool_filter.allowed_tools");
+  compare(
+    "tool_filter.allowed_tools",
+    Array.isArray(tools) ? [...tools].sort() : tools,
+    [...gatewayTools(spec.loanToolkit, spec.approvalsToolkit)].sort(),
+  );
+  return differences;
+}
+
+/** The `items` of one of Arcade's offset pages (`schemas.OffsetPage-*`). */
+export function pageItems(json: unknown): unknown[] {
+  const items = at(json, "items");
+  return Array.isArray(items) ? items : [];
+}
+
+/** Arcade's own `message` out of an error answer, verbatim, or `null` when it sent none. */
+export function arcadeMessage(error: unknown): string | null {
+  if (!(error instanceof ArcadeError)) return null;
+  try {
+    const body = JSON.parse(error.body) as { message?: unknown } | null;
+    return typeof body?.message === "string" && body.message !== "" ? body.message : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether an answer is about Arcade failing to reach the app, which the tunnel
+ * fixes, rather than a request it refused, which it does not. A validation
+ * error is never one: the fourth live run's 400 on `health_check_path` came
+ * with a hint to start the tunnel, and the tunnel was not the problem (#30).
+ * Nobody has seen Arcade's answer for an unreachable health check, so this
+ * reads the words it would have to use.
+ */
+export function isReachabilityError(error: unknown): boolean {
+  if (!(error instanceof ArcadeError)) return false;
+  let validation = false;
+  try {
+    const body = JSON.parse(error.body) as { name?: unknown; field_errors?: unknown } | null;
+    validation = body?.name === "malformed_request" || (Array.isArray(body?.field_errors) && body.field_errors.length > 0);
+  } catch {
+    validation = false;
+  }
+  if (validation) return false;
+  return /unreachable|could not (be )?reach|cannot reach|connection refused|failed to connect|timed out|timeout|no such host|dial tcp|health check failed/i.test(error.body);
 }

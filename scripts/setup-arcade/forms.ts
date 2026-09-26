@@ -1,26 +1,22 @@
 /**
- * The three registrations `bun run setup-arcade` cannot make by API, printed as
- * one paste-ready block per dashboard form (#9, #28), in the order they are
- * filled in.
+ * What `bun run setup-arcade` prints for the registrations it cannot make by
+ * API (#9, #28, #30).
  *
- * - **The User Source** (hop 1). Arcade's API reference has no User Source
- *   endpoint at all. The fields are the ones docs.arcade.dev lists under
- *   "Operate → Identity → User Sources": Name, Description, Issuer URL, Client
- *   ID, Client Secret, and under Advanced, Scopes and Subject Claim.
- * - **The contextual access hooks** (#28). Real Arcade has no `/v1/plugins`
- *   (the second live run on #7 got 404 `route_not_found`). The live swagger
- *   has plugins and hooks only under `/v1/orgs/{org_id}/projects/{project_id}/…`,
- *   and no route tells a project key its org or project. The form was chosen
- *   over two more required values in `.env` (#28). Its fields carry the live swagger's names
- *   (`schemas.CreatePluginRequest`, its `webhook_config`, and
- *   `schemas.CreateHookRequest`'s `hook_point`), because nobody has read the
- *   dashboard's own labels yet; #7 asks the human to.
- * - **The gateway.** `POST /v1/gateways` exists, but it has no field that
- *   attaches a User Source, and its one other documented authentication mode
- *   is Arcade Headers, which DESIGN.md rules out. So the gateway is a form too,
- *   under a slug this script picks and writes as `ARCADE_GATEWAY_ID`. Fields
- *   from docs.arcade.dev "MCP Gateways → Create via dashboard".
+ * - **The User Source** (hop 1), always. Arcade's API has no User Source route
+ *   at all. The fields are the ones docs.arcade.dev lists under "Operate →
+ *   Identity → User Sources": Name, Description, Issuer URL, Client ID, Client
+ *   Secret, and under Advanced, Scopes and Subject Claim.
+ * - **The gateway and the contextual access hooks**, only when the run found no
+ *   Arcade org and project to register them in (`context.ts`). With one, both
+ *   go through the API (`arcade.ts`, #30). The hooks form carries the live
+ *   swagger's field names (`schemas.CreatePluginRequest`, its `webhook_config`,
+ *   and `schemas.CreateHookRequest`'s `hook_point`), because nobody has read
+ *   the dashboard's own labels yet. The gateway form's fields are from
+ *   docs.arcade.dev "MCP Gateways → Create via dashboard", under a slug this
+ *   script picks and writes as `ARCADE_GATEWAY_ID`.
  */
+import { healthCheckUrl, HOOKS_NAME, HOOK_POINTS } from "./arcade.ts";
+
 export interface UserSourceForm {
   origin: string;
   clientId: string;
@@ -48,22 +44,6 @@ export function userSourceForm({ origin, clientId, clientSecret }: UserSourceFor
   ].join("\n");
 }
 
-/** The name the hooks go by in Arcade (`schemas.CreatePluginRequest.name`). */
-export const HOOKS_NAME = "loan-approval-limits-hooks";
-
-/**
- * The three hook points, each a full URL because the extension has no base
- * URL (`schemas.WebhookEndpointRequest`, measured by #4 and recorded on #7).
- * `phase` is what the remote-MCP hooks spike registered, and `failure_mode` is
- * required on every endpoint: fail closed, so an unreachable control plane
- * refuses rather than permits.
- */
-export const HOOK_POINTS = [
-  { point: "access", hookPoint: "tool.access", phase: "before" },
-  { point: "pre", hookPoint: "tool.pre", phase: "before" },
-  { point: "post", hookPoint: "tool.post", phase: "after" },
-] as const;
-
 /**
  * The bearer Arcade presents on every `/hooks` call is `.env`'s
  * `ARCADE_HOOK_SIGNING_SECRET`, named here and never printed: this output is
@@ -85,7 +65,7 @@ export function hooksForm({ origin }: { origin: string }): string {
       "│    failure_mode        fail_closed",
       "│    status              active",
     ]),
-    "│  webhook_config.health_check_path   /hooks/health",
+    `│  webhook_config.health_check_path   ${healthCheckUrl(origin)}`,
     "│  webhook_config.auth.type           bearer",
     "│  webhook_config.auth.token          the value of ARCADE_HOOK_SIGNING_SECRET in .env (not printed here)",
     "│",
@@ -124,26 +104,51 @@ export interface NextSteps {
   host: string;
   origin: string;
   port: string;
+  /**
+   * Where the gateway stands after this run: made by API (`created`), left
+   * for a second run once the User Source exists (`needs-user-source`), or a
+   * dashboard form because no org and project were found (`form`).
+   */
+  gateway: "created" | "needs-user-source" | "form";
+  /** False under `--skip-deploy`: the toolkits still have to be deployed before the gateway lists them. */
+  deployed: boolean;
+}
+
+/** The command that creates the gateway once the User Source exists. */
+export function userSourceCommand(host: string): string {
+  return `bun run setup-arcade ${host} --user-source <id>`;
 }
 
 /**
  * What is left once the run has registered everything it can, in the README
- * Quickstart's order (steps 5 to 7), which `app-test/setup-arcade.test.ts`
- * pins against the README itself (#11). The order is not a preference:
- * Arcade reads the User Source's issuer from the app, and checks the hooks'
- * `/hooks/health`, so the app and the tunnel are up before either form (#28),
- * and the gateway form lists the toolkits' tools only once `arcade deploy` has
- * run, so the deploys come before it.
+ * Quickstart's order (steps 5 to 8), which `app-test/setup-arcade.test.ts`
+ * pins against the README itself (#11). The order is not a preference, and
+ * since #30 it is the shortest one the dependencies allow: Arcade reads the
+ * User Source's issuer from the app, so the app and the tunnel are up before
+ * that form; the gateway authenticates through the User Source, so it waits
+ * for the User Source's id; and it lists the toolkits' tools only once they
+ * are deployed, which this run has done unless `--skip-deploy` said not to.
  */
-export function nextSteps({ host, origin, port }: NextSteps): string {
-  return [
-    "Then:",
-    "  1. Start `bun run dev` (or restart it, if it is already running), so the app reads the new .env.",
-    `  2. Start the tunnel: ngrok http --url=${host} ${port}`,
-    "  3. With the app reachable through the tunnel, fill in the User Source form above.",
-    "  4. Fill in the contextual access hooks form above. Arcade checks /hooks/health through the tunnel.",
-    "  5. Deploy the toolkits (their secrets are set above): arcade deploy, in tools/loan and in tools/approvals.",
-    "  6. Fill in the gateway form above. The toolkits' tools are listed there once both deploys have run.",
-    `  7. Open ${origin}, never localhost, and sign in.`,
-  ].join("\n");
+export function nextSteps({ host, origin, port, gateway, deployed }: NextSteps): string {
+  const steps = [
+    "Start `bun run dev` (or restart it, if it is already running), so the app reads the new .env.",
+    `Start the tunnel: ngrok http --url=${host} ${port}`,
+    ...(deployed || gateway === "created"
+      ? []
+      : ["Deploy both toolkits (their secrets are set above): arcade deploy, in tools/loan and in tools/approvals."]),
+    ...(gateway === "created"
+      ? []
+      : ["With the app reachable through the tunnel, fill in the User Source form above."]),
+    ...(gateway === "needs-user-source"
+      ? [`Create the gateway through that User Source: ${userSourceCommand(host)}, with the id shown on the User Source's page.`]
+      : []),
+    ...(gateway === "form"
+      ? [
+          "Fill in the gateway form above. It authenticates through the User Source, and lists the toolkits' tools once they are deployed.",
+          "Fill in the contextual access hooks form above. Arcade checks /hooks/health through the tunnel.",
+        ]
+      : []),
+    `Open ${origin}, never localhost, and sign in.`,
+  ];
+  return ["Then:", ...steps.map((step, index) => `  ${index + 1}. ${step}`)].join("\n");
 }

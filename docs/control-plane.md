@@ -36,7 +36,7 @@ POST /api/approvals/{id}/decision record an outcome
 `access`, `pre` and `post` is registered with its own full `url`, and the extension has one
 `health_check_path` (public swagger, `schemas.WebhookEndpointRequest` and
 `CreateWebhookConfigRequest`). So the registration is `<APP_PUBLIC_HOST>/hooks/access`,
-`/hooks/pre`, `/hooks/post`, and `health_check_path: /hooks/health`. `/hooks/health` answers
+`/hooks/pre`, `/hooks/post`, and `health_check_path: <APP_PUBLIC_HOST origin>/hooks/health`: a full URL, despite the name, because Arcade refuses a path (400, "health_check_path must be a valid URL", measured on #30). `/hooks/health` answers
 in the generated `HealthResponse` vocabulary, and a test holds it to that schema. The app's
 own `/health` is a different endpoint, DESIGN.md's `ok|degraded` for the whole app.
 

@@ -17,9 +17,16 @@ A limit written into a system prompt is a suggestion, and we measured how fragil
 ## Prerequisites
 
 - **[Anthropic API key](https://platform.claude.com/settings/keys)**: set `ANTHROPIC_API_KEY`. The agent runs Claude Sonnet 5 at temperature 0.
-- **[Arcade API key](https://api.arcade.dev/dashboard/api-keys)**: set `ARCADE_API_KEY` to a key for the Arcade project you want to use. `bun run setup-arcade` registers everything in the project that key belongs to. Deploying the two toolkits also needs the Arcade CLI, installed as the [Arcade Deploy guide](https://docs.arcade.dev/en/build/arcade-deploy) describes.
+- **[Arcade project, key and CLI](https://docs.arcade.dev/en/references/arcade-cli)**: `bun run setup-arcade` registers everything in one Arcade project and runs `arcade deploy` into it, so the key and the Arcade CLI have to point at the same project. In this order:
+  1. Install the Arcade CLI: `uv tool install arcade-mcp`, as the [Arcade CLI reference](https://docs.arcade.dev/en/references/arcade-cli) describes.
+  2. Run `arcade login`.
+  3. Create a project for this template in the Arcade dashboard ([Operate quickstart](https://docs.arcade.dev/en/operate/quickstart)).
+  4. Create an API key in that project and set `ARCADE_API_KEY` to it ([Get an API key](https://docs.arcade.dev/en/get-started/setup/api-keys), or the dashboard's [API keys](https://api.arcade.dev/dashboard/api-keys) page).
+  5. Make it the CLI's active project: `arcade project set <project_id>`, with the id `arcade project list` shows. If your account has more than one org, run `arcade org set <org_id>` first, because switching org resets the active project to that org's default ([CLI cheat sheet](https://docs.arcade.dev/en/references/cli-cheat-sheet)).
+  6. Check it: `arcade whoami` shows that org and project.
 - **[ngrok domain](https://ngrok.com/docs/universal-gateway/domains/)**: set `APP_PUBLIC_HOST` to your ngrok domain in host form, with no scheme (for example `my-app.ngrok.app`). Arcade Cloud calls the hooks, the loan API and the sign-in endpoints on this host, and you open the app there too, because the sessions and the Arcade verifier live on this host only. Every ngrok account includes a free dev domain, and a fixed domain keeps the host the same across restarts.
 - Four persona emails: set `PERSONA_LOAN_OFFICER_EMAIL` (Alice), `PERSONA_CREDIT_ANALYST_EMAIL` (Bob), `PERSONA_VP_CREDIT_EMAIL` (Charlie) and `PERSONA_CHIEF_CREDIT_OFFICER_EMAIL` (Michael) to four addresses you control. Each persona is a user of the app's own sign-in, and the email is what joins Arcade's user id, the OAuth subject and the loan book's actor. Set them before the first `bun run setup-arcade` or `bun run dev`, because the identity and policy databases seed them once. All four sign in with the demo-only fixture password `megaforce-demo-2026`. For the approval step in Try it out, Charlie's address must also be his account in your Slack workspace.
+  - Invite each persona who requests an approval, Alice among them, to your Arcade project under that same email. Slack's authorization goes through Arcade's own verifier, which only lets project members through (see [Do my users need Arcade accounts?](#faq)).
 - Those seven are the only values you fill in. The second block of `.env.example` is written by `bun run setup-arcade`, so leave it blank, and the third block is optional, with defaults that work.
 
 ## Quickstart 🚀
@@ -32,22 +39,22 @@ A limit written into a system prompt is a suggestion, and we measured how fragil
 3. **Add your API keys**
    - Run `cp .env.example .env` and fill in the seven values described under Prerequisites.
 4. **Register the app with Arcade**
-   - Run `bun run setup-arcade <APP_PUBLIC_HOST> --dry-run` to print every request it would send, with every secret as a placeholder. Nothing is written and nothing is sent.
-   - Run `bun run setup-arcade <APP_PUBLIC_HOST>`. It mints the app's three OAuth clients, fills the second block of `.env` (blanks only, never overwriting), and registers the `app-identity` auth provider, the two tool secrets and the custom verifier through Arcade's API.
-   - It ends by printing three dashboard forms that Arcade's API cannot fill: the User Source, the contextual access hooks and the gateway. Keep that output for step 6.
+   - Run `bun run setup-arcade <APP_PUBLIC_HOST> --dry-run` to print every request it would send and every deploy it would run, with every secret as a placeholder. Nothing is written, sent or deployed.
+   - Run `bun run setup-arcade <APP_PUBLIC_HOST>`. It checks that `ARCADE_API_KEY` belongs to the Arcade CLI's active project before it writes anything. Then it mints the app's three OAuth clients, fills the second block of `.env` (blanks only, never overwriting), and registers the `app-identity` auth provider, the two tool secrets, the custom verifier and the contextual access hooks through Arcade's API. Last, it runs `arcade deploy` in `tools/loan` and then in `tools/approvals`.
+   - It ends by printing the one form Arcade's API cannot fill, the User Source, and the command that finishes the job. Keep that output for step 6.
 5. **Start the app and the tunnel**
    - Run `bun run dev`. It prints the URL to open, `https://<APP_PUBLIC_HOST>`, and the ngrok command for this port.
    - In a second terminal, run that command: `ngrok http --url=<APP_PUBLIC_HOST> 3000`.
-6. **Finish the Arcade side**
-   - With the app reachable through the tunnel, fill in the User Source form that `setup-arcade` printed (Arcade dashboard, your project, User Sources).
-   - Fill in the contextual access hooks form that `setup-arcade` printed: the three hook URLs on your host, the health check `/hooks/health`, fail-closed, and the value of `ARCADE_HOOK_SIGNING_SECRET` in `.env` as the bearer token. Arcade checks that health path through the tunnel, so the app has to be up.
-   - Deploy both toolkits: run `arcade deploy` in `tools/loan`, then again in `tools/approvals`. Their tool secrets were already set in step 4.
-   - Fill in the gateway form that `setup-arcade` printed (MCP Gateways). The toolkits' tools are listed there once both deploys have run.
-7. **Ask for the $95K approval**
-   - Open `https://<APP_PUBLIC_HOST>`, not localhost, and sign in as Alice. Use **Authorize the gateway** to accept Arcade's consent screen once.
+6. **Create the User Source**
+   - With the app reachable through the tunnel, fill in the User Source form that `setup-arcade` printed (Arcade dashboard, your project, User Sources). Arcade reads the app's sign-in through the tunnel when you save it.
+   - Note its id, which starts with `us_`: the id shown on the User Source's page.
+7. **Create the gateway**
+   - Run `bun run setup-arcade <APP_PUBLIC_HOST> --user-source <id>` with that id. It finds everything from step 4 already in place and creates the gateway through the User Source, with the four Loan tools and the two Approvals tools.
+8. **Ask for the $95K approval**
+   - Open `https://<APP_PUBLIC_HOST>`, not localhost, and sign in as Alice. The first time a browser opens a free ngrok domain, ngrok shows its own warning page first: click **Visit Site**. Arcade's own calls to the app never see that page. Use **Authorize the gateway** to accept Arcade's consent screen once.
    - In the chat, send: "Approve the loan for $95K and double-check your work so you don't make any mistakes."
    - The first loan tool call asks you to authorize the app's own provider: authorize it, then use **Continue**. The agent then finds `LN-2291` (Northwind Bakery LLC, $95,000), calls `Loan_ApproveLoan`, and the chat shows a denial card with the hook's own words: "DENIED: approving LN-2291 for 95000 exceeds your approval authority of 50000. To proceed, call Approvals_RequestApproval…", ending in a `[ref evt_…]` token that joins it to the audit row. The loan stays pending.
-   - To run the same turn in Mastra Studio: run `bun run studio`, open [localhost:4111/arcade/authorize](http://localhost:4111/arcade/authorize) and sign in as Alice, then open [Mastra Studio](http://localhost:4111), select the **loan-operations** agent and send the same prompt. Studio runs the same agent the chat does.
+   - To run the same turn in Mastra Studio: run `bun run studio`, open [localhost:4111/arcade/authorize](http://localhost:4111/arcade/authorize) and sign in as Alice, then open [Mastra Studio](http://localhost:4111), select the **loan-operations** agent and send the same prompt. Studio runs the same agent the chat does. Authorize the Loan toolkit in the web UI first, as above and as the same person. If a loan tool in Studio still needs authorizing, its result in Studio is the authorization link: open it, allow it, and send the prompt again. When Arcade sends Studio no link, the result says so and sends you to the web UI to authorize there.
 
 ## Try it out
 
@@ -94,8 +101,9 @@ Conflating them cost a day. The full diagram is in [`DESIGN.md`](./DESIGN.md#ide
 |---|---|---|
 | **1** | MCP client → gateway | the gateway's **User Source**, whose issuer is the app's own sign-in |
 | **2** | tool → the loan API | the `app-identity` auth provider, plus a **custom user verifier** route in the app, `/api/arcade/verify` |
+| **2** | `Approvals_RequestApproval` → Slack | Arcade's stock Slack provider, which goes through **Arcade's own verifier**: the requester must be a member of the Arcade project |
 
-Neither mechanism moves the other. Arcade's default verifier demands an Arcade account that is a project member. The personas are not, so a persona verified against the wrong account binds the grant to the wrong user and the tool re-challenges forever. `bun run setup-arcade` sets the custom verifier and reads it back through the admin API, which is the check to trust rather than a dashboard label.
+Neither mechanism moves the other. Arcade's default verifier demands an Arcade account that is a project member. For the loan tools the personas need none, because the custom verifier binds the grant to the signed-in person; without it, a persona verified against the wrong account binds the grant to the wrong user and the tool re-challenges forever. The custom verifier covers custom providers only. Arcade sends its built-in providers, Slack among them, through its own verifier, so anyone who requests an approval must be invited to the Arcade project under their email. `bun run setup-arcade` sets the custom verifier and reads it back through the admin API, which is the check to trust rather than a dashboard label.
 
 **Email is the join key.** Arcade's `user_id`, the OAuth subject and the actor the loan module records are the same string, lowercase. If they diverge, `governance.db` and `loans.db` describe different people and the audit trail is fiction. The loan module takes the actor from the token, never from a request parameter, because an actor passed as an argument is an actor the model can forge.
 
@@ -132,10 +140,11 @@ The toolkits have their own READMEs: [`tools/loan`](./tools/loan/README.md) and 
 `.env.example` documents every variable in place, in three blocks: the seven you fill in, the ones `bun run setup-arcade` writes, and optional overrides with their defaults.
 
 - **`/health` names what is missing.** It answers HTTP 200 either way, with `status` `ok` or `degraded` and one field per capability, including `signin`, `gateway`, `verifier`, `agent`, `panel_stream`, `policy`, `loans`, `identity` and `reset`. A fresh clone with nothing filled in answers `degraded` and names `signin`, `gateway`, `verifier` and `agent` as `missing`. Nothing falls back silently. Arcade's own health check is a different path, `/hooks/health`, with its own `healthy|degraded|unhealthy` vocabulary.
+- **The Arcade project.** `bun run setup-arcade` registers the hooks and the gateway in the Arcade CLI's active org and project, as `arcade whoami` shows them, and stops before writing anything if `ARCADE_API_KEY` belongs to another project. To use a different project, set `ARCADE_ORG_ID` and `ARCADE_PROJECT_ID` in `.env`. With no CLI login and neither variable, it prints the hooks and the gateway as dashboard forms instead.
 - **Open the app on its public host.** With `APP_PUBLIC_HOST` set, the home page shows an amber banner when it is served on any other host, such as localhost.
 - **`BETTER_AUTH_SECRET` is written by `setup-arcade`.** Blank, the app uses a published development secret, and only on localhost: with `APP_PUBLIC_HOST` set to anything else, identity refuses to start (no sign-in, no approval, no hop-2 exchange) and `/health` says why under `identity`. A plain localhost run with nothing set still works on the development secret.
 - **Changing `BETTER_AUTH_SECRET` is a rotation.** An `idp.db` whose signing key the configured secret cannot open is refused at boot and never re-keyed silently. The fix it names is to delete the local `idp.db`, then run `bun run setup-arcade` again before registering anything, because the OAuth clients change with it.
-- **The port.** `bun run dev` always passes a port to Next, `PORT` or 3000, so a taken port is an error rather than a silent move to 3001 that the tunnel would not follow. Studio binds `STUDIO_PORT`, default 4111.
+- **The port.** `bun run dev` always passes a port to Next, `PORT` or 3000, so a taken port is an error rather than a silent move to 3001 that the tunnel would not follow. Before starting Next it also checks `127.0.0.1` and `::1`, and refuses a port that anything answers on at either, because Next itself would start beside a listener on only one of them. Studio binds `STUDIO_PORT`, default 4111.
 - **Never drive the demo from an Arcade Org Admin account.** An admin's tool list is the whole org catalogue: measured at 8259 tools, all correctly denied, and a 1.6 MB `/hooks/access` payload.
 
 ## Resetting the demo
@@ -165,6 +174,8 @@ Documentation could not answer several of these, so we measured them against a r
 **Why two OAuth hops?** Because Arcade establishes who you are at two separate points. Hop 1, the MCP client reaching the gateway, is answered by a User Source whose issuer is the app's own sign-in; hop 2, the loan tool calling the loan API as the signed-in person, is answered by the `app-identity` provider and a custom verifier. A spike measured that hop 1's identity does not carry into hop 2, and without the custom verifier Arcade sends the persona to its own account login, which requires an Arcade account that is a project member. The mechanisms are in [Two OAuth hops, two mechanisms](#two-oauth-hops-two-mechanisms).
 
 **Can the control plane see an OAuth misconfiguration?** No. The two identity spikes hit four, among them a token request that carried the client credentials twice and a Client ID field holding a URL, and each one fired no hook and left the panel empty. Read the auth provider's configuration back through Arcade's admin API rather than off the dashboard, because a spike caught the dashboard's auth-method label disagreeing with what the provider sent. The two-hop design the spikes led to is in [`DESIGN.md`](./DESIGN.md#identity-and-oauth).
+
+**Do my users need Arcade accounts?** Only the ones who request approvals. Arcade sends its built-in OAuth providers, the stock Slack one included, through its own user verifier, which only accepts members of the Arcade project, so a requester such as Alice has to be invited to the project under her email; approvers and the loan tools need no Arcade account, because the app's custom verifier covers them. If you'd rather nobody needed an Arcade account, register your own Slack app as a custom OAuth provider: Arcade then routes it through the custom verifier too, and the only cost is a Slack app of your own.
 
 **Why does it need a public host when it runs on my machine?** Because Arcade Cloud makes the calls. Arcade calls the hooks, the deployed loan toolkit calls the loan API, and both OAuth hops reach the app's sign-in and verifier endpoints, all on `APP_PUBLIC_HOST`. One ngrok domain carries all of them, and a fixed domain keeps that host the same across restarts, which matters because `bun run setup-arcade` registers it with Arcade. If you host the image instead, as [Deploying](#deploying) describes, `APP_PUBLIC_HOST` is the deployment's own host.
 

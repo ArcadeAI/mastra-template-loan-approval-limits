@@ -75,3 +75,56 @@ export function fillBlanks(text: string, values: Record<string, string>): FillRe
 export function writeEnvFile(path: string, text: string): void {
   writeFileSync(path, text, { mode: 0o600 });
 }
+
+/**
+ * The variables `bun run setup-arcade` decides about (#30): `.env.example`'s
+ * seven required values, which it reads, and its second block, which it
+ * writes. `app-test/setup-arcade.test.ts` holds both lists to `.env.example`.
+ */
+export const REQUIRED_KEYS = [
+  "ANTHROPIC_API_KEY",
+  "ARCADE_API_KEY",
+  "APP_PUBLIC_HOST",
+  "PERSONA_LOAN_OFFICER_EMAIL",
+  "PERSONA_CREDIT_ANALYST_EMAIL",
+  "PERSONA_VP_CREDIT_EMAIL",
+  "PERSONA_CHIEF_CREDIT_OFFICER_EMAIL",
+] as const;
+
+export const WRITTEN_KEYS = [
+  "SESSION_SECRET",
+  "BETTER_AUTH_SECRET",
+  "IDP_CLIENT_ID",
+  "IDP_CLIENT_SECRET",
+  "IDP_OAUTH_CLIENTS",
+  "IDP_OAUTH_REDIRECT_URIS_ARCADE",
+  "IDP_OAUTH_REDIRECT_URIS_ARCADE_USER_SOURCE",
+  "IDP_OAUTH_REDIRECT_URIS_WEB",
+  "ARCADE_HOOK_SIGNING_SECRET",
+  "APPROVALS_STORE_TOKEN",
+  "ARCADE_GATEWAY_ID",
+  "GOVERNANCE_STREAM",
+] as const;
+
+export const MANAGED_KEYS: readonly string[] = [...REQUIRED_KEYS, ...WRITTEN_KEYS];
+
+/**
+ * The managed variables the shell exports with a value `.env` does not hold,
+ * names only. A shell variable equal to `.env`'s value is no conflict.
+ */
+export function shellConflicts(shell: Record<string, string | undefined>, file: Record<string, string>): string[] {
+  return MANAGED_KEYS.filter((key) => shell[key] !== undefined && shell[key]!.trim() !== (file[key]?.trim() ?? ""));
+}
+
+/**
+ * `key`'s line set to `value`, whatever it held. For the one variable whose
+ * source of truth is Arcade rather than `.env` (#30): every other key keeps
+ * the never-overwrite rule of {@link fillBlanks}.
+ */
+export function replaceValue(text: string, key: string, value: string): string {
+  const lines = text.split("\n");
+  const index = lines.findIndex((line) => LINE.exec(line)?.[1] === key);
+  if (index === -1) return fillBlanks(text, { [key]: value }).text;
+  lines[index] = `${key}=${value}`;
+  return lines.join("\n");
+}
