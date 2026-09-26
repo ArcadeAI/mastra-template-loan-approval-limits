@@ -115,3 +115,16 @@ export const MANAGED_KEYS: readonly string[] = [...REQUIRED_KEYS, ...WRITTEN_KEY
 export function shellConflicts(shell: Record<string, string | undefined>, file: Record<string, string>): string[] {
   return MANAGED_KEYS.filter((key) => shell[key] !== undefined && shell[key]!.trim() !== (file[key]?.trim() ?? ""));
 }
+
+/**
+ * `key`'s line set to `value`, whatever it held. For the one variable whose
+ * source of truth is Arcade rather than `.env` (#30): every other key keeps
+ * the never-overwrite rule of {@link fillBlanks}.
+ */
+export function replaceValue(text: string, key: string, value: string): string {
+  const lines = text.split("\n");
+  const index = lines.findIndex((line) => LINE.exec(line)?.[1] === key);
+  if (index === -1) return fillBlanks(text, { [key]: value }).text;
+  lines[index] = `${key}=${value}`;
+  return lines.join("\n");
+}

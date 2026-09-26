@@ -84,7 +84,7 @@ import {
   verifierBody,
 } from "./setup-arcade/arcade.ts";
 import { type ArcadeContext, resolveContext } from "./setup-arcade/context.ts";
-import { fillBlanks, MANAGED_KEYS, parseEnv, readEnvFile, shellConflicts, writeEnvFile } from "./setup-arcade/env-file.ts";
+import { fillBlanks, MANAGED_KEYS, parseEnv, readEnvFile, replaceValue, shellConflicts, writeEnvFile } from "./setup-arcade/env-file.ts";
 import { gatewayForm, hooksForm, nextSteps, userSourceCommand, userSourceForm } from "./setup-arcade/forms.ts";
 
 const USER_SOURCE_CALLBACK = "https://cloud.arcade.dev/oauth2/intermediate_callback";
@@ -583,19 +583,30 @@ if (!providerExists) {
 // Arcade generates the provider's callback, one per provider (measured in the
 // custom-verifier spike: `…/oauth/<id>/callback`), and the `arcade` client must
 // allowlist it exactly.
+//
+// The live provider is the source of truth for IDP_OAUTH_REDIRECT_URIS_ARCADE,
+// the one variable this run replaces rather than only fills (#30). On run 4,
+// app-identity was recreated, so Arcade made a new callback, and `.env` still
+// named the old provider's: the run only warned, Arcade then sent the new one,
+// and the identity provider refused it (invalid_redirect) at hop 2's Authorize.
 const callback = (provider as { oauth2?: { redirect_uri?: string } } | null)?.oauth2?.redirect_uri;
-if (callback && !client("arcade").redirect_uris.includes(callback)) {
-  const key = "IDP_OAUTH_REDIRECT_URIS_ARCADE";
-  if (fromFile(key) !== "") {
-    out(`  warning       the provider's callback is ${callback}; add it to ${key} yourself, it is already set and never overwritten`);
-  } else {
-    filled = fillBlanks(filled.text, { [key]: callback });
-    writeEnvFile(envPath, filled.text);
-    process.env[key] = callback;
-    // Brings the client's allowlist in line in place; the id and secret do not change.
-    clients = await oauthClient();
-    out(`  allowlisted the provider's callback on the arcade client: ${callback}`);
+const CALLBACK_KEY = "IDP_OAUTH_REDIRECT_URIS_ARCADE";
+const onFileCallback = fromFile(CALLBACK_KEY);
+if (callback && (onFileCallback !== callback || !client("arcade").redirect_uris.includes(callback))) {
+  if (onFileCallback === "") {
+    filled = fillBlanks(filled.text, { [CALLBACK_KEY]: callback });
+  } else if (onFileCallback !== callback) {
+    filled = { ...filled, text: replaceValue(filled.text, CALLBACK_KEY, callback) };
   }
+  writeEnvFile(envPath, filled.text);
+  process.env[CALLBACK_KEY] = callback;
+  // Brings the client's allowlist in line in place; the id and secret do not change.
+  clients = await oauthClient();
+  out(
+    onFileCallback !== "" && onFileCallback !== callback
+      ? `  replaced the provider's callback: ${onFileCallback} -> ${callback}`
+      : `  allowlisted the provider's callback on the arcade client: ${callback}`,
+  );
 }
 for (const secret of toolSecrets(host, storeToken.value)) {
   const { method, path, body } = secretRequest(secret);

@@ -108,6 +108,8 @@ class StandIn {
   omitEndpointUrl: string | null = null;
   /** When set, a PUT to the verifier settings is accepted and ignored. */
   verifierIgnoresPut = false;
+  /** The callback Arcade generates for the next provider created: one per provider, `…/oauth/<ap_ id>/callback`. */
+  nextCallback = CALLBACK;
   /**
    * When set, the tool-secret route answers every method with Arcade's 404, the
    * way the live run's POST was answered: the run stops just after the provider
@@ -190,7 +192,7 @@ class StandIn {
         const stored = {
           ...sent,
           status: "active",
-          oauth2: { ...sent.oauth2, client_secret: { exists: true, editable: true, binding: "project" }, redirect_uri: CALLBACK },
+          oauth2: { ...sent.oauth2, client_secret: { exists: true, editable: true, binding: "project" }, redirect_uri: this.nextCallback },
         };
         this.providers.set(sent.id, stored);
         return Response.json(stored, { status: 201 });
@@ -1525,3 +1527,40 @@ test("arcade deploy is given no stdin, so its logs prompt never waits for a key"
   expect(run.stdout).toContain(`Secret 'APP_PUBLIC_HOST' not found in environment, skipping upload". That is expected:`);
   expect(run.stdout.indexOf("That is expected:")).toBeLessThan(run.stdout.indexOf("arcade deploy   (in tools/loan):"));
 }, 60_000);
+
+// --- The provider's callback follows the provider (#30, run 4) ----------------
+
+/**
+ * Run 4: app-identity was recreated in the dashboard, Arcade made it a new
+ * callback, and `.env` still named the old one. The run only warned ("add it
+ * … yourself"), and hop 2's Authorize failed with invalid_redirect. The live
+ * provider is the source of truth for this one variable.
+ */
+test("a provider recreated with a new callback: the rerun replaces it in .env and on the allowlist, with no hand edit", async () => {
+  const dir = project("callback-replaced");
+  expect((await setupArcade(dir)).code).toBe(0);
+  expect(envOf(dir).IDP_OAUTH_REDIRECT_URIS_ARCADE).toBe(CALLBACK);
+
+  // Deleted and created again: a new provider, a new callback.
+  const recreated = "https://cloud.arcade.dev/api/v1/oauth/stand_in_ap_2/callback";
+  arcade.providers.clear();
+  arcade.nextCallback = recreated;
+  const envBefore = envOf(dir);
+  const rerun = await setupArcade(dir);
+  console.log(`--- setup-arcade ${HOST}, after the provider was recreated ---\n${rerun.stdout}${rerun.stderr}`);
+  expect(rerun.code, `${rerun.stdout}\n${rerun.stderr}`).toBe(0);
+
+  expect(rerun.stdout).toContain(`replaced the provider's callback: ${CALLBACK} -> ${recreated}`);
+  expect(rerun.stdout).not.toContain("yourself");
+  expect(envOf(dir).IDP_OAUTH_REDIRECT_URIS_ARCADE).toBe(recreated);
+  // Exactly the new one: the old provider's callback no longer passes.
+  expect(clientsIn(dir).arcade!.redirectUris).toEqual([recreated]);
+  // Every other value on file is kept, as ever.
+  for (const [key, value] of Object.entries(envBefore)) if (key !== "IDP_OAUTH_REDIRECT_URIS_ARCADE") expect(envOf(dir)[key], key).toBe(value);
+
+  // And a third run has nothing to replace.
+  const again = await setupArcade(dir);
+  expect(again.code).toBe(0);
+  expect(again.stdout).not.toContain("replaced the provider's callback");
+  expect(again.stdout).not.toContain("allowlisted the provider's callback");
+}, 90_000);
